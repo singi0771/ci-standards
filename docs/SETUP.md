@@ -37,10 +37,21 @@ git push
 > 用量提醒：兩個 Agent 都會扣 AI Credits（1,900/人/月）+ Actions 分鐘。先從小型、明確的 Issue 開始。
 
 ## 步驟 4 — 分支保護，讓閉環「非過不可」
-目標 repo → Settings → Rules → Rulesets → 針對 `main`：
-- 勾 **Require a pull request before merging**
-- 勾 **Require status checks to pass**，加入：
-  `SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)`、`FS / IaC / Docker (Trivy)`、`Secret scan (gitleaks)`
+
+**推薦：一鍵腳本（需已 `gh auth login`）**
+```bash
+./scripts/setup-branch-protection.sh <owner>/<repo>
+# 例：./scripts/setup-branch-protection.sh cecigehlpj/AdminAutoTools
+```
+這會建立 ruleset：要求 PR + 至少 1 approve + 對話解決 + 通過 **Security Gate** 與 **CI** + 禁止 force push/刪除。
+
+**或手動：** 目標 repo → Settings → Rules → Rulesets → 針對 `main`：
+- 勾 **Require a pull request before merging**（至少 1 approve）
+- 勾 **Require status checks to pass**，只要加入這一個彙總關卡即可：
+  **`security / Security Gate`**（它已 `needs` 所有掃描；任何一項失敗它就失敗）
+- 另可加 **`ci / Python lint + test`**
+
+> 為什麼用 Security Gate：公版新增了一個彙總 job，把 Semgrep/OSV/Trivy/gitleaks 的成敗收斂成「一個」required check，分支保護只要顧這一個，之後增減掃描工具都不必再改 ruleset。
 
 ## 步驟 5 — 防止意外超額付費
 Settings → Billing → Spending limit：把 Actions 設為 **$0**。

@@ -140,3 +140,42 @@ jobs:
           format: table
           severity: ${{ inputs.severity }}
           exit-code: "1"
+
+  # 6) 彙總守門員：needs 所有掃描，讓分支保護「只需要求這一個」status check。
+  #    任何一項掃描失敗，這個 gate 就失敗 → PR 無法 merge。
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [semgrep, osv-scanner, trivy, gitleaks, trivy-image]
+    if: ${{ always() }}
+    steps:
+      - name: Evaluate all scan results
+        run: |
+          SEMGREP="${{ needs.semgrep.result }}"
+          OSV="${{ needs.osv-scanner.result }}"
+          TRIVY="${{ needs.trivy.result }}"
+          GITLEAKS="${{ needs.gitleaks.result }}"
+          IMAGE="${{ needs.trivy-image.result }}"
+          {
+            echo "## 🛡️ Security Gate 結果"
+            echo ""
+            echo "| 掃描 | 結果 |"
+            echo "| --- | --- |"
+            echo "| SAST (Semgrep) | $SEMGREP |"
+            echo "| Dependency (OSV) | $OSV |"
+            echo "| FS/IaC (Trivy) | $TRIVY |"
+            echo "| Secret (gitleaks) | $GITLEAKS |"
+            echo "| Docker image (Trivy) | $IMAGE |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          FAIL=0
+          for r in "$SEMGREP" "$OSV" "$TRIVY" "$GITLEAKS"; do
+            [ "$r" != "success" ] && FAIL=1
+          done
+          # Docker image 掃描允許 skipped（未啟用）；只有 failure 才擋
+          [ "$IMAGE" = "failure" ] && FAIL=1
+          if [ "$FAIL" = "1" ]; then
+            echo "❌ Security Gate 未通過（有掃描失敗或發現高風險問題）" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ Security Gate 通過" >> "$GITHUB_STEP_SUMMARY"

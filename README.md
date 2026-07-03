@@ -13,19 +13,25 @@
 ci-standards/
 ├── README.md                          ← 本文件
 ├── .github/workflows/
-│   ├── security-reusable.yml          ← 安全掃描公版（Semgrep + Trivy + OSV + gitleaks）
+│   ├── security-reusable.yml          ← 安全掃描公版（Semgrep+Trivy+OSV+gitleaks+Security Gate）
 │   └── ci-reusable.yml                ← Python + Docker CI 公版
+├── scripts/
+│   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（gh）
 ├── docs/
-│   └── SETUP.md                       ← 完整導入、Copilot 啟用、分支保護步驟
+│   ├── SETUP.md                       ← 完整導入、Copilot 啟用、分支保護步驟
+│   └── DEVSECOPS-NOTES.md             ← SonarQube/ZAP 等顧問建議與取捨
 └── templates/consumer-repo/           ← 各專案要複製過去的「呼叫端」範本
     └── .github/
         ├── dependabot.yml
         ├── copilot-instructions.md
+        ├── pull_request_template.md
         └── workflows/
             ├── security.yml           ← 一行呼叫中央公版
             ├── ci.yml                 ← 一行呼叫中央公版
             └── copilot-setup-steps.yml
 ```
+
+> **分支檢查怎麼收斂**：`security-reusable.yml` 內含一個 **Security Gate** job，`needs` 所有掃描並彙總成敗。分支保護只需要求 **`security / Security Gate`** 這一個 check，之後增減掃描工具都不必再改 ruleset。
 
 ---
 
