@@ -1,0 +1,21 @@
+# 各專案的「呼叫端」CI workflow — 邏輯全在中央公版。
+# ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**/*.md", "docs/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      python-version: "3.12"
+      run-docker-build: true

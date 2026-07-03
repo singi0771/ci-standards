@@ -1,0 +1,142 @@
+# ┌─────────────────────────────────────────────────────────────────┐
+# │  中央「公版」安全掃描 Reusable Workflow（DevSecOps / Shift-left）    │
+# │  各專案用一行 uses: 呼叫。全部免費開源工具。                          │
+# │  預設「job 成敗當守門員 + artifact」，私有 repo 無需 GHAS 也能跑；     │
+# │  若該 repo 有 GHAS 或為 public，可用 upload-sarif=true 把結果寫進     │
+# │  Security 分頁（code scanning）。                                    │
+# └─────────────────────────────────────────────────────────────────┘
+name: Reusable Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "掃描環境用的 Python 版本"
+        type: string
+        default: "3.12"
+      severity:
+        description: "要擋下的嚴重度（Trivy / 影像掃描）"
+        type: string
+        default: "CRITICAL,HIGH"
+      fail-on-findings:
+        description: "掃到問題時是否讓 CI 失敗（true=守門員 / false=只回報）"
+        type: boolean
+        default: true
+      scan-docker-image:
+        description: "若專案有 Dockerfile，是否 build 出 image 再掃描其弱點"
+        type: boolean
+        default: false
+      upload-sarif:
+        description: "是否把結果上傳到 Security 分頁（僅 public repo 或有 GHAS 的 private repo 適用）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  security-events: write   # upload-sarif=true 時才會用到
+
+jobs:
+  # 1) SAST 靜態程式碼弱點（免費取代私有 repo 的 CodeQL）
+  semgrep:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan (OWASP Top 10 + security-audit + auto)
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --config auto \
+            --error --sarif --output=semgrep.sarif
+      - name: Upload SARIF to Security tab
+        if: ${{ always() && inputs.upload-sarif }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+      - name: Upload SARIF as artifact
+        if: ${{ always() && !inputs.upload-sarif }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: ignore
+
+  # 2) 相依套件弱點（比對 OSV 弱點資料庫）
+  osv-scanner:
+    name: Dependency vuln (OSV-Scanner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run OSV-Scanner
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        uses: google/osv-scanner-action/osv-scanner-action@v2
+        with:
+          scan-args: |-
+            --recursive
+            ./
+
+  # 3) 檔案系統 + Dockerfile + IaC 設定弱點 + 內嵌密鑰
+  trivy:
+    name: FS / IaC / Docker (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy scan
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          format: table
+          severity: ${{ inputs.severity }}
+          exit-code: "1"
+
+  # 4) 密鑰外洩掃描（用 docker 執行檔，避開 gitleaks-action 對組織帳號的 license 要求）
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks (free, no license)
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+            detect --source=/repo --redact --no-banner --exit-code=1
+
+  # 5) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
+  trivy-image:
+    name: Docker image (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ inputs.scan-docker-image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (不推送，只為掃描)
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t scan-target:${{ github.sha }} .
+          else
+            echo "沒有 Dockerfile，略過"; exit 0
+          fi
+      - name: Scan image
+        if: ${{ hashFiles('Dockerfile') != '' }}
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: scan-target:${{ github.sha }}
+          format: table
+          severity: ${{ inputs.severity }}
+          exit-code: "1"

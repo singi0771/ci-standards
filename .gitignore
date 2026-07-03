@@ -1,0 +1,8 @@
+# macOS / OneDrive
+.DS_Store
+Icon?
+# 編輯器
+.vscode/
+.idea/
+# 掃描產出
+*.sarif

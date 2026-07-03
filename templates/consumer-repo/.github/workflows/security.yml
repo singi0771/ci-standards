@@ -1,0 +1,27 @@
+# 各專案（例如 AdminAutoTools）的「呼叫端」workflow — 只有這一小段，邏輯全在中央公版。
+# 中央公版更新後，這裡指向 @v1 的 repo 全部自動跟進。
+# ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**/*.md", "docs/**"]
+  schedule:
+    - cron: "0 3 * * 1"        # 每週一完整重掃
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
+    with:
+      python-version: "3.12"
+      severity: "CRITICAL,HIGH"
+      fail-on-findings: true
+      scan-docker-image: true    # AdminAutoTools 有 Dockerfile，順便掃 image
+      upload-sarif: false        # private 且無 GHAS → 保持 false；若改 public 可設 true

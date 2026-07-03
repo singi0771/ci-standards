@@ -1,0 +1,54 @@
+# 中央「公版」CI Reusable Workflow（Python + Docker）
+# 各專案用一行 uses: 呼叫；統一 lint + test + Docker build 檢查。
+name: Reusable CI
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: "3.12"
+      run-docker-build:
+        description: "是否驗證 Docker image 能建置"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python lint + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: "pip"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e . || true; fi
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Test (pytest)
+        run: pytest -q
+
+  docker-build:
+    name: Docker build check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ inputs.run-docker-build }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (不推送，只驗證能 build)
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t ci-check:${{ github.sha }} .
+          else
+            echo "沒有 Dockerfile，略過"
+          fi
