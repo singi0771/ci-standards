@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run OSV-Scanner
         continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: google/osv-scanner-action/osv-scanner-action@v2
+        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
         with:
           scan-args: |-
             --recursive
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Trivy scan
         continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scanners: vuln,misconfig,secret
@@ -133,7 +133,7 @@ jobs:
       - name: Scan image
         if: ${{ hashFiles('Dockerfile') != '' }}
         continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: scan-target:${{ github.sha }}
