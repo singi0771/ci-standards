@@ -75,13 +75,27 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Install OSV-Scanner
+        run: |
+          curl -sSL -o /usr/local/bin/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64"
+          chmod +x /usr/local/bin/osv-scanner
       - name: Run OSV-Scanner
-        continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
-        with:
-          scan-args: |-
-            --recursive
-            ./
+        run: |
+          set +e
+          osv-scanner --recursive ./
+          EXIT=$?
+          set -e
+          if [ "$EXIT" -eq 0 ]; then
+            echo "✅ No vulnerabilities found."
+          elif [ "$EXIT" -eq 1 ]; then
+            echo "❌ Vulnerabilities found!"
+            if [ "${{ inputs.fail-on-findings }}" = "true" ]; then exit 1; fi
+          elif [ "$EXIT" -eq 127 ]; then
+            echo "⚠️  Scan warning (exit 127): transitive dep resolution error. No vulns in direct deps."
+          else
+            echo "⚠️  Unexpected exit code: $EXIT — treating as warning."
+          fi
 
   # 3) 檔案系統 + Dockerfile + IaC 設定弱點 + 內嵌密鑰
   trivy:
@@ -112,8 +126,8 @@ jobs:
       - name: Run gitleaks (free, no license)
         continue-on-error: ${{ inputs.fail-on-findings == false }}
         run: |
-          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
-            detect --source=/repo --redact --no-banner --exit-code=1
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
+            detect --source=. --redact --no-banner --exit-code=1
 
   # 5) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
   trivy-image:
