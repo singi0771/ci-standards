@@ -1,3 +1,6 @@
+# 薄殼：Copilot（或人）送出 changes_requested → 呼叫公版讓 Copilot 依意見自動修。
+# 邏輯全在中央公版；改邏輯只要移動 @v1，本檔幾乎不需再動。
+# ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
 name: Copilot Autofix — Review
 
 on:
@@ -7,73 +10,18 @@ on:
 permissions:
   pull-requests: write
 
-env:
-  MAX_REVIEW_FIX_ATTEMPTS: "3"  # 修改此值調整 review 自動修正次數上限
-
 jobs:
-  request-copilot-fix-from-review:
-    name: Ask Copilot Agent to Fix Review Issues
+  autofix-review:
+    # review 要求變更、且非 Dependabot PR 才呼叫公版
     if: >
       github.event.review.state == 'changes_requested' &&
       !contains(github.event.pull_request.user.login, 'dependabot')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Guard — check review-fix attempt count
-        id: guard
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          MAX: ${{ env.MAX_REVIEW_FIX_ATTEMPTS }}
-        run: |
-          ATTEMPTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" \
-            --jq '[.[] | select(.body | contains("<!-- review-fix-attempt -->"))] | length')
-          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
-
-          if [ "$ATTEMPTS" -ge "$MAX" ]; then
-            echo "action=escalate" >> $GITHUB_OUTPUT
-            echo "Review fix limit reached ($ATTEMPTS/$MAX) — escalating."
-          else
-            echo "action=fix" >> $GITHUB_OUTPUT
-            echo "Review fix attempt $((ATTEMPTS + 1))/$MAX — proceeding."
-          fi
-
-      - name: Post Copilot agent fix request
-        if: ${{ steps.guard.outputs.action == 'fix' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REVIEWER: ${{ github.event.review.user.login }}
-          REVIEW_BODY: ${{ github.event.review.body }}
-          REVIEW_URL: ${{ github.event.review.html_url }}
-          ATTEMPTS: ${{ steps.guard.outputs.attempts }}
-          MAX: ${{ env.MAX_REVIEW_FIX_ATTEMPTS }}
-        run: |
-          ATTEMPT=$(( ATTEMPTS + 1 ))
-          BODY=$(printf '<!-- review-fix-attempt -->\n@copilot **%s 提出了 code review 修改要求（第 %d/%s 次自動修正）**，請根據以下意見直接修正程式碼並 commit：\n\n%s\n\n完整 review：%s\n\n修正後 CI 會自動重跑，通過後 review 將再次評估。' \
-            "$REVIEWER" "$ATTEMPT" "$MAX" "$REVIEW_BODY" "$REVIEW_URL")
-          gh pr comment "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --body "$BODY"
-
-      - name: Escalate — max review-fix attempts reached
-        if: ${{ steps.guard.outputs.action == 'escalate' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          REVIEWER: ${{ github.event.review.user.login }}
-          REVIEW_URL: ${{ github.event.review.html_url }}
-          MAX: ${{ env.MAX_REVIEW_FIX_ATTEMPTS }}
-        run: |
-          BODY=$(printf '🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動循環已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。' \
-            "$MAX" "$PR_AUTHOR" "$REVIEWER" "$MAX" "$REVIEW_URL")
-          gh pr comment "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --body "$BODY"
-          gh label create "needs-human-review" \
-            --color "#FF6B6B" \
-            --description "Automated fix loop exhausted — manual intervention required" \
-            --repo "${{ github.repository }}" 2>/dev/null || true
-          gh pr edit "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --add-label "needs-human-review" 2>/dev/null || true
+    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
+    with:
+      pr-number:   ${{ github.event.pull_request.number }}
+      pr-author:   ${{ github.event.pull_request.user.login }}
+      reviewer:    ${{ github.event.review.user.login }}
+      review-body: ${{ github.event.review.body }}
+      review-url:  ${{ github.event.review.html_url }}
+      # max-attempts: "3"   # 要調整依 review 自動修正次數上限時取消註解
+    secrets: inherit

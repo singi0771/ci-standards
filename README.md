@@ -197,6 +197,8 @@ gh pr create
 
 範本裡三支 `copilot-auto*` workflow 讓「修 + 審」完全自動化。**不裝 Copilot Business 也能複製過去，只是不會動**；有的話會形成這個循環：
 
+> **架構**：這三支 consumer 端只是**十幾行的薄殼**（觸發器 + 一行 `uses:`），所有邏輯放在公版的三支 `*-reusable.yml`。改邏輯只要動公版、移 `v1`，**各專案下次觸發就反應式同步**，跟 ci/security 一樣不必逐一改。詳見[為什麼薄殼](#為什麼是薄殼而非整包複製)。
+
 ```
              ┌──────────────────────────────────────────────────┐
              ▼                                                    │
@@ -213,20 +215,28 @@ gh pr create
         你決定 Merge
 ```
 
-| workflow | 顯示名 | 觸發時機 | 做什麼 |
+| consumer 薄殼 | 顯示名 | 呼叫的公版 | 觸發時機 → 做什麼 |
 |---|---|---|---|
-| `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | CI 或 Security 失敗 | 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 commit |
-| `copilot-autofix-review.yml` | Copilot Autofix — Review | Copilot review 送出 `changes_requested` | `@copilot` 依 review 意見修碼 |
-| `copilot-autoreview-gate.yml` | Copilot Auto Review | CI 或 Security `workflow_run` 完成 | 確認**兩條**都對同一 SHA 通過 → 找對應 PR → 請 Copilot 審 + `@copilot` 觸發 coding agent |
+| `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | `copilot-autofix-reusable.yml` | CI/Security 失敗 → 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 |
+| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | review `changes_requested` → `@copilot` 依意見修碼 |
+| `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 請 Copilot 審 + 觸發 coding agent |
 
 **內建的安全閥（避免無限燒 Credits）：**
 
-- **重試上限**：每支各有 `MAX_*_ATTEMPTS`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
+- **重試上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
 - **Cooldown**：`copilot-autofix-ci-security` 對同一 commit 15 分鐘內只觸發一次（CI 與 Security 常在數秒內相繼失敗，避免重複）。
 - **跳過 Dependabot**：Dependabot PR 由它自己管理，不進 autofix 迴圈。
 - **雙綠才放行**：`copilot-autoreview-gate` 會確認 CI 與 Security **都**對同一 SHA 成功才動作，不會只過一半就請審。
 
-> 這三支是 `workflow_run` / `pull_request_review` 觸發，**無法**做成 reusable 用一行 `uses:` 呼叫（必須存在於 consumer repo 的 default branch），所以是「複製過去」而非「呼叫公版」。要調重試次數，改各檔頂端的 `MAX_*_ATTEMPTS`。
+### 為什麼是薄殼而非整包複製
+
+這三支的**觸發器**（`workflow_run` / `pull_request_review`）依 GitHub 規則**必須存在於 consumer repo 的 default branch**，無法純靠 `uses:` 繼承。但「觸發器要在本地」不代表「邏輯也要在本地」——
+
+- consumer 端只留**薄殼**：本地觸發器 + 一行 `uses: ...copilot-*-reusable.yml@v1`，把事件參數（PR、SHA、run-id…）當 `with:` 傳進去。
+- **所有 bash 邏輯集中在公版的 `*-reusable.yml`**。改邏輯（新升級規則、未來的測試覆蓋率門檻、資安擴充）只要動公版、移 `v1` → 各專案下次觸發自動吃到，**不必逐一改 repo**。
+- 薄殼本身只有在 **input 契約改變**時才需要重新複製，頻率極低。
+
+> 要調重試次數，在薄殼的 `with:` 加 `max-attempts: "5"` 即可，不必改公版。
 
 ---
 
@@ -363,7 +373,10 @@ ci-standards/
 ├── README.md                          ← 本文件
 ├── .github/workflows/
 │   ├── security-reusable.yml          ← 安全公版（Semgrep+OSV+Trivy+gitleaks+Security Gate）
-│   └── ci-reusable.yml                ← CI 公版（Python lint/test + Docker build）
+│   ├── ci-reusable.yml                ← CI 公版（Python lint/test + Docker build）
+│   ├── copilot-autofix-reusable.yml        ← Copilot 自動修（CI/Security 失敗）邏輯
+│   ├── copilot-autofix-review-reusable.yml ← Copilot 自動修（依 review 意見）邏輯
+│   └── copilot-autoreview-reusable.yml     ← Copilot 自動審（雙綠請審 + 觸發 agent）邏輯
 ├── scripts/
 │   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset
 ├── docs/

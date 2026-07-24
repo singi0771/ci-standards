@@ -1,0 +1,100 @@
+# 中央「公版」Reusable：Copilot（或人）送出 changes_requested 後，請 Copilot Coding Agent 依意見自動修。
+# consumer 端放一支 pull_request_review 觸發的薄殼呼叫本檔。
+name: Reusable — Copilot Autofix (Review)
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: "要修的 PR 編號"
+        type: string
+        required: true
+      reviewer:
+        description: "送出 review 的帳號"
+        type: string
+        required: true
+      pr-author:
+        description: "PR 作者帳號，升級人工時 @ 通知"
+        type: string
+        required: true
+      review-body:
+        description: "review 內容（可空）"
+        type: string
+        required: false
+        default: ""
+      review-url:
+        description: "review 的 html_url"
+        type: string
+        required: true
+      max-attempts:
+        description: "依 review 自動修正次數上限"
+        type: string
+        default: "3"
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-copilot-fix-from-review:
+    name: Ask Copilot Agent to Fix Review Issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard — check review-fix attempt count
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          MAX: ${{ inputs.max-attempts }}
+        run: |
+          ATTEMPTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | select(.body | contains("<!-- review-fix-attempt -->"))] | length')
+          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
+
+          if [ "$ATTEMPTS" -ge "$MAX" ]; then
+            echo "action=escalate" >> $GITHUB_OUTPUT
+            echo "Review fix limit reached ($ATTEMPTS/$MAX) — escalating."
+          else
+            echo "action=fix" >> $GITHUB_OUTPUT
+            echo "Review fix attempt $((ATTEMPTS + 1))/$MAX — proceeding."
+          fi
+
+      - name: Post Copilot agent fix request
+        if: ${{ steps.guard.outputs.action == 'fix' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          REVIEWER: ${{ inputs.reviewer }}
+          REVIEW_BODY: ${{ inputs.review-body }}
+          REVIEW_URL: ${{ inputs.review-url }}
+          ATTEMPTS: ${{ steps.guard.outputs.attempts }}
+          MAX: ${{ inputs.max-attempts }}
+        run: |
+          ATTEMPT=$(( ATTEMPTS + 1 ))
+          BODY=$(printf '<!-- review-fix-attempt -->\n@copilot **%s 提出了 code review 修改要求（第 %d/%s 次自動修正）**，請根據以下意見直接修正程式碼並 commit：\n\n%s\n\n完整 review：%s\n\n修正後 CI 會自動重跑，通過後 review 將再次評估。' \
+            "$REVIEWER" "$ATTEMPT" "$MAX" "$REVIEW_BODY" "$REVIEW_URL")
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "$BODY"
+
+      - name: Escalate — max review-fix attempts reached
+        if: ${{ steps.guard.outputs.action == 'escalate' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          PR_AUTHOR: ${{ inputs.pr-author }}
+          REVIEWER: ${{ inputs.reviewer }}
+          REVIEW_URL: ${{ inputs.review-url }}
+          MAX: ${{ inputs.max-attempts }}
+        run: |
+          BODY=$(printf '🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動循環已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。' \
+            "$MAX" "$PR_AUTHOR" "$REVIEWER" "$MAX" "$REVIEW_URL")
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "$BODY"
+          gh label create "needs-human-review" \
+            --color "#FF6B6B" \
+            --description "Automated fix loop exhausted — manual intervention required" \
+            --repo "${{ github.repository }}" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --add-label "needs-human-review" 2>/dev/null || true
