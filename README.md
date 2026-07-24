@@ -258,6 +258,9 @@ gh pr create
 |---|---|---|---|
 | `python-version` | string | `3.12` | CI 的 Python 版本 |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
+| `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改碼的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
+
+> **lint 穩定性**：consumer 的 ruff 規則由**自己的 `pyproject.toml`**（`[tool.ruff.lint] select/ignore`）決定，公版只負責釘死 ruff 執行檔版本。兩者搭配才能讓 `ruff check` 結果可重現、不隨上游漂移。
 
 ---
 

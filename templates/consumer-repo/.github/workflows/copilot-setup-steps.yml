@@ -20,6 +20,6 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
+          pip install "ruff==0.16.0" pytest   # 與 ci-reusable 的釘版本一致
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then pip install -e . || true; fi

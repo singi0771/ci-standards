@@ -12,6 +12,10 @@ on:
         description: "是否驗證 Docker image 能建置"
         type: boolean
         default: true
+      ruff-version:
+        description: "釘死的 ruff 版本，避免 lint 隨新版 ruff 漂移（要升級在此改）"
+        type: string
+        default: "0.16.0"
 
 permissions:
   contents: read
@@ -30,7 +34,8 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
+          # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改碼的 repo 突然變紅
+          pip install "ruff==${{ inputs.ruff-version }}" pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then pip install -e . || true; fi
       - name: Lint (ruff)
