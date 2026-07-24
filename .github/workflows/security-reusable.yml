@@ -33,7 +33,13 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # upload-sarif=true 時才會用到
+  # 預設「不」要求 security-events: write，這樣 upload-sarif=false（預設）在任何 repo
+  # （含 token 為唯讀的 private repo）都能正常啟動。
+  # 若要 upload-sarif=true（public 或有 GHAS 的 repo），呼叫端的 job 需自行加上：
+  #   permissions:
+  #     contents: read
+  #     security-events: write
+  # 且該 repo 的 Actions workflow 權限要允許寫入 security-events。
 
 jobs:
   # 1) SAST 靜態程式碼弱點（免費取代私有 repo 的 CodeQL）
