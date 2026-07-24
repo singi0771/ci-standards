@@ -1,0 +1,99 @@
+name: Copilot Review Gate
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security Scan"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+  actions: read   # gh run list 需要讀取 workflow runs
+
+jobs:
+  copilot-gate:
+    name: Request Copilot Review & Fix
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      # 1) 確認另一條 workflow 也對同一個 SHA 通過了
+      - name: Verify both CI and Security Scan passed for this SHA
+        id: both-pass
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGERED_BY: ${{ github.event.workflow_run.name }}
+        run: |
+          if [ "$TRIGGERED_BY" = "CI" ]; then
+            CHECK_WORKFLOW="Security Scan"
+          else
+            CHECK_WORKFLOW="CI"
+          fi
+          echo "Triggered by: $TRIGGERED_BY — checking: $CHECK_WORKFLOW for SHA $HEAD_SHA"
+
+          OTHER_OK=$(gh run list \
+            --repo "$GH_REPO" \
+            --workflow "$CHECK_WORKFLOW" \
+            --json headSha,conclusion \
+            --jq ".[] | select(.headSha == \"$HEAD_SHA\" and .conclusion == \"success\") | .headSha" \
+            | head -1)
+
+          if [ "$OTHER_OK" = "$HEAD_SHA" ]; then
+            echo "Both workflows passed for $HEAD_SHA — proceeding."
+            echo "ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "$CHECK_WORKFLOW hasn't passed for $HEAD_SHA yet. Skipping."
+            echo "ready=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 2) 找到這個 branch 對應的開放 PR
+      - name: Find open PR for this branch
+        id: pr
+        if: ${{ steps.both-pass.outputs.ready == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          BRANCH="$HEAD_BRANCH"
+          NUMBER=$(gh pr list \
+            --repo "$GH_REPO" \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -z "$NUMBER" ]; then
+            echo "No open PR for branch '$BRANCH' (direct push to main or schedule run) — skipping."
+          else
+            echo "Found PR #$NUMBER for branch $BRANCH"
+          fi
+          echo "number=$NUMBER" >> $GITHUB_OUTPUT
+
+      # 3) Request Copilot code review
+      - name: Request Copilot code review
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/$GH_REPO/pulls/$PR_NUMBER/requested_reviewers" \
+            -f 'reviewers[]=copilot-pull-request-reviewer[bot]' \
+            && echo "Copilot review requested." \
+            || echo "Warning: Copilot review API call failed. Check repo Copilot settings."
+
+      # 4) @copilot 觸發 coding agent（用 printf 避免 YAML block 縮排問題）
+      - name: Trigger Copilot coding agent
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          BODY=$(printf '🤖 **CI & Security Gate 全部通過。**\n\n@copilot 請審閱此 PR 的程式碼品質、安全性與最佳實踐（含邏輯正確性、錯誤處理、命名清晰度）。若發現任何問題，請直接修正後 commit。確認無問題後請 approve 此 PR，才開放人工 Merge。')
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --body "$BODY"

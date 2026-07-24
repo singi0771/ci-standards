@@ -12,13 +12,14 @@
 1. [運作原理（先看這個）](#運作原理先看這個)
 2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
-4. [可調參數（inputs）](#可調參數inputs)
-5. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
-6. [常見情境客製](#常見情境客製)
-7. [疑難排解](#疑難排解)
-8. [版本策略](#版本策略)
-9. [檔案地圖](#檔案地圖)
-10. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
+4. [自動修復閉環（選配，需 Copilot Business）](#自動修復閉環選配需-copilot-business)
+5. [可調參數（inputs）](#可調參數inputs)
+6. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
+7. [常見情境客製](#常見情境客製)
+8. [疑難排解](#疑難排解)
+9. [版本策略](#版本策略)
+10. [檔案地圖](#檔案地圖)
+11. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
 
 ---
 
@@ -83,9 +84,14 @@ cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 | `workflows/security.yml` | 呼叫安全公版 | ✅ 改 `uses:` 與 `with:` |
 | `workflows/ci.yml` | 呼叫 CI 公版 | ✅ 改 `uses:` |
 | `workflows/copilot-setup-steps.yml` | Copilot Coding Agent 動工前的環境準備 | 依專案相依調整 |
+| `workflows/copilot-review-gate.yml` | CI+Security 全過 → 自動請 Copilot 審 + 觸發 coding agent | 不用改（需 Copilot Business） |
+| `workflows/auto-fix-on-failure.yml` | CI/Security 失敗 → 自動 @copilot 修，含重試上限與升級 | 不用改（需 Copilot Business） |
+| `workflows/copilot-review-fix.yml` | Copilot review 要求變更 → 自動 @copilot 依意見修 | 不用改（需 Copilot Business） |
 | `dependabot.yml` | pip / docker / actions 每週自動更新 | 有前端再加 npm 區塊 |
 | `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，範本目前寫死 AdminAutoTools |
 | `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
+
+> 三支 `copilot-*` / `auto-fix-*` workflow 是**選配的自動修復閉環**，沒有 Copilot Business 也能複製過去（只是不會動）。細節見[下方說明](#自動修復閉環選配需-copilot-business)。
 
 ### 步驟 2 — 改三個地方
 
@@ -184,6 +190,43 @@ gh pr create
 ### 公版更新了怎麼辦
 
 什麼都不用做。`uses: ...@v1` 且 `v1` tag 已移動 → 你下次跑 CI 就吃到新版。
+
+---
+
+## 自動修復閉環（選配，需 Copilot Business）
+
+範本裡三支 `copilot-*` / `auto-fix-*` workflow 讓「修 + 審」完全自動化。**不裝 Copilot Business 也能複製過去，只是不會動**；有的話會形成這個循環：
+
+```
+             ┌──────────────────────────────────────────────┐
+             ▼                                                │
+  你開 PR ─▶ CI + Security ──失敗──▶ auto-fix-on-failure ──▶ @copilot 修 ─┐
+             │                        （最多 3 次，超過就升級人工）        │
+             │全過                                                        │
+             ▼                                                            │
+     copilot-review-gate ──▶ 請 Copilot 審 + 觸發 coding agent           │
+             │                                                            │
+      Copilot 要求變更 ──▶ copilot-review-fix ──▶ @copilot 依意見修 ──────┘
+             │（最多 3 次）
+      Copilot approve
+             ▼
+        你決定 Merge
+```
+
+| workflow | 觸發時機 | 做什麼 |
+|---|---|---|
+| `copilot-review-gate.yml` | CI 或 Security `workflow_run` 完成 | 確認**兩條**都對同一 SHA 通過 → 找對應 PR → 請 Copilot 審 + `@copilot` 觸發 coding agent |
+| `auto-fix-on-failure.yml` | CI 或 Security 失敗 | 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 commit |
+| `copilot-review-fix.yml` | Copilot review 送出 `changes_requested` | `@copilot` 依 review 意見修碼 |
+
+**內建的安全閥（避免無限燒 Credits）：**
+
+- **重試上限**：每支各有 `MAX_*_ATTEMPTS`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
+- **Cooldown**：`auto-fix-on-failure` 對同一 commit 15 分鐘內只觸發一次（CI 與 Security 常在數秒內相繼失敗，避免重複）。
+- **跳過 Dependabot**：Dependabot PR 由它自己管理，不進 auto-fix 迴圈。
+- **雙綠才放行**：`copilot-review-gate` 會確認 CI 與 Security **都**對同一 SHA 成功才動作，不會只過一半就請審。
+
+> 這三支是 `workflow_run` / `pull_request_review` 觸發，**無法**做成 reusable 用一行 `uses:` 呼叫（必須存在於 consumer repo 的 default branch），所以是「複製過去」而非「呼叫公版」。要調重試次數，改各檔頂端的 `MAX_*_ATTEMPTS`。
 
 ---
 
@@ -330,7 +373,13 @@ ci-standards/
     ├── dependabot.yml
     ├── copilot-instructions.md
     ├── pull_request_template.md
-    └── workflows/{security,ci,copilot-setup-steps}.yml
+    └── workflows/
+        ├── security.yml               ← 呼叫安全公版
+        ├── ci.yml                     ← 呼叫 CI 公版
+        ├── copilot-setup-steps.yml    ← Copilot agent 環境準備
+        ├── copilot-review-gate.yml    ← 選配：全過 → 自動請 Copilot 審
+        ├── auto-fix-on-failure.yml    ← 選配：失敗 → 自動 @copilot 修
+        └── copilot-review-fix.yml     ← 選配：review 要求變更 → 自動修
 ```
 
 ---

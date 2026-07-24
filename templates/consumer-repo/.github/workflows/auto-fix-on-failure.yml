@@ -1,0 +1,140 @@
+name: Auto-fix on CI/Security Failure
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security Scan"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+  actions: read
+
+env:
+  MAX_FIX_ATTEMPTS: "3"   # 修改此值調整自動修正次數上限（每個 PR 合計）
+
+jobs:
+  request-copilot-fix:
+    name: Ask Copilot Agent to Fix Failures
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find open PR and author
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pass github context values through env to prevent shell injection
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          BRANCH="$HEAD_BRANCH"
+          PR_NUM=$(gh pr list \
+            --repo "$GH_REPO" \
+            --head "$BRANCH" --state open \
+            --json number --jq '.[0].number // empty')
+          PR_AUTHOR=$(gh pr list \
+            --repo "$GH_REPO" \
+            --head "$BRANCH" --state open \
+            --json author --jq '.[0].author.login // empty')
+
+          # Dependabot PR 由 Dependabot 自行管理，不走 Copilot agent auto-fix 流程
+          if [[ "$PR_AUTHOR" == "app/dependabot" || "$PR_AUTHOR" == *"dependabot"* ]]; then
+            echo "Dependabot PR — skipping auto-fix (Dependabot manages its own PRs)."
+            PR_NUM=""
+          fi
+
+          echo "number=$PR_NUM" >> $GITHUB_OUTPUT
+          echo "author=$PR_AUTHOR" >> $GITHUB_OUTPUT
+          [ -z "$PR_NUM" ] && echo "Skipping (no open PR or Dependabot PR)." \
+                           || echo "PR #$PR_NUM by @$PR_AUTHOR"
+
+      - name: Guard — check attempt count and cooldown
+        id: guard
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MAX: ${{ env.MAX_FIX_ATTEMPTS }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # 計算已發出的 auto-fix 請求數（用隱藏 HTML marker 標記）
+          ATTEMPTS=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | select(.body | contains("<!-- auto-fix-attempt -->"))] | length')
+
+          # Cooldown：同一個 commit 的 CI 和 Security 可能在數秒內相繼失敗
+          # 15 分鐘內已有 fix request 就跳過，避免重複觸發兩次
+          CUTOFF=$(date -u -d '15 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+          RECENT=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+            --jq "[.[] | select(.body | contains(\"<!-- auto-fix-attempt -->\"))
+                       | select(.created_at >= \"$CUTOFF\")] | length")
+
+          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
+
+          if [ "$RECENT" -gt "0" ]; then
+            echo "action=cooldown" >> $GITHUB_OUTPUT
+            echo "Cooldown: fix request posted in last 15 min — skipping duplicate."
+          elif [ "$ATTEMPTS" -ge "$MAX" ]; then
+            echo "action=escalate" >> $GITHUB_OUTPUT
+            echo "Limit reached ($ATTEMPTS/$MAX) — will escalate to human."
+          else
+            echo "action=fix" >> $GITHUB_OUTPUT
+            echo "Attempt $((ATTEMPTS + 1))/$MAX — will request Copilot fix."
+          fi
+
+      - name: Get failed job names
+        id: info
+        if: ${{ steps.guard.outputs.action == 'fix' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          FAILED=$(gh api "repos/$GH_REPO/actions/runs/$WORKFLOW_RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | "- `" + .name + "`"] | join("\n")')
+          echo "failed<<EOF" >> $GITHUB_OUTPUT
+          echo "$FAILED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post Copilot fix request
+        if: ${{ steps.guard.outputs.action == 'fix' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          FAILED_JOBS: ${{ steps.info.outputs.failed }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          ATTEMPTS: ${{ steps.guard.outputs.attempts }}
+          MAX: ${{ env.MAX_FIX_ATTEMPTS }}
+        run: |
+          ATTEMPT=$(( ATTEMPTS + 1 ))
+          BODY=$(printf '<!-- auto-fix-attempt -->\n🔴 **%s 失敗，自動修正中（第 %d/%s 次）**\n\n失敗的 jobs：\n%s\n\n詳細 log：%s\n\n@copilot 請分析上述失敗原因，直接修正程式碼並 commit 到本 PR 分支。修正後 CI 會自動重跑，不需手動觸發。若為安全掃描問題，請優先以修改程式碼解決，避免使用 ignore 規則。' \
+            "$WORKFLOW_NAME" "$ATTEMPT" "$MAX" "$FAILED_JOBS" "$RUN_URL")
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --body "$BODY"
+
+      - name: Escalate — max attempts reached, notify human
+        if: ${{ steps.guard.outputs.action == 'escalate' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          MAX: ${{ env.MAX_FIX_ATTEMPTS }}
+        run: |
+          BODY=$(printf '🚨 **自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試自動修正 %s 次，但 **%s** 仍然失敗，自動循環已停止。\n\n最後失敗的 run：%s\n\n請人工排查並修正，或重新評估此 PR 的修正方向。' \
+            "$MAX" "$PR_AUTHOR" "$MAX" "$WORKFLOW_NAME" "$RUN_URL")
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --body "$BODY"
+          # 建立 label（若不存在則先建立）並貼到 PR
+          gh label create "needs-human-review" \
+            --color "#FF6B6B" \
+            --description "Automated fix loop exhausted — manual intervention required" \
+            --repo "$GH_REPO" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --add-label "needs-human-review" 2>/dev/null || true
