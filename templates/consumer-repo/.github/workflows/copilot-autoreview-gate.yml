@@ -1,4 +1,4 @@
-name: Copilot Review Gate
+name: Copilot Auto Review
 
 on:
   workflow_run:

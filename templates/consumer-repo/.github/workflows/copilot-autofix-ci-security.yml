@@ -1,4 +1,4 @@
-name: Auto-fix on CI/Security Failure
+name: Copilot Autofix — CI/Security
 
 on:
   workflow_run:

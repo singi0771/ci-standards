@@ -1,4 +1,4 @@
-name: Auto-fix after Copilot Review
+name: Copilot Autofix — Review
 
 on:
   pull_request_review:
