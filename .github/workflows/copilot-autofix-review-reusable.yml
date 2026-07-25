@@ -42,7 +42,7 @@ jobs:
       - name: Guard — check review-fix attempt count
         id: guard
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number }}
           MAX: ${{ inputs.max-attempts }}
         run: |
@@ -61,7 +61,7 @@ jobs:
       - name: Post Copilot agent fix request
         if: ${{ steps.guard.outputs.action == 'fix' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number }}
           REVIEWER: ${{ inputs.reviewer }}
           REVIEW_BODY: ${{ inputs.review-body }}
@@ -79,7 +79,7 @@ jobs:
       - name: Escalate — max review-fix attempts reached
         if: ${{ steps.guard.outputs.action == 'escalate' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr-number }}
           PR_AUTHOR: ${{ inputs.pr-author }}
           REVIEWER: ${{ inputs.reviewer }}

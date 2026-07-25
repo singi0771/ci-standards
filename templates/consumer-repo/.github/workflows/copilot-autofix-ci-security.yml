@@ -24,4 +24,3 @@ jobs:
       run-id:        ${{ github.event.workflow_run.id }}
       run-url:       ${{ github.event.workflow_run.html_url }}
       # max-attempts: "3"   # 要調整每個 PR 自動修正次數上限時取消註解
-    secrets: inherit

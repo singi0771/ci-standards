@@ -22,4 +22,3 @@ jobs:
       head-sha:     ${{ github.event.workflow_run.head_sha }}
       head-branch:  ${{ github.event.workflow_run.head_branch }}
       triggered-by: ${{ github.event.workflow_run.name }}
-    secrets: inherit

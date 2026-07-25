@@ -32,7 +32,7 @@ jobs:
       - name: Verify both CI and Security Scan passed for this SHA
         id: both-pass
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ inputs.head-sha }}
           TRIGGERED_BY: ${{ inputs.triggered-by }}
@@ -64,7 +64,7 @@ jobs:
         id: pr
         if: ${{ steps.both-pass.outputs.ready == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_BRANCH: ${{ inputs.head-branch }}
         run: |
@@ -86,7 +86,7 @@ jobs:
       - name: Request Copilot code review
         if: ${{ steps.pr.outputs.number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
@@ -101,7 +101,7 @@ jobs:
       - name: Trigger Copilot coding agent
         if: ${{ steps.pr.outputs.number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |

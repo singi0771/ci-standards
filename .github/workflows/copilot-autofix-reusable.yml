@@ -40,7 +40,7 @@ jobs:
       - name: Find open PR and author
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           # Pass context values through env to prevent shell injection
           HEAD_BRANCH: ${{ inputs.head-branch }}
           GH_REPO: ${{ github.repository }}
@@ -70,7 +70,7 @@ jobs:
         id: guard
         if: ${{ steps.pr.outputs.number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           MAX: ${{ inputs.max-attempts }}
           GH_REPO: ${{ github.repository }}
@@ -103,7 +103,7 @@ jobs:
         id: info
         if: ${{ steps.guard.outputs.action == 'fix' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           WORKFLOW_RUN_ID: ${{ inputs.run-id }}
         run: |
@@ -116,7 +116,7 @@ jobs:
       - name: Post Copilot fix request
         if: ${{ steps.guard.outputs.action == 'fix' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           WORKFLOW_NAME: ${{ inputs.workflow-name }}
           RUN_URL: ${{ inputs.run-url }}
@@ -135,7 +135,7 @@ jobs:
       - name: Escalate — max attempts reached, notify human
         if: ${{ steps.guard.outputs.action == 'escalate' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}

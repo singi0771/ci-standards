@@ -24,4 +24,3 @@ jobs:
       review-body: ${{ github.event.review.body }}
       review-url:  ${{ github.event.review.html_url }}
       # max-attempts: "3"   # 要調整依 review 自動修正次數上限時取消註解
-    secrets: inherit
