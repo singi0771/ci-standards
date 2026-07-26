@@ -48,7 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: semgrep/semgrep
+      # 釘版本：不釘（＝latest）等於每次跑都可能吃到新規則，讓沒改碼的 repo 突然變紅，
+      # 也是供應鏈風險。要升級規則就在這裡改一版、統一生效。
+      image: semgrep/semgrep:1.171.0
     steps:
       - uses: actions/checkout@v4
       - name: Semgrep scan (OWASP Top 10 + security-audit + auto)
@@ -83,9 +85,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install OSV-Scanner
         run: |
-          curl -sSL -o /usr/local/bin/osv-scanner \
+          # --fail 很重要：沒有它，GitHub 回 404/5xx 時 curl 會把錯誤頁面存成「執行檔」，
+          # 後面執行失敗又被當成良性 warning 放行 → 相依弱點掃描靜默失效、Gate 照樣綠燈。
+          curl --fail -sSL -o /usr/local/bin/osv-scanner \
             "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64"
           chmod +x /usr/local/bin/osv-scanner
+          # 再驗一次真的是可執行的 osv-scanner，才往下跑
+          osv-scanner --version
       - name: Run OSV-Scanner
         run: |
           set +e
@@ -97,10 +103,20 @@ jobs:
           elif [ "$EXIT" -eq 1 ]; then
             echo "❌ Vulnerabilities found!"
             if [ "${{ inputs.fail-on-findings }}" = "true" ]; then exit 1; fi
-          elif [ "$EXIT" -eq 127 ]; then
-            echo "⚠️  Scan warning (exit 127): transitive dep resolution error. No vulns in direct deps."
+          elif [ "$EXIT" -eq 128 ]; then
+            # 128 = osv-scanner 找不到任何可掃的 lockfile/manifest，不是弱點
+            echo "⚠️  No supported lockfile found — nothing to scan."
           else
-            echo "⚠️  Unexpected exit code: $EXIT — treating as warning."
+            # 其餘（含 127）一律視為「掃描沒跑成功」而擋下。
+            #
+            # 行為變更說明：舊版把 127 當良性 warning 放行（見 commit 22b1317）。但 127 是
+            # command-not-found，最可能的成因其實是上一步下載失敗——那正是「掃描靜默失效
+            # 卻依然綠燈」的漏洞。現在安裝步驟已用 --fail + --version 驗過執行檔，走到這裡
+            # 代表 scanner 真的出錯、這次沒掃成，不能當作通過。
+            # 若確認是 osv-scanner 自己對某種 transitive dep 的已知問題，請針對該情況加白名單，
+            # 不要把整個 else 改回放行。
+            echo "❌ OSV-Scanner 異常結束（exit $EXIT）— 視為掃描失敗。"
+            if [ "${{ inputs.fail-on-findings }}" = "true" ]; then exit 1; fi
           fi
 
   # 3) 檔案系統 + Dockerfile + IaC 設定弱點 + 內嵌密鑰
@@ -132,7 +148,8 @@ jobs:
       - name: Run gitleaks (free, no license)
         continue-on-error: ${{ inputs.fail-on-findings == false }}
         run: |
-          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
+          # 釘版本，理由同 semgrep：latest 升版會新增規則，沒改碼也可能突然變紅。
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
             detect --source=. --redact --no-banner --exit-code=1
 
   # 5) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
@@ -159,6 +176,10 @@ jobs:
           image-ref: scan-target:${{ github.sha }}
           format: table
           severity: ${{ inputs.severity }}
+          # 只擋「上游已有修補版本」的 CVE。base image（Debian/Alpine）長期帶著十幾個
+          # 上游還沒修的 HIGH，擋了你也改不掉，只會逼大家把 fail-on-findings 關掉、
+          # 整套守門一起廢掉。要看完整清單就把 ignore-unfixed 設成 false。
+          ignore-unfixed: true
           exit-code: "1"
 
   # 6) 彙總守門員：needs 所有掃描，讓分支保護「只需要求這一個」status check。
