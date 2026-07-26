@@ -7,8 +7,10 @@ on:
   push:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]
+  # ⚠️ pull_request 這裡「不要」加 paths-ignore —— 理由同 ci.yml：
+  # `security / Security Gate` 是 required check，被 path filter 擋掉就永遠不回報，
+  # 純文件 PR 會卡死在 pending。
   pull_request:
-    paths-ignore: ["**/*.md", "docs/**"]
   schedule:
     - cron: "0 3 * * 1"        # 每週一完整重掃
 

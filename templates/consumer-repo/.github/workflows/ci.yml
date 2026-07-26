@@ -6,8 +6,11 @@ on:
   push:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]
+  # ⚠️ pull_request 這裡「不要」加 paths-ignore。
+  # 分支保護把 `ci / CI Gate` 設成 required check 後，被 path filter 擋掉的 PR
+  # 根本不會啟動 workflow → required check 永遠 pending → 純文件 PR 永遠 merge 不了
+  # （連 admin 都不行，ruleset 沒 bypass）。省那幾分鐘不值得換一個死鎖。
   pull_request:
-    paths-ignore: ["**/*.md", "docs/**"]
 
 concurrency:
   group: ci-${{ github.ref }}

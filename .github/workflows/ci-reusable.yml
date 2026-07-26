@@ -57,3 +57,36 @@ jobs:
           else
             echo "沒有 Dockerfile，略過"
           fi
+
+  # 彙總守門員：分支保護「只需要求 ci / CI Gate 這一個」status check。
+  # 不要把 docker-build 直接設成 required —— 它有 if 條件，run-docker-build=false 時
+  # 會變 skipped、required check 永遠不回報 → PR 永久卡住。
+  # 未來 ci-reusable 新增 job 時，記得加進下面的 needs（否則該 job 形同虛設）。
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [python, docker-build]
+    if: ${{ always() }}
+    steps:
+      - name: Evaluate all CI results
+        run: |
+          PYTHON="${{ needs.python.result }}"
+          DOCKER="${{ needs.docker-build.result }}"
+          {
+            echo "## 🧪 CI Gate 結果"
+            echo ""
+            echo "| 檢查 | 結果 |"
+            echo "| --- | --- |"
+            echo "| Python lint + test | $PYTHON |"
+            echo "| Docker build check | $DOCKER |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          FAIL=0
+          [ "$PYTHON" != "success" ] && FAIL=1
+          # docker-build 允許 skipped（run-docker-build=false）；只有 failure 才擋
+          [ "$DOCKER" = "failure" ] && FAIL=1
+          if [ "$FAIL" = "1" ]; then
+            echo "❌ CI Gate 未通過" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ CI Gate 通過" >> "$GITHUB_STEP_SUMMARY"
