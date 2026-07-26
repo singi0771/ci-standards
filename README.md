@@ -38,15 +38,21 @@
 
 .github/workflows/ci.yml        ──呼叫──▶ ci-reusable.yml
    jobs.ci:                                ├─ Python lint + test
-     uses: ...@v1                          └─ Docker build check
+     uses: ...@v1                          ├─ Docker build check ←可選
+                                           └─ 🧪 CI Gate ←彙總，分支保護只認這個
 ```
 
 **呼叫端只有十幾行、沒有邏輯**。要改掃描規則、加工具、升版本 —— 全部改這個 repo，不動任何專案。
 
-### 為什麼有 Security Gate
+### 為什麼有 Security Gate / CI Gate
 
-`Security Gate` 是一個 `needs` 全部掃描的彙總 job：任一掃描失敗它就失敗。
-所以**分支保護只要求它這一個 check**，日後你在公版增減掃描工具，不必回頭改每個 repo 的 ruleset。
+兩者都是 `needs` 全部子 job 的彙總 job：任一子 job 失敗它就失敗。
+所以**分支保護只要求這兩個 check**，日後你在公版增減工具，不必回頭改每個 repo 的 ruleset。
+
+更重要的是：**不要把有 `if` 條件的 job 直接設成 required check**。
+`docker-build`（`run-docker-build: false` 時）和 `trivy-image`（`scan-docker-image: false` 時）會變成
+`skipped`，而 skipped 的 required check **永遠不會回報結果**，PR 就會卡在 pending 卡到天荒地老。
+Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才擋」，就沒有這個問題。
 
 ### 完整閉環（有 Copilot Business 時）
 
@@ -56,6 +62,10 @@
 ```
 
 免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
+
+> **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
+> 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，
+> 而分支保護的 required approvals 若設成 1，Copilot 是**湊不出**那一票的（見[分支保護](#分支保護讓流程非過不可)）。
 
 ---
 
@@ -148,8 +158,12 @@ gh run list -L 5
 ./scripts/setup-branch-protection.sh <owner>/<repo>
 ```
 
-這會建立 ruleset：必須開 PR + 至少 1 approve + 對話解決 + 通過 `Security Gate` 與 CI + 禁止 force push / 刪分支。
-⚠️ 有方案限制，見[下一節](#分支保護讓流程非過不可)。
+這會建立 ruleset：必須開 PR + 對話解決 + 通過 `Security Gate` 與 `CI Gate` + 禁止 force push / 刪分支。
+⚠️ 有方案限制、以及 required approvals 預設為何是 0，見[下一節](#分支保護讓流程非過不可)。
+
+> 三支 `copilot-auto*` 的觸發器（`workflow_run` / `pull_request_review`）依 GitHub 規則
+> **只認 default branch 上的檔案**。所以「導入這件事」本身的那個 PR 不會有自動修/自動審，
+> 要等合併進 `main` 之後的下一個 PR 才會生效 —— 不是壞掉。
 
 ---
 
@@ -206,26 +220,35 @@ gh pr create
              │                        （最多 3 次，超過就升級人工）              │
              │全過                                                              │
              ▼                                                                  │
-     copilot-autoreview-gate ──▶ 請 Copilot 審 + 觸發 coding agent             │
-             │                                                                  │
-      Copilot 要求變更 ──▶ copilot-autofix-review ──▶ @copilot 依意見修 ────────┘
-             │（最多 3 次）
-      Copilot approve
+     copilot-autoreview-gate ──▶ 請 Copilot 審 + 觸發 coding agent ─────────────┘
+             │                    （每個 PR 最多 3 次；Copilot 修完 commit
+             │                      → 新 SHA 全綠 → 再審，這條迴圈靠上限收斂）
+             │
+      真人 reviewer 按 Request changes ──▶ copilot-autofix-review ──▶ @copilot 依意見修
+             │                              （最多 3 次）
              ▼
-        你決定 Merge
+        你看完 Copilot 的意見，決定 Merge
 ```
+
+> **注意這裡沒有「Copilot approve」這一格。** Copilot 只會留 COMMENT，不會 approve。
+> `copilot-autofix-review` 那條路徑吃的是 `changes_requested`，實務上**只有真人 reviewer 會觸發**——
+> 這是刻意的：autoreview 貼的留言已經要求 Copilot「發現問題直接修正後 commit」，
+> 若再接上 Copilot 自己的 COMMENT review，兩支 workflow 會互相觸發成無窮迴圈。
 
 | consumer 薄殼 | 顯示名 | 呼叫的公版 | 觸發時機 → 做什麼 |
 |---|---|---|---|
 | `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | `copilot-autofix-reusable.yml` | CI/Security 失敗 → 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 |
-| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | review `changes_requested` → `@copilot` 依意見修碼 |
+| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | **真人** review `changes_requested` → `@copilot` 依意見修碼 |
 | `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 請 Copilot 審 + 觸發 coding agent |
 
 **內建的安全閥（避免無限燒 Credits）：**
 
-- **重試上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
+- **修正次數上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
+- **審查次數上限**：`max-review-requests`（預設 3）。Copilot 依意見 commit → 新 SHA → CI/Security 又全綠 → 又請審，**這條迴圈本身沒有終點**，靠這個上限收斂。
+- **升級後閉嘴**：升級人工的留言帶 `<!-- *-escalated -->` marker，之後同一 PR 不再自動留言。想重啟自動修正就把那則留言刪掉。
 - **Cooldown**：`copilot-autofix-ci-security` 對同一 commit 15 分鐘內只觸發一次（CI 與 Security 常在數秒內相繼失敗，避免重複）。
-- **跳過 Dependabot**：Dependabot PR 由它自己管理，不進 autofix 迴圈。
+- **同 SHA 去重 + 排隊**：`copilot-autoreview-gate` 用 `concurrency` 把同一 SHA 的兩次呼叫排隊（CI 與 Security 幾乎同時完成時，兩邊會同時判定「該請審了」），後到的那次看到 marker 就跳過。
+- **跳過 Dependabot**：Dependabot PR 不進 autofix，**也不進 autoreview**（每週 5 個 PR 各燒一次 review + agent 是純浪費）。
 - **雙綠才放行**：`copilot-autoreview-gate` 會確認 CI 與 Security **都**對同一 SHA 成功才動作，不會只過一半就請審。
 
 ### 為什麼是薄殼而非整包複製
@@ -277,6 +300,20 @@ gh pr create
 
 三個解法：把 repo 轉到有 Team 方案的 org（推薦，順便統一管 Copilot policy）／帳號升 Pro／repo 轉 public（多數情況不適合）。
 
+### ⚠️ required approvals 為什麼預設是 0
+
+腳本預設 `required_approving_review_count: 0`，這是刻意的。設 1 而團隊只有你一個人時，**PR 會永遠 merge 不了**，三件事疊在一起：
+
+1. GitHub 不允許 PR 作者 approve 自己的 PR
+2. Copilot Code Review 送的是 COMMENT 類型 review，**它不會 approve**
+3. ruleset 預設沒有 `bypass_actors`，連 org admin 都繞不過（跟舊版 classic branch protection 不同）
+
+設 0 **不代表沒有守門**——「必須開 PR」和「必須通過 Security Gate / CI Gate」照樣強制，只是不強制人工按 Approve。等有第二位固定 reviewer 再改：
+
+```bash
+REQUIRED_APPROVALS=1 ./scripts/setup-branch-protection.sh <owner>/<repo>
+```
+
 ### 一鍵設定
 
 ```bash
@@ -284,18 +321,32 @@ gh auth login                                        # 需有目標 repo 的 adm
 ./scripts/setup-branch-protection.sh <owner>/<repo>
 ```
 
+腳本可重複執行：偵測到同名 ruleset 會改用 `PUT` 更新，不會建出第二份。
+
 ### 手動設定
 
-目標 repo → Settings → Rules → Rulesets → 針對 `main`：
+目標 repo → Settings → Rules → Rulesets → New branch ruleset → 針對 `main`：
 
-- ✅ **Require a pull request before merging**（至少 1 approve、要求對話解決）
+- ✅ **Enforcement status** 設為 **Active**（預設是 Disabled，很容易漏）
+- ✅ **Require a pull request before merging**（approvals 先填 0、勾要求對話解決）
 - ✅ **Require status checks to pass**，加入：
-  - `security / Security Gate` ← **必要，只要這一個**
-  - `ci / Python lint + test` ← 建議
-- ✅ **Block force pushes** / 禁止刪除分支
+  - `security / Security Gate`
+  - `ci / CI Gate`
+- ✅ **Block force pushes** / **Restrict deletions**
 
 > check 名稱格式是 `<呼叫端 job id> / <公版 job 名>`。若你改過 job id，這裡要跟著改。
 > 名稱必須跟 Checks 分頁上實際出現的字串**完全一致**，所以務必等第一次 run 跑完再設。
+
+> **只設這兩個 Gate，不要把個別 job 加進去。** `docker-build` 和 `trivy-image` 有 `if` 條件，
+> 關掉時會變 `skipped`，而 skipped 的 required check 永遠不回報 → PR 永久 pending。
+
+### ⚠️ 開之前先確認呼叫端沒有 paths-ignore
+
+`ci.yml` / `security.yml` 的 **`pull_request` 區塊不可以有 `paths-ignore`**。
+被 path filter 擋掉的 PR 根本不會啟動 workflow，required check 就永遠是 pending —— 一個只改 README 的 PR
+會直接卡死，而且沒有 bypass 可以繞。範本已經拿掉了，但如果你手上是舊版複製過去的，導入前務必檢查。
+
+（`push: main` 那邊保留 `paths-ignore` 沒問題，那不影響 required check。）
 
 ### 另外要做的兩件事
 
