@@ -57,16 +57,16 @@ jobs:
           ESCALATED=$(echo "$COMMENTS" \
             | jq -s 'add | [.[] | select(.body | contains("<!-- review-fix-escalated -->"))] | length')
 
-          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
+          echo "attempts=$ATTEMPTS" >> "$GITHUB_OUTPUT"
 
           if [ "$ESCALATED" -gt "0" ]; then
-            echo "action=done" >> $GITHUB_OUTPUT
+            echo "action=done" >> "$GITHUB_OUTPUT"
             echo "Already escalated to human — staying quiet."
           elif [ "$ATTEMPTS" -ge "$MAX" ]; then
-            echo "action=escalate" >> $GITHUB_OUTPUT
+            echo "action=escalate" >> "$GITHUB_OUTPUT"
             echo "Review fix limit reached ($ATTEMPTS/$MAX) — escalating."
           else
-            echo "action=fix" >> $GITHUB_OUTPUT
+            echo "action=fix" >> "$GITHUB_OUTPUT"
             echo "Review fix attempt $((ATTEMPTS + 1))/$MAX — proceeding."
           fi
 

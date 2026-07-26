@@ -1,0 +1,28 @@
+# 本 repo 自己的 CI —— 公版對自己也要適用（dogfooding）。
+# 用 ./ 呼叫本 repo 的 reusable：PR 會用「這個 PR 的版本」跑，
+# 不是 @v1。改壞公版時當場就會紅，不會等到別人的專案才爆。
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
+  # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci-reusable.yml
+    with:
+      # 本 repo 沒有 Python、沒有 Dockerfile，真正要檢查的是 workflow 與 shell script
+      run-python: false
+      run-docker-build: false
+      run-actionlint: true
+      run-shellcheck: true
+      # 除了本 repo 的 .github/workflows，consumer 範本也要一起檢查 ——
+      # 範本壞掉的話，每個照著導入的專案都會壞
+      actionlint-paths: "templates/consumer-repo/.github/workflows/*.yml"

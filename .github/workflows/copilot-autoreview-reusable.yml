@@ -71,10 +71,10 @@ jobs:
 
           if [ "$OTHER_OK" = "$HEAD_SHA" ]; then
             echo "Both workflows passed for $HEAD_SHA — proceeding."
-            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "$CHECK_WORKFLOW hasn't passed for $HEAD_SHA yet. Skipping."
-            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
       # 2) 找到這個 branch 對應的開放 PR
@@ -107,7 +107,7 @@ jobs:
           else
             echo "Found PR #$NUMBER by @$AUTHOR"
           fi
-          echo "number=$NUMBER" >> $GITHUB_OUTPUT
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
 
       # 3) 次數上限 + 同 SHA 去重
       - name: Guard — dedupe by SHA and cap total review requests
@@ -132,13 +132,13 @@ jobs:
             | jq -s 'add | [.[] | select(.body | contains("<!-- auto-review-request:"))] | length')
 
           if [ "$SAME_SHA" -gt "0" ]; then
-            echo "action=skip" >> $GITHUB_OUTPUT
+            echo "action=skip" >> "$GITHUB_OUTPUT"
             echo "Already requested review for $HEAD_SHA — skipping duplicate."
           elif [ "$TOTAL" -ge "$MAX" ]; then
-            echo "action=capped" >> $GITHUB_OUTPUT
+            echo "action=capped" >> "$GITHUB_OUTPUT"
             echo "Review request cap reached ($TOTAL/$MAX) — staying quiet."
           else
-            echo "action=review" >> $GITHUB_OUTPUT
+            echo "action=review" >> "$GITHUB_OUTPUT"
             echo "Review request $((TOTAL + 1))/$MAX for $HEAD_SHA."
           fi
 
@@ -168,6 +168,7 @@ jobs:
         run: |
           # 不要叫 Copilot「approve 此 PR」——Copilot code review 送出的是 COMMENT 類型的
           # review，它不會（也不能）approve。寫成那樣只會讓人等一個永遠不會出現的 approval。
+          # shellcheck disable=SC2016  # 單引號內的反引號是 Markdown 語法，不是命令替換
           BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`）\n\n@copilot 請審閱此 PR 的程式碼品質、安全性與最佳實踐（含邏輯正確性、錯誤處理、命名清晰度）。若發現任何問題，請直接修正後 commit。\n\n審查意見處理完畢後，由人工確認並 Merge。' \
             "$HEAD_SHA" "$HEAD_SHA")
           gh pr comment "$PR_NUMBER" \

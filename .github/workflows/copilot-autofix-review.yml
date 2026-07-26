@@ -1,0 +1,25 @@
+# 薄殼（本 repo 自用）：真人 reviewer 按 Request changes → 讓 Copilot 依意見修。
+# Copilot code review 送的是 COMMENT（state = commented），不會走到這裡，這是刻意的 ——
+# 接上去會與 copilot-autoreview-gate 互相觸發成無窮迴圈。
+name: Copilot Autofix — Review
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: write
+  issues: write     # 達上限時貼 needs-human-review label 用
+
+jobs:
+  autofix-review:
+    if: >
+      github.event.review.state == 'changes_requested' &&
+      !contains(github.event.pull_request.user.login, 'dependabot')
+    uses: ./.github/workflows/copilot-autofix-review-reusable.yml
+    with:
+      pr-number:   ${{ github.event.pull_request.number }}
+      pr-author:   ${{ github.event.pull_request.user.login }}
+      reviewer:    ${{ github.event.review.user.login }}
+      review-body: ${{ github.event.review.body }}
+      review-url:  ${{ github.event.review.html_url }}

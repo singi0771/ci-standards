@@ -1,0 +1,11 @@
+# 本 repo 只有 GitHub Actions 相依（沒有 pip / docker）
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-all:
+        patterns: ["*"]     # 全部併成一個 PR，避免每週開一堆 PR 塞爆通知

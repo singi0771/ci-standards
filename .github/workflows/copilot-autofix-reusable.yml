@@ -62,8 +62,8 @@ jobs:
             PR_NUM=""
           fi
 
-          echo "number=$PR_NUM" >> $GITHUB_OUTPUT
-          echo "author=$PR_AUTHOR" >> $GITHUB_OUTPUT
+          echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+          echo "author=$PR_AUTHOR" >> "$GITHUB_OUTPUT"
           [ -z "$PR_NUM" ] && echo "Skipping (no open PR or Dependabot PR)." \
                            || echo "PR #$PR_NUM by @$PR_AUTHOR"
 
@@ -97,19 +97,19 @@ jobs:
           ESCALATED=$(echo "$COMMENTS" \
             | jq -s 'add | [.[] | select(.body | contains("<!-- auto-fix-escalated -->"))] | length')
 
-          echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
+          echo "attempts=$ATTEMPTS" >> "$GITHUB_OUTPUT"
 
           if [ "$ESCALATED" -gt "0" ]; then
-            echo "action=done" >> $GITHUB_OUTPUT
+            echo "action=done" >> "$GITHUB_OUTPUT"
             echo "Already escalated to human — staying quiet."
           elif [ "$RECENT" -gt "0" ]; then
-            echo "action=cooldown" >> $GITHUB_OUTPUT
+            echo "action=cooldown" >> "$GITHUB_OUTPUT"
             echo "Cooldown: fix request posted in last 15 min — skipping duplicate."
           elif [ "$ATTEMPTS" -ge "$MAX" ]; then
-            echo "action=escalate" >> $GITHUB_OUTPUT
+            echo "action=escalate" >> "$GITHUB_OUTPUT"
             echo "Limit reached ($ATTEMPTS/$MAX) — will escalate to human."
           else
-            echo "action=fix" >> $GITHUB_OUTPUT
+            echo "action=fix" >> "$GITHUB_OUTPUT"
             echo "Attempt $((ATTEMPTS + 1))/$MAX — will request Copilot fix."
           fi
 
@@ -121,11 +121,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
           WORKFLOW_RUN_ID: ${{ inputs.run-id }}
         run: |
+          # shellcheck disable=SC2016  # 單引號內是 jq 語法，本來就不該由 shell 展開
           FAILED=$(gh api "repos/$GH_REPO/actions/runs/$WORKFLOW_RUN_ID/jobs" \
             --jq '[.jobs[] | select(.conclusion == "failure") | "- `" + .name + "`"] | join("\n")')
-          echo "failed<<EOF" >> $GITHUB_OUTPUT
-          echo "$FAILED" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "failed<<EOF"
+            echo "$FAILED"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Post Copilot fix request
         if: ${{ steps.guard.outputs.action == 'fix' }}

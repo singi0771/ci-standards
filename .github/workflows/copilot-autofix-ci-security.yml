@@ -1,0 +1,25 @@
+# 薄殼（本 repo 自用）：CI/Security 失敗 → 讓 Copilot 自動修。
+# 用 ./ 呼叫本 repo 的公版。注意 workflow_run 觸發器只認 default branch 上的檔案，
+# 所以這支要合併進 main 之後才會生效。
+name: Copilot Autofix — CI/Security
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security Scan"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  issues: write     # 達上限時貼 needs-human-review label 用
+  contents: read
+  actions: read
+
+jobs:
+  autofix:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    uses: ./.github/workflows/copilot-autofix-reusable.yml
+    with:
+      head-branch:   ${{ github.event.workflow_run.head_branch }}
+      workflow-name: ${{ github.event.workflow_run.name }}
+      run-id:        ${{ github.event.workflow_run.id }}
+      run-url:       ${{ github.event.workflow_run.html_url }}
