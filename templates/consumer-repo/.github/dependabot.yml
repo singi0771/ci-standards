@@ -4,9 +4,10 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
+      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
-      semver-major-days: 30
     directory: "/"
     schedule:
       interval: "weekly"
@@ -17,18 +18,20 @@ updates:
 
   - package-ecosystem: "docker"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
+      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
-      semver-major-days: 30
     directory: "/"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "github-actions"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
+      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
-      semver-major-days: 30
     directory: "/"
     schedule:
       interval: "weekly"
