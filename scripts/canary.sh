@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# 自動化迴圈驗證用的 canary script（故意寫壞，用來測 CI 會不會擋、Copilot 會不會修）
+# 自動化迴圈驗證用的 canary script（錯誤已依 CI 與 Copilot review 意見修正）
 set -euo pipefail
 
 TARGET=$1
 
-# 故意的錯誤 1：未引用的變數（shellcheck SC2086）
-# 若 TARGET 含空白或萬用字元，會刪到非預期的檔案
-rm -rf $TARGET
+# 修正 SC2086：引用變數，並用 -- 終止選項解析，避免 TARGET 以 - 開頭被當成參數
+rm -rf -- "$TARGET"
 
-# 故意的錯誤 2：用 ls 的輸出當迴圈來源（shellcheck SC2045）
-for f in $(ls *.log); do
-  echo $f
+# 修正 SC2045/SC2035：改用 glob，nullglob 避免沒有檔案時跑到字面值 *.log
+shopt -s nullglob
+for f in ./*.log; do
+  echo "$f"
 done
