@@ -3,6 +3,10 @@ version: 2
 
 updates:
   - package-ecosystem: "github-actions"
+    cooldown:
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版
+      default-days: 7
+      semver-major-days: 30
     directory: "/"
     schedule:
       interval: "weekly"

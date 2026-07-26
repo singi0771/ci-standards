@@ -52,7 +52,7 @@ jobs:
       # 也是供應鏈風險。要升級規則就在這裡改一版、統一生效。
       image: semgrep/semgrep:1.171.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Semgrep scan (OWASP Top 10 + security-audit + auto)
         continue-on-error: ${{ inputs.fail-on-findings == false }}
         run: |
@@ -64,13 +64,13 @@ jobs:
             --error --sarif --output=semgrep.sarif
       - name: Upload SARIF to Security tab
         if: ${{ always() && inputs.upload-sarif }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
         with:
           sarif_file: semgrep.sarif
           category: semgrep
       - name: Upload SARIF as artifact
         if: ${{ always() && !inputs.upload-sarif }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install OSV-Scanner
         run: |
           # --fail 很重要：沒有它，GitHub 回 404/5xx 時 curl 會把錯誤頁面存成「執行檔」，
@@ -93,6 +93,8 @@ jobs:
           # 再驗一次真的是可執行的 osv-scanner，才往下跑
           osv-scanner --version
       - name: Run OSV-Scanner
+        env:
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         run: |
           set +e
           osv-scanner --recursive ./
@@ -102,7 +104,7 @@ jobs:
             echo "✅ No vulnerabilities found."
           elif [ "$EXIT" -eq 1 ]; then
             echo "❌ Vulnerabilities found!"
-            if [ "${{ inputs.fail-on-findings }}" = "true" ]; then exit 1; fi
+            if [ "$FAIL_ON_FINDINGS" = "true" ]; then exit 1; fi
           elif [ "$EXIT" -eq 128 ]; then
             # 128 = osv-scanner 找不到任何可掃的 lockfile/manifest，不是弱點
             echo "⚠️  No supported lockfile found — nothing to scan."
@@ -116,7 +118,7 @@ jobs:
             # 若確認是 osv-scanner 自己對某種 transitive dep 的已知問題，請針對該情況加白名單，
             # 不要把整個 else 改回放行。
             echo "❌ OSV-Scanner 異常結束（exit $EXIT）— 視為掃描失敗。"
-            if [ "${{ inputs.fail-on-findings }}" = "true" ]; then exit 1; fi
+            if [ "$FAIL_ON_FINDINGS" = "true" ]; then exit 1; fi
           fi
 
   # 3) 檔案系統 + Dockerfile + IaC 設定弱點 + 內嵌密鑰
@@ -125,10 +127,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Trivy scan
         continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scanners: vuln,misconfig,secret
@@ -142,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Run gitleaks (free, no license)
@@ -159,18 +161,20 @@ jobs:
     timeout-minutes: 15
     if: ${{ inputs.scan-docker-image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image (不推送，只為掃描)
+        env:
+          SHA: ${{ github.sha }}
         run: |
           if [ -f Dockerfile ]; then
-            docker build -t scan-target:${{ github.sha }} .
+            docker build -t "scan-target:$SHA" .
           else
             echo "沒有 Dockerfile，略過"; exit 0
           fi
       - name: Scan image
         if: ${{ hashFiles('Dockerfile') != '' }}
         continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
           image-ref: scan-target:${{ github.sha }}
@@ -192,12 +196,13 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Evaluate all scan results
+        env:
+          SEMGREP: ${{ needs.semgrep.result }}
+          OSV: ${{ needs.osv-scanner.result }}
+          TRIVY: ${{ needs.trivy.result }}
+          GITLEAKS: ${{ needs.gitleaks.result }}
+          IMAGE: ${{ needs.trivy-image.result }}
         run: |
-          SEMGREP="${{ needs.semgrep.result }}"
-          OSV="${{ needs.osv-scanner.result }}"
-          TRIVY="${{ needs.trivy.result }}"
-          GITLEAKS="${{ needs.gitleaks.result }}"
-          IMAGE="${{ needs.trivy-image.result }}"
           {
             echo "## 🛡️ Security Gate 結果"
             echo ""
