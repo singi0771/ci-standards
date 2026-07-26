@@ -33,6 +33,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write     # 貼 needs-human-review label 需要（label API 屬於 Issues 權限）
 
 jobs:
   request-copilot-fix-from-review:
@@ -46,11 +47,22 @@ jobs:
           PR_NUMBER: ${{ inputs.pr-number }}
           MAX: ${{ inputs.max-attempts }}
         run: |
-          ATTEMPTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" \
-            --jq '[.[] | select(.body | contains("<!-- review-fix-attempt -->"))] | length')
+          COMMENTS=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUMBER/comments")
+
+          ATTEMPTS=$(echo "$COMMENTS" \
+            | jq -s 'add | [.[] | select(.body | contains("<!-- review-fix-attempt -->"))] | length')
+
+          # 已升級過就閉嘴。沒有這道檢查的話，達上限後每一次 changes_requested
+          # 都會再貼一則 🚨 —— 這條路徑原本連 cooldown 都沒有，洗版更嚴重。
+          ESCALATED=$(echo "$COMMENTS" \
+            | jq -s 'add | [.[] | select(.body | contains("<!-- review-fix-escalated -->"))] | length')
+
           echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
 
-          if [ "$ATTEMPTS" -ge "$MAX" ]; then
+          if [ "$ESCALATED" -gt "0" ]; then
+            echo "action=done" >> $GITHUB_OUTPUT
+            echo "Already escalated to human — staying quiet."
+          elif [ "$ATTEMPTS" -ge "$MAX" ]; then
             echo "action=escalate" >> $GITHUB_OUTPUT
             echo "Review fix limit reached ($ATTEMPTS/$MAX) — escalating."
           else
@@ -86,7 +98,7 @@ jobs:
           REVIEW_URL: ${{ inputs.review-url }}
           MAX: ${{ inputs.max-attempts }}
         run: |
-          BODY=$(printf '🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動循環已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。' \
+          BODY=$(printf '<!-- review-fix-escalated -->\n🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動循環已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。\n\n> 本 PR 之後的 changes_requested 不會再自動留言。想重啟自動修正，請刪掉這則留言。' \
             "$MAX" "$PR_AUTHOR" "$REVIEWER" "$MAX" "$REVIEW_URL")
           gh pr comment "$PR_NUMBER" \
             --repo "${{ github.repository }}" \

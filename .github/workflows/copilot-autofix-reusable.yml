@@ -29,6 +29,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write     # 貼 needs-human-review label 需要（label API 屬於 Issues 權限）
   contents: read
   actions: read
 
@@ -76,19 +77,32 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           # 計算已發出的 auto-fix 請求數（用隱藏 HTML marker 標記）
-          ATTEMPTS=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
-            --jq '[.[] | select(.body | contains("<!-- auto-fix-attempt -->"))] | length')
+          # 一次抓完留言，後面全部就地過濾（省 API 呼叫，也避免三次查詢之間有新留言插進來）
+          COMMENTS=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments")
+
+          ATTEMPTS=$(echo "$COMMENTS" \
+            | jq -s 'add | [.[] | select(.body | contains("<!-- auto-fix-attempt -->"))] | length')
 
           # Cooldown：同一個 commit 的 CI 和 Security 可能在數秒內相繼失敗
           # 15 分鐘內已有 fix request 就跳過，避免重複觸發兩次
           CUTOFF=$(date -u -d '15 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
-          RECENT=$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
-            --jq "[.[] | select(.body | contains(\"<!-- auto-fix-attempt -->\"))
-                       | select(.created_at >= \"$CUTOFF\")] | length")
+          RECENT=$(echo "$COMMENTS" \
+            | jq -s --arg cutoff "$CUTOFF" 'add | [.[]
+                | select(.body | contains("<!-- auto-fix-attempt -->"))
+                | select(.created_at >= $cutoff)] | length')
+
+          # 已經升級過就不要再貼一次。升級留言本身不含 auto-fix-attempt marker，
+          # 所以上面的 cooldown 擋不住它 —— 沒有這道檢查的話，達上限後「每一次」
+          # CI 失敗都會再貼一則 🚨 並重新 @ 人，PR 會被洗版。
+          ESCALATED=$(echo "$COMMENTS" \
+            | jq -s 'add | [.[] | select(.body | contains("<!-- auto-fix-escalated -->"))] | length')
 
           echo "attempts=$ATTEMPTS" >> $GITHUB_OUTPUT
 
-          if [ "$RECENT" -gt "0" ]; then
+          if [ "$ESCALATED" -gt "0" ]; then
+            echo "action=done" >> $GITHUB_OUTPUT
+            echo "Already escalated to human — staying quiet."
+          elif [ "$RECENT" -gt "0" ]; then
             echo "action=cooldown" >> $GITHUB_OUTPUT
             echo "Cooldown: fix request posted in last 15 min — skipping duplicate."
           elif [ "$ATTEMPTS" -ge "$MAX" ]; then
@@ -143,7 +157,7 @@ jobs:
           RUN_URL: ${{ inputs.run-url }}
           MAX: ${{ inputs.max-attempts }}
         run: |
-          BODY=$(printf '🚨 **自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試自動修正 %s 次，但 **%s** 仍然失敗，自動循環已停止。\n\n最後失敗的 run：%s\n\n請人工排查並修正，或重新評估此 PR 的修正方向。' \
+          BODY=$(printf '<!-- auto-fix-escalated -->\n🚨 **自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試自動修正 %s 次，但 **%s** 仍然失敗，自動循環已停止。\n\n最後失敗的 run：%s\n\n請人工排查並修正，或重新評估此 PR 的修正方向。\n\n> 本 PR 之後的 CI 失敗不會再自動留言。處理完想重啟自動修正，請刪掉這則留言。' \
             "$MAX" "$PR_AUTHOR" "$MAX" "$WORKFLOW_NAME" "$RUN_URL")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \

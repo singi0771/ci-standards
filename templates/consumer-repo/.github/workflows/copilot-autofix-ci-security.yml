@@ -10,6 +10,7 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會靜默 403）
   contents: read
   actions: read
 
