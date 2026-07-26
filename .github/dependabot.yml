@@ -1,0 +1,16 @@
+# 本 repo 只有 GitHub Actions 相依（沒有 pip / docker）
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    cooldown:
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
+      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
+      default-days: 7
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-all:
+        patterns: ["*"]     # 全部併成一個 PR，避免每週開一堆 PR 塞爆通知

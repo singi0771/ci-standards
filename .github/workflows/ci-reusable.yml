@@ -8,10 +8,30 @@ on:
       python-version:
         type: string
         default: "3.12"
+      run-python:
+        description: "是否跑 Python lint + test（非 Python 專案設 false）"
+        type: boolean
+        default: true
       run-docker-build:
         description: "是否驗證 Docker image 能建置"
         type: boolean
         default: true
+      run-actionlint:
+        description: "是否檢查 GitHub Actions workflow 語法（含 run: 區塊的 shellcheck）"
+        type: boolean
+        default: false
+      run-shellcheck:
+        description: "是否用 shellcheck 檢查 shell script"
+        type: boolean
+        default: false
+      shellcheck-paths:
+        description: "要檢查的 shell script glob（空字串＝自動找全 repo 的 *.sh）"
+        type: string
+        default: ""
+      actionlint-paths:
+        description: "額外要檢查的 workflow 檔（空字串＝只檢查本 repo 的 .github/workflows）"
+        type: string
+        default: ""
       ruff-version:
         description: "釘死的 ruff 版本，避免 lint 隨新版 ruff 漂移（要升級在此改）"
         type: string
@@ -25,23 +45,38 @@ jobs:
     name: Python lint + test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    if: ${{ inputs.run-python }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ inputs.python-version }}
           cache: "pip"
       - name: Install deps
+        env:
+          RUFF_VERSION: ${{ inputs.ruff-version }}
         run: |
           python -m pip install --upgrade pip
           # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改碼的 repo 突然變紅
-          pip install "ruff==${{ inputs.ruff-version }}" pytest
+          pip install "ruff==$RUFF_VERSION" pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then pip install -e . || true; fi
       - name: Lint (ruff)
         run: ruff check .
       - name: Test (pytest)
-        run: pytest -q
+        run: |
+          set +e
+          pytest -q
+          EXIT=$?
+          set -e
+          # pytest 的 exit 5 = 「沒收集到任何測試」。還沒開始寫測試的專案不該因此
+          # 永遠紅著（那只會逼人把 CI 關掉）。真正的測試失敗是 exit 1，照樣擋。
+          if [ "$EXIT" -eq 5 ]; then
+            echo "⚠️  沒有找到任何測試 —— 通過，但這個專案應該補上測試。"
+            echo "⚠️ 沒有任何測試" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$EXIT" -ne 0 ]; then
+            exit "$EXIT"
+          fi
 
   docker-build:
     name: Docker build check
@@ -49,11 +84,103 @@ jobs:
     timeout-minutes: 15
     if: ${{ inputs.run-docker-build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build image (不推送，只驗證能 build)
+        env:
+          # 一律先過 env 再進 shell，不要把 ${{ }} 直接插進 run: 字串（shell injection）
+          SHA: ${{ github.sha }}
         run: |
           if [ -f Dockerfile ]; then
-            docker build -t ci-check:${{ github.sha }} .
+            docker build -t "ci-check:$SHA" .
           else
             echo "沒有 Dockerfile，略過"
           fi
+
+  # workflow 語法檢查。對「邏輯大多寫在 workflow 的 run: 區塊裡」的 repo 特別有用——
+  # actionlint 的 docker image 內建 shellcheck，會連 run: 裡的 bash 一起檢查。
+  actionlint:
+    name: Workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ inputs.run-actionlint }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run actionlint
+        env:
+          EXTRA_PATHS: ${{ inputs.actionlint-paths }}
+        run: |
+          # 釘版本，理由同其他掃描器：latest 升版會新增規則，沒改碼也可能突然變紅。
+          IMAGE=rhysd/actionlint:1.7.12
+
+          # 不帶檔案參數時 actionlint 會自動掃 .github/workflows；
+          # 一旦給了檔案參數就「只」檢查那些檔案，所以額外路徑必須分開跑一次。
+          docker run --rm -v "$PWD:/repo" -w /repo "$IMAGE" -color
+
+          if [ -n "$EXTRA_PATHS" ]; then
+            # shellcheck disable=SC2086  # 要讓 glob / 多路徑展開成多個參數
+            docker run --rm -v "$PWD:/repo" -w /repo "$IMAGE" -color $EXTRA_PATHS
+          fi
+
+  shellcheck:
+    name: Shell lint (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ inputs.run-shellcheck }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run shellcheck
+        env:
+          PATHS: ${{ inputs.shellcheck-paths }}
+        run: |
+          # ubuntu-latest runner 內建 shellcheck，不必另外安裝
+          if [ -n "$PATHS" ]; then
+            # shellcheck disable=SC2086
+            shellcheck $PATHS
+          else
+            mapfile -t FILES < <(find . -path ./.git -prune -o -name '*.sh' -print)
+            if [ "${#FILES[@]}" -eq 0 ]; then
+              echo "沒有 .sh 檔，略過"; exit 0
+            fi
+            printf '檢查：%s\n' "${FILES[@]}"
+            shellcheck "${FILES[@]}"
+          fi
+
+  # 彙總守門員：分支保護「只需要求 ci / CI Gate 這一個」status check。
+  # 不要把 docker-build 直接設成 required —— 它有 if 條件，run-docker-build=false 時
+  # 會變 skipped、required check 永遠不回報 → PR 永久卡住。
+  # 未來 ci-reusable 新增 job 時，記得加進下面的 needs（否則該 job 形同虛設）。
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [python, docker-build, actionlint, shellcheck]
+    if: ${{ always() }}
+    steps:
+      - name: Evaluate all CI results
+        env:
+          PYTHON: ${{ needs.python.result }}
+          DOCKER: ${{ needs.docker-build.result }}
+          ACTIONLINT: ${{ needs.actionlint.result }}
+          SHELLCHECK: ${{ needs.shellcheck.result }}
+        run: |
+          {
+            echo "## 🧪 CI Gate 結果"
+            echo ""
+            echo "| 檢查 | 結果 |"
+            echo "| --- | --- |"
+            echo "| Python lint + test | $PYTHON |"
+            echo "| Docker build check | $DOCKER |"
+            echo "| Workflow lint (actionlint) | $ACTIONLINT |"
+            echo "| Shell lint (shellcheck) | $SHELLCHECK |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          FAIL=0
+          # 所有子 job 都可能因 input 關掉而 skipped，一律「只有 failure 才擋」。
+          # 別寫成 != success，否則關掉某項檢查會讓 Gate 永遠失敗。
+          for r in "$PYTHON" "$DOCKER" "$ACTIONLINT" "$SHELLCHECK"; do
+            case "$r" in failure|cancelled) FAIL=1 ;; esac
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo "❌ CI Gate 未通過" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "✅ CI Gate 通過" >> "$GITHUB_STEP_SUMMARY"

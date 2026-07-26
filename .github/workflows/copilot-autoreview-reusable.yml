@@ -17,6 +17,10 @@ on:
         description: "觸發本次的 workflow 名稱（CI 或 Security Scan），用來決定要檢查另一條"
         type: string
         required: true
+      max-review-requests:
+        description: "每個 PR 最多請 Copilot 審幾次（防止 Copilot 自己 commit → 又觸發 → 無限燒 credits）"
+        type: string
+        default: "3"
 
 permissions:
   pull-requests: write
@@ -27,6 +31,15 @@ jobs:
   copilot-gate:
     name: Request Copilot Review & Fix
     runs-on: ubuntu-latest
+
+    # CI 與 Security 常在數秒內相繼完成，兩邊都會呼叫本 workflow。若同時跑，
+    # 兩邊的 guard 會同時看到「還沒請過審」→ 重複請審 + 重複留言。
+    # 用同一個 concurrency group 把同一 SHA 的兩次呼叫排隊（不是取消），
+    # 後到的那次就能看到前一次留下的 marker 而正確跳過。
+    concurrency:
+      group: copilot-autoreview-${{ github.repository }}-${{ inputs.head-sha }}
+      cancel-in-progress: false
+
     steps:
       # 1) 確認另一條 workflow 也對同一個 SHA 通過了
       - name: Verify both CI and Security Scan passed for this SHA
@@ -35,6 +48,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ inputs.head-sha }}
+          HEAD_BRANCH: ${{ inputs.head-branch }}
           TRIGGERED_BY: ${{ inputs.triggered-by }}
         run: |
           if [ "$TRIGGERED_BY" = "CI" ]; then
@@ -44,19 +58,23 @@ jobs:
           fi
           echo "Triggered by: $TRIGGERED_BY — checking: $CHECK_WORKFLOW for SHA $HEAD_SHA"
 
+          # --branch + --limit 很重要：gh run list 預設只回傳最近 20 筆，repo 一忙
+          # 目標 SHA 的 run 就會掉出視窗 → 靜默 skip，看起來像「gate 沒反應」。
           OTHER_OK=$(gh run list \
             --repo "$GH_REPO" \
             --workflow "$CHECK_WORKFLOW" \
+            --branch "$HEAD_BRANCH" \
+            --limit 100 \
             --json headSha,conclusion \
             --jq ".[] | select(.headSha == \"$HEAD_SHA\" and .conclusion == \"success\") | .headSha" \
             | head -1)
 
           if [ "$OTHER_OK" = "$HEAD_SHA" ]; then
             echo "Both workflows passed for $HEAD_SHA — proceeding."
-            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "$CHECK_WORKFLOW hasn't passed for $HEAD_SHA yet. Skipping."
-            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
       # 2) 找到這個 branch 對應的開放 PR
@@ -69,22 +87,64 @@ jobs:
           HEAD_BRANCH: ${{ inputs.head-branch }}
         run: |
           BRANCH="$HEAD_BRANCH"
-          NUMBER=$(gh pr list \
+          PR_JSON=$(gh pr list \
             --repo "$GH_REPO" \
             --head "$BRANCH" \
             --state open \
-            --json number \
-            --jq '.[0].number // empty')
-          if [ -z "$NUMBER" ]; then
-            echo "No open PR for branch '$BRANCH' (direct push to main or schedule run) — skipping."
-          else
-            echo "Found PR #$NUMBER for branch $BRANCH"
-          fi
-          echo "number=$NUMBER" >> $GITHUB_OUTPUT
+            --json number,author)
+          NUMBER=$(echo "$PR_JSON" | jq -r '.[0].number // empty')
+          AUTHOR=$(echo "$PR_JSON" | jq -r '.[0].author.login // empty')
 
-      # 3) Request Copilot code review
-      - name: Request Copilot code review
+          # 跟 autofix 一致：Dependabot PR 不進 Copilot 迴圈。
+          # 每週 5 個 Dependabot PR 全綠後各燒一次 code review + coding agent，純浪費 credits。
+          if [ -n "$NUMBER" ] && [[ "$AUTHOR" == *"dependabot"* ]]; then
+            echo "Dependabot PR #$NUMBER — skipping Copilot review."
+            NUMBER=""
+          fi
+
+          if [ -z "$NUMBER" ]; then
+            echo "No eligible open PR for branch '$BRANCH' (direct push to main / schedule / Dependabot) — skipping."
+          else
+            echo "Found PR #$NUMBER by @$AUTHOR"
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      # 3) 次數上限 + 同 SHA 去重
+      - name: Guard — dedupe by SHA and cap total review requests
+        id: guard
         if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+          MAX: ${{ inputs.max-review-requests }}
+        run: |
+          COMMENTS=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments")
+
+          # 同一個 SHA 已經請過審就不再請（concurrency 排隊後，後到的那次會走到這裡）
+          SAME_SHA=$(echo "$COMMENTS" | jq -s --arg m "<!-- auto-review-request:$HEAD_SHA -->" \
+            'add | [.[] | select(.body | contains($m))] | length')
+
+          # 總次數上限。Copilot 依審查意見 commit → 新 SHA → CI/Security 又全綠 → 又請審，
+          # 這條迴圈本身沒有終點；沒有上限的話 credits 會一路燒到 PR 關掉為止。
+          TOTAL=$(echo "$COMMENTS" \
+            | jq -s 'add | [.[] | select(.body | contains("<!-- auto-review-request:"))] | length')
+
+          if [ "$SAME_SHA" -gt "0" ]; then
+            echo "action=skip" >> "$GITHUB_OUTPUT"
+            echo "Already requested review for $HEAD_SHA — skipping duplicate."
+          elif [ "$TOTAL" -ge "$MAX" ]; then
+            echo "action=capped" >> "$GITHUB_OUTPUT"
+            echo "Review request cap reached ($TOTAL/$MAX) — staying quiet."
+          else
+            echo "action=review" >> "$GITHUB_OUTPUT"
+            echo "Review request $((TOTAL + 1))/$MAX for $HEAD_SHA."
+          fi
+
+      # 4) Request Copilot code review
+      - name: Request Copilot code review
+        if: ${{ steps.guard.outputs.action == 'review' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -97,15 +157,20 @@ jobs:
             && echo "Copilot review requested." \
             || echo "Warning: Copilot review API call failed. Check repo Copilot settings."
 
-      # 4) @copilot 觸發 coding agent（用 printf 避免 YAML block 縮排問題）
+      # 5) @copilot 觸發 coding agent（用 printf 避免 YAML block 縮排問題）
       - name: Trigger Copilot coding agent
-        if: ${{ steps.pr.outputs.number != '' }}
+        if: ${{ steps.guard.outputs.action == 'review' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ inputs.head-sha }}
         run: |
-          BODY=$(printf '🤖 **CI & Security Gate 全部通過。**\n\n@copilot 請審閱此 PR 的程式碼品質、安全性與最佳實踐（含邏輯正確性、錯誤處理、命名清晰度）。若發現任何問題，請直接修正後 commit。確認無問題後請 approve 此 PR，才開放人工 Merge。')
+          # 不要叫 Copilot「approve 此 PR」——Copilot code review 送出的是 COMMENT 類型的
+          # review，它不會（也不能）approve。寫成那樣只會讓人等一個永遠不會出現的 approval。
+          # shellcheck disable=SC2016  # 單引號內的反引號是 Markdown 語法，不是命令替換
+          BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`）\n\n@copilot 請審閱此 PR 的程式碼品質、安全性與最佳實踐（含邏輯正確性、錯誤處理、命名清晰度）。若發現任何問題，請直接修正後 commit。\n\n審查意見處理完畢後，由人工確認並 Merge。' \
+            "$HEAD_SHA" "$HEAD_SHA")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \
             --body "$BODY"

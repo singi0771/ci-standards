@@ -22,3 +22,4 @@ jobs:
       head-sha:     ${{ github.event.workflow_run.head_sha }}
       head-branch:  ${{ github.event.workflow_run.head_branch }}
       triggered-by: ${{ github.event.workflow_run.name }}
+      # max-review-requests: "3"   # 每個 PR 最多請 Copilot 審幾次（防止無限迴圈燒 credits）

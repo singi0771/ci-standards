@@ -1,0 +1,22 @@
+# 薄殼（本 repo 自用）：CI 與 Security 都對同一 SHA 通過 → 請 Copilot 審。
+# workflow_run 觸發器只認 default branch，合併進 main 後才生效。
+name: Copilot Auto Review
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security Scan"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+  actions: read
+
+jobs:
+  autoreview:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: ./.github/workflows/copilot-autoreview-reusable.yml
+    with:
+      head-sha:     ${{ github.event.workflow_run.head_sha }}
+      head-branch:  ${{ github.event.workflow_run.head_branch }}
+      triggered-by: ${{ github.event.workflow_run.name }}

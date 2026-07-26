@@ -49,8 +49,13 @@ git tag v2 && git push origin v2         # 破壞性變更：開新 tag 並公�
 ### 改動公版的自我檢查
 
 - [ ] 有沒有改到 input 名稱或 job 名稱？（會打壞既有 repo 的 ruleset → 該開 v2）
-- [ ] 新增的 job 有沒有加進 `security-gate` 的 `needs`？（沒加＝這個掃描不會擋門，形同虛設）
+- [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋門，形同虛設）
 - [ ] 新 action 有沒有釘版本？（不要用 `@master` / `@main`，供應鏈風險）
+- [ ] 新 **container image** 有沒有釘版本？（`semgrep/semgrep`、`ghcr.io/gitleaks/gitleaks` 都用 `:latest`
+      的話，沒改碼的 repo 會隨上游新規則突然變紅，也是供應鏈風險）
+- [ ] 有 `if` 條件的新 job **不要**設成 required check（skipped 的 check 永遠不回報 → PR 卡死），
+      只把它加進 gate 的 `needs`，由 gate 判斷 skipped 算過
+- [ ] 掃描工具「執行失敗」有沒有被當成「通過」？（下載用 `curl --fail` + 跑前先驗 `--version`）
 - [ ] 先在一個專案用 `@main` 試跑過，再移動 `v1`
 
 ---
@@ -70,6 +75,27 @@ git tag v2 && git push origin v2         # 破壞性變更：開新 tag 並公�
 1. Org → Settings → Copilot → Policies → 確認 **Copilot coding agent** 已啟用
 2. 開 Issue → 右側 Assignees **指派給 Copilot**
 3. Copilot 先跑該 repo 的 `copilot-setup-steps.yml` 準備環境，再修碼、跑測試、開 PR
+
+### ⚠️ 導入第一步：先驗證 Copilot 吃不吃 Actions 貼的 `@copilot`
+
+三支 `copilot-auto*` 的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言。
+這則留言的作者是 `github-actions[bot]` —— **GitHub 對「bot 觸發 bot」有防迴圈限制**，
+Copilot Coding Agent 到底會不會回應機器人發的留言，是整套自動修復閉環能不能成立的前提。
+
+**開 ruleset、調 `max-attempts` 之前，先花十分鐘實測**：
+
+1. 開一個 PR，故意讓 CI 失敗（例如塞一行 lint 錯誤）
+2. 等 `Copilot Autofix — CI/Security` 跑完，確認 PR 上出現 `@copilot` 留言
+3. **看 Copilot 有沒有真的動工**（開始 commit、或出現 agent session）
+
+沒反應的話，改用 fine-grained PAT 或 GitHub App token：
+
+- 在 org 建一個 secret（例如 `COPILOT_TRIGGER_TOKEN`），權限只要 PR / Issues 讀寫
+- 公版 reusable 加上 `secrets:` 區塊接收（**不能用 `secrets: inherit`**，那會造成
+  `startup_failure`，見 commit `c19ff64`），把 `GH_TOKEN` 換成該 secret
+- Repo → Settings → Actions → General 勾選 **Allow GitHub Actions to create and approve pull requests**
+
+沒驗證這一點就往下調參數，等於在調一台還沒確認會不會發動的引擎。
 
 ### 讓 Copilot 真的修得動的關鍵
 
@@ -128,7 +154,8 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 
 - `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘
 - schedule 從每週改每月（改呼叫端 `security.yml` 的 cron）
-- caller 已設 `paths-ignore: ["**/*.md", "docs/**"]`，改文件不會觸發掃描
+- caller 的 **`push: main`** 有 `paths-ignore: ["**/*.md", "docs/**"]`，直接推文件到 main 不會觸發掃描
+  （**`pull_request` 刻意不加** —— 加了會讓純文件 PR 的 required check 永遠 pending、PR 卡死）
 - caller 已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
 
 ---

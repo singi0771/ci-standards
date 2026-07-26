@@ -9,10 +9,17 @@ on:
 
 permissions:
   pull-requests: write
+  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會靜默 403）
 
 jobs:
   autofix-review:
     # review 要求變更、且非 Dependabot PR 才呼叫公版
+    #
+    # 注意：這條路徑實務上是給「真人 reviewer 按 Request changes」用的。
+    # Copilot code review 送出的是 COMMENT 類型 review（state = commented），
+    # 不會是 changes_requested，所以不會走到這裡 —— 這是刻意的：
+    # copilot-autoreview-gate 貼的留言已經要求 Copilot「發現問題就直接修正後 commit」，
+    # 若這裡再接 commented，兩邊會互相觸發成無窮迴圈。
     if: >
       github.event.review.state == 'changes_requested' &&
       !contains(github.event.pull_request.user.login, 'dependabot')
