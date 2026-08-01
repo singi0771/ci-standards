@@ -69,11 +69,14 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
 
-> 🟡 **「修」這一格能動，但目前**無法自動觸發**。實測（2026-08-01）：
-> 手動「開 Issue → 指派 Copilot」→ 立刻開出 PR ✅；
-> 但 Actions 貼的 `@copilot` 留言喚不醒它（GitHub 的 bot 防迴圈限制）❌。
-> **導入時請把「修」當成手動一步**，解法與排查見
-> [已知限制](docs/KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。
+> 🔴 **「修」這一格有兩道關卡還沒開通**（2026-08-01 實測）：
+>
+> 1. **Copilot 開的 PR，其 CI/Security run 卡在 `action_required`** → required check 永遠不回報
+>    → **那個 PR 永遠 merge 不了**，除非有人手動按 Approve and run。這條要先解。
+> 2. Actions 貼的 `@copilot` 留言喚不醒 Agent（GitHub 的 bot 防迴圈限制）→ 只能人工開 Issue 起頭。
+>
+> Agent 本身是好的（指派 Issue → 立刻開 PR ✅），Code Review 也正常 ✅。
+> **導入時請把「修」當成手動一步**，排查步驟見 [已知限制](docs/KNOWN-LIMITATIONS.md)。
 
 > **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
 > 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，

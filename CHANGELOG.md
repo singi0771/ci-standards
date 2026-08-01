@@ -19,7 +19,9 @@
 
   補測（2026-08-01）：**Copilot Coding Agent 其實是可用的** —— 指派 Issue 會立刻開出 PR。
   7/26 那次「直接指派到人類的 PR」是無效測試（不是官方觸發入口），因此一度誤判為方案／
-  policy 問題。問題現已收斂為單一原因：`github-actions[bot]` 貼的 `@copilot` 喚不醒 Agent。
+  policy 問題。問題現已收斂為兩點：`github-actions[bot]` 貼的 `@copilot` 喚不醒 Agent；
+  以及 **Copilot 開的 PR，其 CI/Security run 全部卡在 `action_required`**
+  → required check 永遠不回報 → 那個 PR 永遠 merge 不了。後者才是自動修真正的擋路石。
 - `docs/MIGRATION-TO-ORG.md` —— 搬到組織的完整 checklist。
 - `CONTRIBUTING.md`、`SECURITY.md`、`LICENSE`、`CHANGELOG.md`、`.github/CODEOWNERS`
 - `.github/pull_request_template.md` —— 本 repo 自己的 PR 檢查清單（原本只有給 consumer 的範本）

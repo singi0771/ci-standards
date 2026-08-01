@@ -8,8 +8,8 @@
 
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
+| [Copilot 開的 PR 其 CI 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | 🔴 **Copilot 的 PR 永遠 merge 不了**（required check 不回報） | 改 repo 的 Actions 核准設定 —— **這條要先解** |
 | [Copilot Coding Agent 不回應 Actions 貼的 `@copilot`](#copilot-coding-agent-對-actions-貼的-copilot-沒有反應) | 「自動修」的**自動觸發**那一步 | Agent 本身可用 —— 改成手動「開 Issue 指派 Copilot」即可 |
-| [Copilot 觸發的 workflow 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | Copilot 開的 PR 可能不跑 CI | 改 repo 的 Actions 核准設定 |
 | [`upload-sarif: true` 尚未驗證可用](#upload-sarif-true-尚未驗證可用) | Security 分頁整合 | 維持 `false`，用 artifact |
 | [只有 Python 的 lint/test](#ci-reusable-只內建-python-的-linttest) | 非 Python 專案 | `run-python: false` + 自己補一支 |
 
@@ -128,15 +128,46 @@ PR 留言裡的隱藏 marker 計數，改開 Issue 就要改成用 label 或 Iss
 
 ## Copilot 觸發的 workflow run 會卡在 `action_required`
 
-**狀態：🟡 有解，但要改 repo 設定**
+**狀態：🔴 已證實，且這是「自動修」真正的擋路石**
 
-canary 測試中，Copilot 送出 code review 之後觸發的 `Copilot Autofix — Review` run
-停在 `action_required`（要人按 **Approve and run**），不會自己執行。
+### 實測
 
-**影響範圍比看起來大**：這代表**任何由 Copilot 活動觸發的 workflow run 都可能需要人工核准**。
-真正麻煩的不是這支 workflow（它吃 `changes_requested`，而 Copilot 只送 COMMENT，實務上不會走到），
-而是**未來 Copilot Coding Agent 開的 PR** —— 那些 PR 的 CI / Security run 若也卡在 `action_required`，
-Gate 就形同停擺，自動修好的 PR 永遠不會變綠。
+| 日期 | 情境 | 結果 |
+|---|---|---|
+| 2026-07-26 | Copilot 送出 code review → 觸發 `Copilot Autofix — Review` | `action_required` |
+| 2026-08-01 | **Copilot Coding Agent 開的 PR #6** → 觸發 `CI` 與 `Security Scan` | **兩支、兩次推送共 4 個 run 全部 `action_required`** |
+
+`action_required` 代表 run 建立了但**沒有執行**，要人到 Actions 分頁按 **Approve and run**。
+
+### 為什麼這條比 bot mention 那條更嚴重
+
+原本以為麻煩的是 `Copilot Autofix — Review`（實務上走不到，因為 Copilot 只送 COMMENT）。
+2026-08-01 的測試顯示真正的問題在別的地方：
+
+**Copilot Coding Agent 開的 PR，它的 `ci / CI Gate` 與 `security / Security Gate` 永遠不會自己跑。**
+而這兩個正是分支保護的 required check —— 也就是說：
+
+```
+Copilot 修好 → 開 PR → CI 卡在 action_required → required check 永遠不回報
+   → PR 永遠 merge 不了，除非有人手動按 Approve and run
+```
+
+「自動修」省下的那點人力，被「每個 Copilot PR 都要人去按一次核准」吃掉了。
+**先解這條，再去解 [bot mention](#copilot-coding-agent-對-actions-貼的-copilot-沒有反應) 那條** ——
+順序反了的話，只會得到一堆卡在 `action_required` 的自動 PR。
+
+### 排查
+
+1. Repo → Settings → Actions → General → **Approval for running fork pull request workflows**
+   /「Require approval for ...」那組設定 —— 目前的設定把 Copilot 歸類成需要核准的一方
+2. 放寬到最低必要的層級（例如只對真正的 first-time outside contributor 要求核准）
+3. **驗證方式**：重新指派一個小 Issue 給 Copilot，看它開的 PR 的 CI 會不會自己跑起來。
+   PR #6 就是現成的樣本 —— 到它的 Actions run 按一次 Approve and run，
+   確認按下去之後 Gate 會正常變綠（先確認「只是被擋住」而不是「另有問題」）
+
+> 這是安全性與自動化的權衡，不是純技術問題。放寬之後，fork 來的 PR 也更容易跑到你的 Actions。
+> 決定前先確認 repo 可見性與 spending limit（Actions 應設 $0，見 [SETUP §D](SETUP.md#d-額度與帳務)）。
+> 若不願意放寬，就接受「Copilot 的 PR 要人按一次核准」，並把它寫進團隊的日常流程。
 
 **排查：**
 
