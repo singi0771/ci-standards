@@ -127,8 +127,8 @@ jobs:
       python-version: "3.12"
       severity: "CRITICAL,HIGH"
       fail-on-findings: true
-      scan-docker-image: true    # 有 Dockerfile 才開
-      upload-sarif: false        # private 且無 GHAS → 保持 false
+      scan-docker-image: false   # 有 Dockerfile 才改 true（會多吃 2–3 分鐘）
+      upload-sarif: false        # 保持 false，見「已知限制」
 ```
 
 **② `ci.yml` 的 `uses:`**

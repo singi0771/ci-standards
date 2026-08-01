@@ -25,5 +25,7 @@ jobs:
       python-version: "3.12"
       severity: "CRITICAL,HIGH"
       fail-on-findings: true
-      scan-docker-image: true    # 有 Dockerfile 才開；沒有就設 false（會多吃 2-3 分鐘）
+      # 範本預設 false（與公版預設一致）。有 Dockerfile 才改成 true ——
+      # 沒有 Dockerfile 時公版雖然會快速略過，但仍會起一個 job 白吃 Actions 分鐘。
+      scan-docker-image: false
       upload-sarif: false        # private 且無 GHAS → 保持 false；若改 public 可設 true
