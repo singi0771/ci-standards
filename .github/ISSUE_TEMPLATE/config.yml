@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 我的 CI 紅了怎麼辦
+    url: https://github.com/singi0771/ci-standards#疑難排解
+    about: 先查 README 疑難排解；常見症狀與解法都在裡面
+  - name: 回報安全弱點
+    url: https://github.com/singi0771/ci-standards/security/advisories/new
+    about: 請透過 GitHub Security Advisories 私下回報，不要開公開 Issue（詳見 SECURITY.md）
