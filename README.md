@@ -9,6 +9,7 @@
 
 ## 目錄
 
+0. **[已知限制（導入前先看）](docs/KNOWN-LIMITATIONS.md)** —— 哪些功能實測過但還不能用
 1. [運作原理（先看這個）](#運作原理先看這個)
 2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
@@ -37,10 +38,15 @@
                                            └─ 🛡️ Security Gate ←彙總，分支保護只認這個
 
 .github/workflows/ci.yml        ──呼叫──▶ ci-reusable.yml
-   jobs.ci:                                ├─ Python lint + test
-     uses: ...@v1                          ├─ Docker build check ←可選
+   jobs.ci:                                ├─ Python lint + test    ←可選
+     uses: ...@v1                          ├─ Docker build check    ←可選
+     with: { ... }                         ├─ Workflow lint (actionlint) ←可選
+                                           ├─ Shell lint (shellcheck)    ←可選
                                            └─ 🧪 CI Gate ←彙總，分支保護只認這個
 ```
+
+> CI 的四項子檢查**每一項都可以獨立開關**（見[可調參數](#ci-reusableyml)）。
+> 全關掉也不會讓 Gate 變紅 —— Gate 只認 `failure` / `cancelled`，`skipped` 一律算過。
 
 **呼叫端只有十幾行、沒有邏輯**。要改掃描規則、加工具、升版本 —— 全部改這個 repo，不動任何專案。
 
@@ -63,6 +69,11 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
 
+> 🔴 **「修」這一格目前還沒驗證成功。** 2026-07-26 的實測中，Copilot Code Review（審）正常運作，
+> 但 Copilot Coding Agent（修）對 Actions 貼的 `@copilot` 沒有反應。
+> **導入時請先當成「掃描擋門 + Copilot 自動審 + 人工修」**，完整結果與排查步驟見
+> [已知限制](docs/KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。
+
 > **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
 > 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，
 > 而分支保護的 required approvals 若設成 1，Copilot 是**湊不出**那一票的（見[分支保護](#分支保護讓流程非過不可)）。
@@ -75,7 +86,7 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 | 項目 | 要求 |
 |---|---|
-| 語言 | Python（`ci-reusable.yml` 跑 ruff + pytest）。非 Python 見[常見情境](#專案不是-python) |
+| 語言 | Python 開箱即用（ruff + pytest）。非 Python 設 `run-python: false` 即可，見[常見情境](#專案不是-python) |
 | 本 repo 可見性 | 目前是 **public**，任何 repo 都能呼叫。若哪天改回 private，要到 Settings → Actions → General → Access 選 **Accessible from repositories in the organization** |
 | 目標 repo 權限 | 你要有 admin（才能設分支保護）；沒有的話第 5 步得請 owner 做 |
 
@@ -98,7 +109,7 @@ cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 | `workflows/copilot-autofix-review.yml` | Copilot review 要求變更 → 自動 @copilot 依意見修 | 不用改（需 Copilot Business） |
 | `workflows/copilot-autoreview-gate.yml` | CI+Security 全過 → 自動請 Copilot 審 + 觸發 coding agent | 不用改（需 Copilot Business） |
 | `dependabot.yml` | pip / docker / actions 每週自動更新 | 有前端再加 npm 區塊 |
-| `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，範本目前寫死 AdminAutoTools |
+| `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，前四段是待填的佔位符 |
 | `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
 
 > 三支 `copilot-auto*` workflow 是**選配的自動化閉環**，沒有 Copilot Business 也能複製過去（只是不會動）。細節見[下方說明](#自動修復閉環選配需-copilot-business)。
@@ -273,17 +284,37 @@ gh pr create
 | `severity` | string | `CRITICAL,HIGH` | Trivy 要擋下的嚴重度。可加 `MEDIUM` 收更嚴 |
 | `fail-on-findings` | boolean | `true` | `true`=掃到就擋 merge；`false`=只回報不擋（**導入初期過渡用**） |
 | `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，會多吃 2–3 分鐘 |
-| `upload-sarif` | boolean | `false` | 上傳到 Security 分頁。僅 public repo 或有 GHAS 可用；開啟時呼叫端 job 要自行加 `permissions: security-events: write` |
+| `upload-sarif` | boolean | `false` | 上傳到 Security 分頁。僅 public repo 或有 GHAS 可用。⚠️ **這條路徑尚未實測成功，請先維持 `false`** —— 詳見[已知限制](docs/KNOWN-LIMITATIONS.md#upload-sarif-true-尚未驗證可用) |
 
 ### `ci-reusable.yml`
 
 | 參數 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `python-version` | string | `3.12` | CI 的 Python 版本 |
+| `run-python` | boolean | `true` | 是否跑 ruff + pytest。**非 Python 專案設 `false`**，不必自己另寫一支 CI |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
+| `run-actionlint` | boolean | `false` | 檢查 GitHub Actions workflow 語法。actionlint 的 image 內建 shellcheck，會連 `run:` 區塊的 bash 一起檢查 |
+| `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
+| `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝） |
+| `shellcheck-paths` | string | `""` | 要檢查的 `.sh` glob。空字串＝自動找全 repo（找不到就略過） |
 | `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改碼的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
 
+> **`run-*` 全部關掉也不會卡住**：四個子 job 都可能因 input 而 `skipped`，CI Gate 只在 `failure` / `cancelled` 才擋。
+>
 > **lint 穩定性**：consumer 的 ruff 規則由**自己的 `pyproject.toml`**（`[tool.ruff.lint] select/ignore`）決定，公版只負責釘死 ruff 執行檔版本。兩者搭配才能讓 `ruff check` 結果可重現、不隨上游漂移。
+
+**「這個 repo 沒有 Python，主要內容是 workflow 與 script」的設定範例**（本 repo 自己就是這樣跑的，見 `.github/workflows/ci.yml`）：
+
+```yaml
+jobs:
+  ci:
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      run-python: false
+      run-docker-build: false
+      run-actionlint: true
+      run-shellcheck: true
+```
 
 ---
 
@@ -355,14 +386,36 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 這兩項是組織層級的一次性設定，細節見 [`docs/SETUP.md`](docs/SETUP.md)。
 
+> 本 repo 目前在個人帳號底下。**private repo 的 ruleset 需要 Pro 以上方案**，
+> 而組織可以用「一條 org ruleset 管所有 repo」，不必逐個跑腳本。
+> 建議在導入第 3 個專案之前搬到組織，見 [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md)。
+
 ---
 
 ## 常見情境客製
 
 ### 專案不是 Python
 
-`security-reusable.yml` 是語言無關的（Semgrep / Trivy / gitleaks / OSV 都自己認語言），**可以照用**。
-`ci-reusable.yml` 寫死 ruff + pytest，非 Python 專案就**別複製 `ci.yml`**，自己寫一支；或提個需求到本 repo，加一支 `ci-node-reusable.yml`。
+`security-reusable.yml` 是語言無關的（Semgrep / Trivy / gitleaks / OSV 都自己認語言），**照用即可**。
+
+`ci-reusable.yml` 也**照用**，只要把 Python 那段關掉：
+
+```yaml
+with:
+  run-python: false        # 不跑 ruff / pytest
+  run-docker-build: true   # 有 Dockerfile 就留著
+  run-actionlint: true     # workflow 語法 + run: 區塊的 bash
+  run-shellcheck: true     # shell script
+```
+
+這樣仍然會產出 `ci / CI Gate` 這個 check，分支保護的 ruleset 不必為了語言不同而各寫一套。
+
+**還需要語言原生的 lint / test（Node 的 eslint + jest、Go 的 go vet + go test…）時**，目前公版還沒有對應的 reusable。兩條路：
+
+1. 在該專案自己加一支 `ci-lang.yml`，**用不同的 job id**（例如 `node`），再把 `node / <job 名>` 一起加進 ruleset 的 required checks。
+2. 到本 repo 開 Issue 提需求，補一支 `ci-node-reusable.yml`（見 [CONTRIBUTING](CONTRIBUTING.md)）。
+
+> 走第 1 條時**不要**把 `ci.yml` 的 job id 也改掉 —— `ci / CI Gate` 是所有專案共用的 check 名稱，改了 ruleset 就要逐一客製，公版的意義就沒了。
 
 ### 沒有 Dockerfile
 
@@ -405,18 +458,24 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 ## 版本策略
 
+每次發佈都要打**兩個** tag：一個不可變的版本號、一個會移動的別名。
+
 ```bash
-git tag -f v1 && git push -f origin v1   # 小修：移動 v1，所有專案自動跟進
-git tag v2 && git push origin v2         # 破壞性變更：開新 tag，各專案自行升級
+git tag -a v1.2.0 -m "..." && git push origin v1.2.0   # 不可變：出事時的回滾點
+git tag -f v1 && git push -f origin v1                 # 會移動的別名：所有專案自動跟進
 ```
 
 | 情況 | 做法 |
 |---|---|
-| 修 bug、加掃描規則、升 action 版本 | 移動 `v1` |
-| 改 input 名稱 / 移除 input / 改 job 名稱 | 開 `v2`，公告後各專案自行改 `@v1` → `@v2` |
+| 修 bug、加掃描規則、升 action 版本、**新增有預設值的 input** | 打 `v1.x.y` + 移動 `v1` |
+| 改 input 名稱 / 移除 input / 改 job 名稱 | 打 `v2.0.0` + 開 `v2`，公告後各專案自行改 `@v1` → `@v2` |
 | 想吃最新未打 tag 的版本 | 呼叫端寫 `@main`（不建議用在正式專案） |
 
-> ⚠️ **改完公版一定要移動 tag**，否則指向 `@v1` 的專案完全不會有感覺。
+> ⚠️ **改完公版一定要移動 `v1`**，否則指向 `@v1` 的專案完全不會有感覺 —— main 領先 `v1` 好幾個 commit 卻沒人發現，是這套機制最容易出的事故。
+>
+> ⚠️ **只有會移動的 `v1` 是不夠的**。`v1` 移壞了就沒有「昨天的 v1」可退，所以每次都要留一個不可變的 `v1.x.y`。回滾＝把 `v1` 指回上一個版本號。
+
+發佈過哪些版本、每版改了什麼，記在 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -425,16 +484,37 @@ git tag v2 && git push origin v2         # 破壞性變更：開新 tag，各專
 ```
 ci-standards/
 ├── README.md                          ← 本文件
-├── .github/workflows/
-│   ├── security-reusable.yml          ← 安全公版（Semgrep+OSV+Trivy+gitleaks+Security Gate）
-│   ├── ci-reusable.yml                ← CI 公版（Python lint/test + Docker build）
-│   ├── copilot-autofix-reusable.yml        ← Copilot 自動修（CI/Security 失敗）邏輯
-│   ├── copilot-autofix-review-reusable.yml ← Copilot 自動修（依 review 意見）邏輯
-│   └── copilot-autoreview-reusable.yml     ← Copilot 自動審（雙綠請審 + 觸發 agent）邏輯
+├── CHANGELOG.md                       ← 發佈過哪些版本、每版改了什麼
+├── CONTRIBUTING.md                    ← 要改公版 / 要提需求的人看這裡
+├── SECURITY.md                        ← 弱點回報管道
+├── LICENSE
+│
+├── .github/                           ← ⚠️ 這裡有兩種東西，別搞混
+│   ├── workflows/
+│   │   │  ── ① 公版本體（給別人 uses: 呼叫的）──
+│   │   ├── security-reusable.yml          ← 安全公版（Semgrep+OSV+Trivy+gitleaks+Security Gate）
+│   │   ├── ci-reusable.yml                ← CI 公版（Python + Docker + actionlint + shellcheck）
+│   │   ├── copilot-autofix-reusable.yml        ← Copilot 自動修（CI/Security 失敗）邏輯
+│   │   ├── copilot-autofix-review-reusable.yml ← Copilot 自動修（依 review 意見）邏輯
+│   │   ├── copilot-autoreview-reusable.yml     ← Copilot 自動審（雙綠請審 + 觸發 agent）邏輯
+│   │   │
+│   │   │  ── ② 本 repo 自己的呼叫端（dogfooding，用 ./ 呼叫上面那些）──
+│   │   ├── ci.yml                         ← 自己跑 actionlint + shellcheck
+│   │   ├── security.yml                   ← 自己跑四項安全掃描
+│   │   ├── copilot-autofix-ci-security.yml
+│   │   ├── copilot-autofix-review.yml
+│   │   └── copilot-autoreview-gate.yml
+│   ├── copilot-instructions.md        ← 本 repo 自己的 Copilot 規範
+│   ├── pull_request_template.md       ← 本 repo 自己的 PR 檢查清單
+│   ├── CODEOWNERS
+│   └── dependabot.yml                 ← 本 repo 只有 github-actions 相依
+│
 ├── scripts/
 │   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset
 ├── docs/
 │   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
+│   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
+│   ├── MIGRATION-TO-ORG.md            ← 把本 repo 搬到組織底下的 checklist
 │   └── DEVSECOPS-NOTES.md             ← 為什麼不用 SonarQube/ZAP、工具取捨與導入順序
 └── templates/consumer-repo/.github/   ← 各專案要複製過去的「呼叫端」範本
     ├── dependabot.yml
@@ -475,3 +555,17 @@ ci-standards/
 - 全部工具皆開源免費，只消耗 GitHub Actions 分鐘
 
 更多取捨理由（含為什麼不建議把 SonarQube Community 當 PR gate）見 [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md)。
+
+---
+
+## 延伸閱讀
+
+| 文件 | 給誰看 |
+|---|---|
+| [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含排查步驟 |
+| [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
+| [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 管理者 —— 搬到組織底下的 checklist |
+| [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md) | 想知道工具怎麼選的人 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 要改公版、要提需求的人 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 想知道 `v1` 現在是什麼的人 |
+| [`SECURITY.md`](SECURITY.md) | 要回報弱點的人 |

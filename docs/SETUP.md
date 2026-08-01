@@ -13,6 +13,9 @@
 | 開 Copilot 自動修 / 自動審 | [§B](#b-啟用-copilot-兩個-agent) 本文 |
 | 分支保護開不起來 | [§C](#c-分支保護的方案前提) 本文 |
 | 控制花費 | [§D](#d-額度與帳務) 本文 |
+| 某個功能實測不會動 | [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) |
+| 把公版搬到組織底下 | [MIGRATION-TO-ORG.md](MIGRATION-TO-ORG.md) |
+| 改公版的流程與自我檢查 | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ---
 
@@ -39,12 +42,23 @@ git tag v1 && git push origin v1
 
 ⚠️ **一定要移動 tag，否則所有專案完全不會有感覺**（大家都指向 `@v1`）。
 
+每次發佈打**兩個** tag：不可變的版本號（回滾點）+ 會移動的別名（大家指向的）。
+
 ```bash
-git tag -f v1 && git push -f origin v1   # 小修：所有專案下次跑 CI 自動跟進
-git tag v2 && git push origin v2         # 破壞性變更：開新 tag 並公告
+git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變
+git tag -f v1 && git push -f origin v1                  # 移動別名
+git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞性變更
 ```
 
-判斷標準見 [README — 版本策略](../README.md#版本策略)。
+並在 [CHANGELOG.md](../CHANGELOG.md) 補上這一版。判斷標準見 [README — 版本策略](../README.md#版本策略)。
+
+> 🔴 **這是這套機制最容易出的事故**：改動合進 `main`，但忘了移 `v1`，
+> 於是 `main` 領先 `v1` 好幾個 commit 而沒有人發現 —— 新導入的專案拿到的其實是舊版，
+> 包含你以為早就修掉的 bug。**定期檢查**：
+>
+> ```bash
+> git log --oneline "$(git rev-list -n1 v1)"..origin/main   # 應該是空的
+> ```
 
 ### 改動公版的自我檢查
 
@@ -76,26 +90,28 @@ git tag v2 && git push origin v2         # 破壞性變更：開新 tag 並公�
 2. 開 Issue → 右側 Assignees **指派給 Copilot**
 3. Copilot 先跑該 repo 的 `copilot-setup-steps.yml` 準備環境，再修碼、跑測試、開 PR
 
-### ⚠️ 導入第一步：先驗證 Copilot 吃不吃 Actions 貼的 `@copilot`
+### 🔴 已實測：Coding Agent 目前不回應 Actions 貼的 `@copilot`
 
-三支 `copilot-auto*` 的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言。
-這則留言的作者是 `github-actions[bot]` —— **GitHub 對「bot 觸發 bot」有防迴圈限制**，
-Copilot Coding Agent 到底會不會回應機器人發的留言，是整套自動修復閉環能不能成立的前提。
+三支 `copilot-auto*` 的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言，
+作者是 `github-actions[bot]`。**這個前提在 2026-07-26 的 canary 實測中沒有成立**：
 
-**開 ruleset、調 `max-attempts` 之前，先花十分鐘實測**：
+| 觀察項 | 結果 |
+|---|---|
+| Gate 擋門、cooldown 去重、autoreview 去重 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
+| Copilot **Code Review**（自動審） | ✅ 會動 |
+| Copilot **Coding Agent**（自動修） | ❌ 對 `@copilot` 留言等 12 分鐘無反應 |
 
-1. 開一個 PR，故意讓 CI 失敗（例如塞一行 lint 錯誤）
-2. 等 `Copilot Autofix — CI/Security` 跑完，確認 PR 上出現 `@copilot` 留言
-3. **看 Copilot 有沒有真的動工**（開始 commit、或出現 agent session）
+**完整結果、無效測試的說明、以及三關排查步驟，見
+[KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。**
 
-沒反應的話，改用 fine-grained PAT 或 GitHub App token：
+排查的第一步不是換 token，而是**先確認 Coding Agent 到底有沒有開**：
+開一個小 Issue，Assignees 指派給 Copilot，看它會不會開 PR。
+這一關沒過，換 token 也不會有用 —— 引擎根本沒裝上去。
 
-- 在 org 建一個 secret（例如 `COPILOT_TRIGGER_TOKEN`），權限只要 PR / Issues 讀寫
-- 公版 reusable 加上 `secrets:` 區塊接收（**不能用 `secrets: inherit`**，那會造成
-  `startup_failure`，見 commit `c19ff64`），把 `GH_TOKEN` 換成該 secret
-- Repo → Settings → Actions → General 勾選 **Allow GitHub Actions to create and approve pull requests**
-
-沒驗證這一點就往下調參數，等於在調一台還沒確認會不會發動的引擎。
+> **在這件事解決之前照常導入，只是不要期待「自動修」。**
+> 「掃描擋門 + Copilot 自動審 + 人工修」這條線已經完整可用，
+> 三支 `copilot-auto*` 複製過去不會有害（沒反應而已，也不燒 credits），
+> 但**不要拿它們當導入成功的驗收標準**。
 
 ### 讓 Copilot 真的修得動的關鍵
 
@@ -162,6 +178,8 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 
 ## E. 每月檢視清單
 
+- [ ] **`v1` 有沒有落後 `main`**（`git log --oneline "$(git rev-list -n1 v1)"..origin/main` 應為空）
+      —— 落後代表所有專案吃的都還是舊版，這是最容易發生也最容易漏掉的事故
 - [ ] 各 repo Actions run 是否有長期紅著沒人理的（尤其每週排程的 Security Scan —— 它會抓「程式碼沒動但新公布的 CVE」）
 - [ ] Dependabot PR 有沒有積著沒 merge
 - [ ] Org → Billing：AI Credits 與 Actions 分鐘用量
@@ -173,4 +191,8 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 ## 延伸閱讀
 
 - [README](../README.md) —— 導入流程、參數、日常使用、疑難排解
+- [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) —— 實測過但還不能用的功能，含排查步驟
+- [MIGRATION-TO-ORG.md](MIGRATION-TO-ORG.md) —— 把公版搬到組織底下的 checklist
+- [CONTRIBUTING.md](../CONTRIBUTING.md) —— 改公版的流程、送 PR 前的自我檢查
+- [CHANGELOG.md](../CHANGELOG.md) —— 發佈過哪些版本
 - [DEVSECOPS-NOTES.md](DEVSECOPS-NOTES.md) —— 工具取捨理由（為什麼不把 SonarQube Community 當 PR gate、ZAP 為何不進核心 gate）、建議導入順序

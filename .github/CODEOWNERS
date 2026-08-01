@@ -1,0 +1,17 @@
+# 這裡是中央公版：一次改動同時影響所有指向 @v1 的專案。
+# 任何改動都應該有 owner 看過。
+#
+# ⚠️ 搬到組織之後，把 @singi0771 換成 team（例如 @ORG/platform-team），
+#    不要把公版綁在單一個人帳號上 —— 見 docs/MIGRATION-TO-ORG.md
+#
+# ⚠️ CODEOWNERS 只有在 ruleset 勾選 "Require review from Code Owners" 時才會強制。
+#    目前 setup-branch-protection.sh 預設 require_code_owner_review: false
+#    （單人團隊時開了會直接鎖死自己）。有第二位 reviewer 之後再一起打開。
+
+*                                   @singi0771
+
+# 公版本體：改壞會讓所有專案一起壞
+/.github/workflows/                 @singi0771
+
+# consumer 範本：改壞會讓每個新導入的專案壞
+/templates/                         @singi0771
