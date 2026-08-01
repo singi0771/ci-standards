@@ -69,9 +69,10 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
 
-> 🔴 **「修」這一格目前還沒驗證成功。** 2026-07-26 的實測中，Copilot Code Review（審）正常運作，
-> 但 Copilot Coding Agent（修）對 Actions 貼的 `@copilot` 沒有反應。
-> **導入時請先當成「掃描擋門 + Copilot 自動審 + 人工修」**，完整結果與排查步驟見
+> 🟡 **「修」這一格能動，但目前**無法自動觸發**。實測（2026-08-01）：
+> 手動「開 Issue → 指派 Copilot」→ 立刻開出 PR ✅；
+> 但 Actions 貼的 `@copilot` 留言喚不醒它（GitHub 的 bot 防迴圈限制）❌。
+> **導入時請把「修」當成手動一步**，解法與排查見
 > [已知限制](docs/KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。
 
 > **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
@@ -199,6 +200,9 @@ gh pr create
 - `upload-sarif: true` 時才會進 Security 分頁（需 public repo 或 GHAS）
 
 ### 掃到弱點 → 交給 Copilot 修
+
+> ✅ **這條路已實測可用**（2026-08-01）。目前不能用的是「CI 紅了自動 @copilot」那條，
+> 見[已知限制](docs/KNOWN-LIMITATIONS.md)。所以「修」這一步要由人開 Issue 起頭。
 
 1. 依掃描結果開 Issue，把弱點檔案、行號、掃描器訊息貼進去
 2. Issue 右側 Assignees **指派給 Copilot**

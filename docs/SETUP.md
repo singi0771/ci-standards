@@ -90,26 +90,29 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 2. 開 Issue → 右側 Assignees **指派給 Copilot**
 3. Copilot 先跑該 repo 的 `copilot-setup-steps.yml` 準備環境，再修碼、跑測試、開 PR
 
-### 🔴 已實測：Coding Agent 目前不回應 Actions 貼的 `@copilot`
+### 🟡 已實測：Agent 可用，但 Actions 貼的 `@copilot` 喚不醒它
 
 三支 `copilot-auto*` 的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言，
-作者是 `github-actions[bot]`。**這個前提在 2026-07-26 的 canary 實測中沒有成立**：
+作者是 `github-actions[bot]`。**這個前提沒有成立**：
 
 | 觀察項 | 結果 |
 |---|---|
 | Gate 擋門、cooldown 去重、autoreview 去重 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
 | Copilot **Code Review**（自動審） | ✅ 會動 |
-| Copilot **Coding Agent**（自動修） | ❌ 對 `@copilot` 留言等 12 分鐘無反應 |
+| Copilot **Coding Agent** — 指派 Issue（官方入口） | ✅ 會動，立刻開出 PR |
+| Copilot **Coding Agent** — Actions 貼的 `@copilot` 留言 | ❌ 等 12 分鐘無反應 |
 
-**完整結果、無效測試的說明、以及三關排查步驟，見
+也就是說：**引擎是好的，卡住的是自動觸發那條線**（GitHub 對「bot 觸發 bot」的防迴圈限制）。
+
+**完整結果、排查三關、以及解法，見
 [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。**
 
-排查的第一步不是換 token，而是**先確認 Coding Agent 到底有沒有開**：
-開一個小 Issue，Assignees 指派給 Copilot，看它會不會開 PR。
-這一關沒過，換 token 也不會有用 —— 引擎根本沒裝上去。
+> **導入新專案時，第 1 關要重測一次。** 方案是帳號層級的，但 Copilot policy 與
+> `copilot-setup-steps.yml` 是 repo 層級的 —— 這個 repo 過了不代表下一個 repo 也過。
+> 測法：開一個小 Issue，Assignees 指派給 Copilot，看它會不會開 PR。
 
-> **在這件事解決之前照常導入，只是不要期待「自動修」。**
-> 「掃描擋門 + Copilot 自動審 + 人工修」這條線已經完整可用，
+> **在自動觸發修好之前照常導入，只是「修」要手動起頭。**
+> 完整可用的路徑是「掃描擋門 → Copilot 自動審 → 開 Issue 指派 Copilot 修 → 人 merge」。
 > 三支 `copilot-auto*` 複製過去不會有害（沒反應而已，也不燒 credits），
 > 但**不要拿它們當導入成功的驗收標準**。
 
