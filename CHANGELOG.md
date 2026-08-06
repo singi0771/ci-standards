@@ -34,6 +34,19 @@
 
 ### 修正 —— 這是必須發佈的理由
 
+- 🔴 **`CI Gate` 會把「沒跑到」當成「通過」**（2026-08-06 由本 repo 自己的 PR 實測踩到）。
+  GitHub 因 runner 排隊過久取消了 `actionlint` 與 `shellcheck`，run 整體 `conclusion: failure`，
+  但 `ci / CI Gate` 回報 **success** —— 而分支保護只認這個 Gate，等於**兩個檢查一行沒跑，PR 照樣可以合併**。
+
+  原因：`ci-gate` 用的是黑名單（`只擋 failure|cancelled`），而被取消的 job 傳進
+  `needs.<job>.result` 的值並不是 `cancelled`，所以漏掉了。
+  同一批 job 之下 `security / Security Gate` 正確地失敗了 —— 它用的是白名單（`!= success` 就擋）。
+
+  修法：兩個 Gate 一律改成白名單判定 —— **啟用了就必須是 `success`**，只有未啟用才允許非 success。
+  `security-gate` 的 `trivy-image` 也有同型的洞（只擋 `failure`），一併補上。
+- **`copilot-autofix` 的失敗清單可能是空的**：只挑 `conclusion == "failure"` 的 job，
+  遇到「全部被取消」或 startup failure 時會貼出空清單。改為同時涵蓋
+  `cancelled` / `timed_out` / `startup_failure`，全空時明講原因。
 - **消除三種「PR 永遠 merge 不了」的死鎖**：`skipped` 的 required check 永遠不回報、
   呼叫端 `pull_request` 的 `paths-ignore` 會擋掉純文件 PR、required approvals 設 1 但沒人能 approve。
 - **掃描失敗不再被當成通過**：OSV-Scanner 下載改用 `curl --fail` 並先驗 `--version`；
