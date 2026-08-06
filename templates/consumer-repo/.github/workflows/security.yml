@@ -1,4 +1,4 @@
-# 各專案（例如 AdminAutoTools）的「呼叫端」workflow — 只有這一小段，邏輯全在中央公版。
+# 各專案的「呼叫端」workflow — 只有這一小段，邏輯全在中央公版。
 # 中央公版更新後，這裡指向 @v1 的 repo 全部自動跟進。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
 name: Security Scan
@@ -25,5 +25,7 @@ jobs:
       python-version: "3.12"
       severity: "CRITICAL,HIGH"
       fail-on-findings: true
-      scan-docker-image: true    # AdminAutoTools 有 Dockerfile，順便掃 image
+      # 範本預設 false（與公版預設一致）。有 Dockerfile 才改成 true ——
+      # 沒有 Dockerfile 時公版雖然會快速略過，但仍會起一個 job 白吃 Actions 分鐘。
+      scan-docker-image: false
       upload-sarif: false        # private 且無 GHAS → 保持 false；若改 public 可設 true

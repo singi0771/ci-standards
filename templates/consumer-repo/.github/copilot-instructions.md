@@ -1,9 +1,22 @@
-# Copilot 專案指引（Coding Agent / Code Review 都會讀）— AdminAutoTools 範本
+# Copilot 專案指引（Coding Agent / Code Review 都會讀）
+
+> ⚠️ **這是範本，複製到專案後一定要改。**
+>
+> | 段落 | 要不要改 |
+> |---|---|
+> | 專案概觀（用途 / 技術棧 / 進入點） | ✅ **必改**，目前是佔位符 |
+> | 開發與測試指令 | ✅ **必改**，寫錯 Copilot 就測不起來 |
+> | 程式碼慣例 | ✅ **必改**，目錄結構與 commit 慣例每個專案不同 |
+> | 安全要求 | 照抄即可，但**用不到的段落請刪掉**（例如沒有 Docker/IaC 就刪那段） |
+> | PR 要求 | 照抄即可 |
+>
+> 「開發與測試指令」沒換成專案實況是**導入後最常見的失敗原因** ——
+> Copilot 會照著錯的指令跑、測不起來，產出的 PR 品質會很差。
 
 ## 專案概觀
-- 用途：<一句話描述 AdminAutoTools 在做什麼>
-- 技術棧：Python + Docker（含 docker-compose、nginx、openapi/openspec 規格）
-- 進入點：`app.py`
+- 用途：<一句話描述這個專案在做什麼>
+- 技術棧：<例如 Python + Docker（含 docker-compose、nginx、openapi 規格）>
+- 進入點：`<app.py>`
 
 ## 開發與測試指令（Coding Agent 修完必須自己跑過）
 - 安裝相依：`pip install -r requirements.txt`

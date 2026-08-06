@@ -28,7 +28,9 @@ ZAP baseline 是對**正在執行的 Web App URL**掃描，不是掃程式碼。
 
 ## 其他幾點技術指教
 
-- **action 釘版本，別用 `@master`**：文章的 `aquasecurity/trivy-action@master` 與 OSV 的 install script（抓 `main`）是供應鏈風險——上游一改你就默默中招。公版一律釘版本（`trivy-action@0.28.0`、`osv-scanner-action@v2`）；要更嚴謹可釘 commit SHA。
+- **action 釘版本，別用 `@master`**：文章的 `aquasecurity/trivy-action@master` 與 OSV 的 install script（抓 `main`）是供應鏈風險——上游一改你就默默中招。公版**一律釘 commit SHA**（不是版本 tag —— tag 可以被移動），例如 `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0`。
+- **container image 也要釘**：`semgrep/semgrep:1.171.0`、`ghcr.io/gitleaks/gitleaks:v8.30.1`、`rhysd/actionlint:1.7.12`。用 `:latest` 的話，上游新增規則會讓**沒改任何一行碼的 repo 突然變紅**，這比供應鏈風險更常實際發生。
+- **OSV-Scanner 改為直接下載釘死版本的 binary**（不用 `osv-scanner-action`），下載時 `curl --fail`、執行前先驗 `--version`。這一步很關鍵：沒有它的話，GitHub 回 404/5xx 時 curl 會把錯誤頁面存成「執行檔」，後面執行失敗又被當成良性 warning 放行 → **相依弱點掃描靜默失效、Gate 照樣綠燈**。
 - **gitleaks 用 docker 執行檔，不要用 `gitleaks-action`**：後者在**組織帳號**需要 `GITLEAKS_LICENSE`。公版已改用 `ghcr.io/gitleaks/gitleaks` 直接跑，免授權。
 - **Dependency Review Action 在 private 需 GHAS**：文章提到的 dependency-review-action 在私有 repo 要 GHAS 才能用；OSV-Scanner 已免費涵蓋同樣需求，private 就用 OSV 即可。
 - **Actions 額度**：Semgrep 多規則 + Docker build/scan 會多吃分鐘。`ci-standards` 設 public 後它自己的 Actions 不計額度；但 **consumer 的 private repo（如 AdminAutoTools）仍吃自己每月 3,000 分鐘**，留意用量。
