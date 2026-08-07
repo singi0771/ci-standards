@@ -162,24 +162,60 @@ jobs:
           DOCKER: ${{ needs.docker-build.result }}
           ACTIONLINT: ${{ needs.actionlint.result }}
           SHELLCHECK: ${{ needs.shellcheck.result }}
+          # 每個檢查「是否應該要跑」——判斷通過與否的關鍵，見下方說明
+          RUN_PYTHON: ${{ inputs.run-python }}
+          RUN_DOCKER: ${{ inputs.run-docker-build }}
+          RUN_ACTIONLINT: ${{ inputs.run-actionlint }}
+          RUN_SHELLCHECK: ${{ inputs.run-shellcheck }}
         run: |
           {
             echo "## 🧪 CI Gate 結果"
             echo ""
-            echo "| 檢查 | 結果 |"
-            echo "| --- | --- |"
-            echo "| Python lint + test | $PYTHON |"
-            echo "| Docker build check | $DOCKER |"
-            echo "| Workflow lint (actionlint) | $ACTIONLINT |"
-            echo "| Shell lint (shellcheck) | $SHELLCHECK |"
+            echo "| 檢查 | 啟用 | 結果 |"
+            echo "| --- | --- | --- |"
+            echo "| Python lint + test | $RUN_PYTHON | $PYTHON |"
+            echo "| Docker build check | $RUN_DOCKER | $DOCKER |"
+            echo "| Workflow lint (actionlint) | $RUN_ACTIONLINT | $ACTIONLINT |"
+            echo "| Shell lint (shellcheck) | $RUN_SHELLCHECK | $SHELLCHECK |"
+            echo ""
           } >> "$GITHUB_STEP_SUMMARY"
+
           FAIL=0
-          # 所有子 job 都可能因 input 關掉而 skipped，一律「只有 failure 才擋」。
-          # 別寫成 != success，否則關掉某項檢查會讓 Gate 永遠失敗。
-          for r in "$PYTHON" "$DOCKER" "$ACTIONLINT" "$SHELLCHECK"; do
-            case "$r" in failure|cancelled) FAIL=1 ;; esac
-          done
+
+          # 判定原則：**啟用了就必須是 success**；只有沒啟用時才允許非 success。
+          #
+          # 為什麼不能只擋 failure / cancelled（2026-08-06 實測踩到）：
+          # runner 排隊過久被 GitHub 取消時，那些 job 的 conclusion 是 cancelled，
+          # 但傳進 needs.<job>.result 的值並不是 cancelled ——
+          # 舊寫法（只擋 failure|cancelled）因此判定通過，Gate 回報 success，
+          # 而那次 actionlint 與 shellcheck 根本一行都沒執行。
+          # 分支保護只認這個 Gate，等於「沒跑到」被當成「通過」，required check 形同虛設。
+          #
+          # 所以這裡改成白名單：該跑的就得拿到 success，其他一律擋。
+          assert_job() {
+            local name="$1" enabled="$2" result="$3"
+            if [ "$enabled" = "true" ]; then
+              if [ "$result" != "success" ]; then
+                echo "❌ **$name** 已啟用，但結果是 \`${result:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
+                FAIL=1
+              fi
+            else
+              case "$result" in
+                failure|cancelled)
+                  echo "❌ **$name** 未啟用，結果卻是 \`$result\`" >> "$GITHUB_STEP_SUMMARY"
+                  FAIL=1
+                  ;;
+              esac
+            fi
+          }
+
+          assert_job "Python lint + test"         "$RUN_PYTHON"     "$PYTHON"
+          assert_job "Docker build check"         "$RUN_DOCKER"     "$DOCKER"
+          assert_job "Workflow lint (actionlint)" "$RUN_ACTIONLINT" "$ACTIONLINT"
+          assert_job "Shell lint (shellcheck)"    "$RUN_SHELLCHECK" "$SHELLCHECK"
+
           if [ "$FAIL" = "1" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "❌ CI Gate 未通過" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

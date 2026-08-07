@@ -202,6 +202,7 @@ jobs:
           TRIVY: ${{ needs.trivy.result }}
           GITLEAKS: ${{ needs.gitleaks.result }}
           IMAGE: ${{ needs.trivy-image.result }}
+          SCAN_IMAGE: ${{ inputs.scan-docker-image }}
         run: |
           {
             echo "## 🛡️ Security Gate 結果"
@@ -212,16 +213,43 @@ jobs:
             echo "| Dependency (OSV) | $OSV |"
             echo "| FS/IaC (Trivy) | $TRIVY |"
             echo "| Secret (gitleaks) | $GITLEAKS |"
-            echo "| Docker image (Trivy) | $IMAGE |"
+            echo "| Docker image (Trivy) | $IMAGE（啟用：$SCAN_IMAGE） |"
+            echo ""
           } >> "$GITHUB_STEP_SUMMARY"
+
           FAIL=0
+
+          # 這四項沒有 if 條件，一定會跑 —— 所以「不是 success 就擋」。
+          # 這個白名單寫法是對的：不只擋 failure，連 cancelled、skipped、
+          # 以及 runner 沒排到而拿不到結果的情況，全部都擋。
           for r in "$SEMGREP" "$OSV" "$TRIVY" "$GITLEAKS"; do
-            [ "$r" != "success" ] && FAIL=1
+            if [ "$r" != "success" ]; then
+              echo "❌ 有掃描的結果是 \`${r:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
+              FAIL=1
+            fi
           done
-          # Docker image 掃描允許 skipped（未啟用）；只有 failure 才擋
-          [ "$IMAGE" = "failure" ] && FAIL=1
+
+          # Docker image 掃描是可選的，判定原則跟 CI Gate 一致：
+          # **啟用了就必須 success**，沒啟用才允許 skipped。
+          # 舊寫法只擋 failure —— 那樣的話 scan-docker-image=true 但 job 被取消時，
+          # 掃描沒跑成 Gate 卻放行，等於「沒跑到」被當成「通過」。
+          if [ "$SCAN_IMAGE" = "true" ]; then
+            if [ "$IMAGE" != "success" ]; then
+              echo "❌ Docker image 掃描已啟用，但結果是 \`${IMAGE:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
+              FAIL=1
+            fi
+          else
+            case "$IMAGE" in
+              failure|cancelled)
+                echo "❌ Docker image 掃描未啟用，結果卻是 \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+                FAIL=1
+                ;;
+            esac
+          fi
+
           if [ "$FAIL" = "1" ]; then
-            echo "❌ Security Gate 未通過（有掃描失敗或發現高風險問題）" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ Security Gate 未通過（有掃描失敗、沒跑成，或發現高風險問題）" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "✅ Security Gate 通過" >> "$GITHUB_STEP_SUMMARY"

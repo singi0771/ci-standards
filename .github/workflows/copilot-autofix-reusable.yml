@@ -121,9 +121,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           WORKFLOW_RUN_ID: ${{ inputs.run-id }}
         run: |
+          # 不要只挑 conclusion == "failure"：run 可能因為 job 被取消、逾時或
+          # 啟動失敗而整體失敗，那時沒有任何 job 是 "failure"，清單會是空的，
+          # 貼出去的留言就變成「CI 失敗，失敗的 jobs：（空白）」——對 Copilot 和人都沒用。
           # shellcheck disable=SC2016  # 單引號內是 jq 語法，本來就不該由 shell 展開
           FAILED=$(gh api "repos/$GH_REPO/actions/runs/$WORKFLOW_RUN_ID/jobs" \
-            --jq '[.jobs[] | select(.conclusion == "failure") | "- `" + .name + "`"] | join("\n")')
+            --jq '[.jobs[]
+                   | select(.conclusion == "failure" or .conclusion == "cancelled"
+                            or .conclusion == "timed_out" or .conclusion == "startup_failure")
+                   | "- `" + .name + "`（" + .conclusion + "）"] | join("\n")')
+          if [ -z "$FAILED" ]; then
+            FAILED="- （沒有任何 job 被標記為失敗 —— 可能是 workflow 啟動失敗，或 runner 排隊過久被取消。請直接看上面的 run 畫面。）"
+          fi
           {
             echo "failed<<EOF"
             echo "$FAILED"
