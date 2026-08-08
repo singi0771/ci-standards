@@ -12,7 +12,40 @@
 
 ## [未發佈]
 
-（目前沒有未發佈的變更。`v1` 指向 `v1.1.0`。）
+### 新增
+- **一鍵導入腳本**，跨平台雙版本：
+  - `scripts/adopt.sh` —— macOS / Linux / Windows Git Bash
+  - `scripts/adopt.ps1` —— Windows PowerShell 5.1（**系統內建，零安裝**）
+
+  會自動偵測 Dockerfile / Python / shell script 並把 `ci.yml`、`security.yml` 的參數填好。
+
+  **兩種模式**：目標沒有呼叫端就整份鋪上（`install`）；已經有舊版就改用**就地合併**
+  （`upgrade`）—— 保留使用者調過的參數與自訂的 `on:` 觸發、保留 `with:` 裡的註解、
+  **移除公版已廢除的 input**（留著會讓 workflow 直接 `invalid input` 起不來）、
+  補上公版新增的 input、更新 `uses:` 的 ref，而 **job id 絕不更動**（分支保護綁著它）。
+
+  「公版有哪些 input」是直接讀 reusable 的 `workflow_call.inputs` 宣告，
+  不是腳本裡寫死的清單 —— 公版加減 input 時自動跟上。
+
+  `copilot-instructions.md` / `copilot-setup-steps.yml` / `pull_request_template.md` /
+  `dependabot.yml` 含專案專屬內容，**已存在時絕不覆蓋**，只另存一份 `.new` 供比對。
+- `scripts/test-adopt.sh` —— 回歸測試，涵蓋全新導入、升級舊版、冪等、
+  `--dry-run`、`--uses-repo` 五個情境共 26 項檢查。
+- `adopt.sh` / `adopt.ps1` 新增 `--uses-repo` / `-UsesRepo` —— 搬到組織時
+  一併換掉 `uses:` 的 `owner/repo`，不用另外 sed。
+
+  **相依只有 `git`** —— 刻意不用 `gh` / `jq` / `yq` / `python` / `curl`，
+  因為受管制的公司環境上那些都不保證裝得起來。導入本身是純檔案操作，不碰網路。
+- `docs/ADOPT.md` —— 跨平台用法、內網／離線／Proxy 的做法，以及
+  「哪些步驟其實不需要 `gh`」的對照表（結論：`gh` 完全是選配）。
+- **`.gitattributes`** —— 強制 `.sh` / `.yml` / `.ps1` 以 LF 簽出。
+  沒有它的話，Git for Windows 預設 `core.autocrlf=true` 會把 shell script
+  轉成 CRLF，bash 會噴 `bad interpreter: /usr/bin/env: ...^M` ——
+  而且 `\r` 不顯示，錯誤訊息完全看不出原因。推廣到 Windows 環境前必須先有這個。
+
+### 變更
+- README 的「步驟 1」改為以一鍵導入為主、手動複製收進 `<details>`。
+  用一鍵版時步驟 2 的 ①② 可以跳過。
 
 ---
 
