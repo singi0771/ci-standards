@@ -16,7 +16,7 @@ jobs:
     if: >
       github.event.review.state == 'changes_requested' &&
       !contains(github.event.pull_request.user.login, 'dependabot')
-    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1.1.0
+    uses: ./.github/workflows/copilot-autofix-review-reusable.yml
     with:
       pr-number:   ${{ github.event.pull_request.number }}
       pr-author:   ${{ github.event.pull_request.user.login }}

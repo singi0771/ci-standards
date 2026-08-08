@@ -18,6 +18,12 @@ ADOPT="$STD/scripts/adopt.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# 立刻離開呼叫者的目錄。
+# 2026-08-08 的事故：舊版 new_repo 用命令替換取路徑，cd 只發生在子 shell，
+# 所有情境都跑在 ci-standards 自己身上，把 .github/ 整組改掉還跟著 commit 進 main。
+# 現在起點就在暫存區，就算某個 cd 失敗也不會波及真的 repo。
+cd "$WORK"
+
 PASS=0; FAIL=0
 
 ok()   { printf '  ✅ %s\n' "$1"; PASS=$((PASS+1)); }
@@ -34,6 +40,11 @@ new_repo() {
   REPO_DIR="$WORK/$1"
   mkdir -p "$REPO_DIR"
   cd "$REPO_DIR"
+  # 再確認一次真的切過去了 —— 這是上次事故的關鍵防線
+  if [ "$PWD" != "$REPO_DIR" ]; then
+    printf '❌ 沒有切到暫存目錄（現在在 %s），中止以免動到真的 repo\n' "$PWD" >&2
+    exit 1
+  fi
   git init -q .
   git config user.email t@t
   git config user.name t

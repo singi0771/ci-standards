@@ -56,6 +56,16 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "$TARGET 不是 git repo（請先
 TARGET_ROOT="$(git rev-parse --show-toplevel)"
 cd "$TARGET_ROOT"
 
+# 安全閥：不准把公版導入公版自己。
+# 公版的呼叫端刻意用 `uses: ./...` 做 dogfooding；被這支腳本改成
+# `owner/repo@ref` 之後，PR 上跑的就不再是「這個 PR 的版本」，
+# 綠燈會變成假的。（這正是 2026-08-08 真的發生過的事故。）
+if [ -d "$TARGET_ROOT/templates/consumer-repo/.github" ]; then
+  die "目標看起來就是 ci-standards 公版本身（有 templates/consumer-repo/）。
+    公版不需要導入自己 —— 它已經用 uses: ./ 呼叫自己的 reusable。
+    要測試這支腳本請用 scripts/test-adopt.sh。"
+fi
+
 # ── 公版範本 ─────────────────────────────────────────────────
 TMP_CLONE=""
 if [ -z "$STD" ]; then
