@@ -1,0 +1,50 @@
+name: 公版好像壞了
+description: 回報公版 workflow 行為異常（意外紅了、掃描結果不合理等）
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        填表前請先查 [README 疑難排解](https://github.com/singi0771/ci-standards#疑難排解)
+        與 [docs/KNOWN-LIMITATIONS.md](https://github.com/singi0771/ci-standards/blob/main/docs/KNOWN-LIMITATIONS.md)，
+        確認不是已知限制。
+
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: 哪個 workflow 出問題
+      description: 選出問題的公版 workflow
+      options:
+        - ci-reusable
+        - security-reusable
+        - copilot-autofix-ci-security
+        - copilot-autofix-review-reusable
+        - copilot-autoreview-reusable
+    validations:
+      required: true
+
+  - type: input
+    id: ref
+    attributes:
+      label: 呼叫端指向哪個 ref
+      description: "呼叫端 uses: 後面的版本，例如 @v1、@v1.2.3、@main"
+      placeholder: "@v1"
+    validations:
+      required: true
+
+  - type: input
+    id: run-url
+    attributes:
+      label: 失敗的 run 連結
+      description: GitHub Actions run 的完整 URL
+      placeholder: "https://github.com/<org>/<repo>/actions/runs/<id>"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 確認事項
+      options:
+        - label: "已閱讀 [docs/KNOWN-LIMITATIONS.md](https://github.com/singi0771/ci-standards/blob/main/docs/KNOWN-LIMITATIONS.md)，確認此問題不在已知限制清單內"
+          required: true

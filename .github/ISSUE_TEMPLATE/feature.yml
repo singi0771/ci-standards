@@ -1,0 +1,42 @@
+name: 要求支援新語言 / 新掃描工具
+description: 要求在公版新增語言支援或整合新的掃描工具
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提需求前請確認：這個需求是「公版」層級的（所有專案都受惠），
+        而不是單一專案自己的客製化。
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 哪個專案、什麼情境需要
+      description: 說明你的專案背景與具體情境，讓維護者評估通用性
+      placeholder: |
+        例如：我們的 Node.js 專案目前用 ci-reusable 但沒有 lint/test 步驟，
+        因為公版只支援 Python。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: 希望公版提供什麼
+      description: 選擇你需要的變更類型
+      options:
+        - 新的 reusable workflow（新語言 / 新工具鏈）
+        - 既有 reusable 的新 input 選項
+        - 其他（請在下方說明）
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 不做的話現在怎麼繞過
+      description: 說明目前的替代方案或繞過方法，有助於評估優先順序
+      placeholder: |
+        例如：在呼叫端 job 裡自行加 steps，但每個 repo 各維護一份，很難同步更新。
+    validations:
+      required: true
