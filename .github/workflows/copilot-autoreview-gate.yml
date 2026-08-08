@@ -15,7 +15,7 @@ permissions:
 jobs:
   autoreview:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    uses: singi0771/ci-standards/.github/workflows/copilot-autoreview-reusable.yml@v1.1.0
+    uses: ./.github/workflows/copilot-autoreview-reusable.yml
     with:
       head-sha:     ${{ github.event.workflow_run.head_sha }}
       head-branch:  ${{ github.event.workflow_run.head_branch }}

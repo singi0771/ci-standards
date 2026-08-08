@@ -66,6 +66,13 @@ if ($LASTEXITCODE -ne 0 -or -not $TargetRoot) { Die "$Target 不是 git repo（�
 Set-Location -LiteralPath ($TargetRoot.Trim())
 $TargetRoot = (Get-Location).Path
 
+# 安全閥：不准把公版導入公版自己。
+# 公版的呼叫端刻意用 `uses: ./...` 做 dogfooding；改成 owner/repo@ref 之後，
+# PR 上跑的就不再是「這個 PR 的版本」，綠燈會變成假的。
+if (Test-Path -LiteralPath (Join-Path $TargetRoot 'templates\consumer-repo\.github')) {
+  Die "目標看起來就是 ci-standards 公版本身（有 templates\consumer-repo\）。公版不需要導入自己。要測試這支腳本請用 scripts/test-adopt.sh。"
+}
+
 # ── 公版範本 ─────────────────────────────────────────────────
 $TmpClone = ""
 if (-not $Std) {
