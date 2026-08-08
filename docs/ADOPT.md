@@ -69,6 +69,48 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ---
 
+## 兩種模式：全新導入 vs 升級
+
+腳本會看目標有沒有 `.github/workflows/ci.yml` 或 `security.yml` 來決定模式。
+
+### `install` —— 目標還沒有呼叫端
+
+整份範本鋪上去，依偵測結果填好參數。
+
+### `upgrade` —— 目標已經有舊版呼叫端
+
+**不覆蓋，改用就地合併。** 這是最容易出事的路徑，所以規則寫死：
+
+| 情況 | 行為 | 為什麼 |
+|---|---|---|
+| 你調過的參數（`severity`、`fail-on-findings`、`python-version`…） | **保留原值** | 那是你針對這個專案的決定，偵測結果不該蓋過去 |
+| 你自訂的 `on:` 觸發（例如改過的 cron） | **完全不動** | 只改 `uses:` 那一行與 `with:` 區塊，其餘原樣 |
+| `with:` 裡的註解 | **保留** | `# max-attempts: "3"` 這種提示不該消失 |
+| 公版**已廢除**的 input | **移除並回報** | 留著會讓 workflow 直接 `invalid input` 起不來 |
+| 公版**新增**的 input | 補上（用偵測值） | 只補「你檔案裡沒有」的，不覆寫既有的 |
+| `uses:` 的 ref | 更新成 `--ref` | 這才是真正生效的那一行 |
+| **job id（`ci` / `security`）** | **絕不更動** | 分支保護的 check 名稱綁著它，改了 ruleset 就對不上 |
+
+「公版有哪些 input」是**直接讀公版 reusable 的 `workflow_call.inputs` 宣告**得來的，
+不是腳本裡寫死一份清單 —— 公版加減 input 時自動跟上，不會漂移。
+
+### 絕不覆蓋的檔案
+
+這四個含專案專屬內容，已存在時腳本只放一份 `.new` 給你比對：
+
+- `copilot-instructions.md` ← **最重要**，是你手寫的專案規範
+- `copilot-setup-steps.yml` ← 專案的環境準備步驟
+- `pull_request_template.md`
+- `dependabot.yml` ← 你可能加過 npm 區塊、改過排程
+
+比對完記得把 `.new` 刪掉。
+
+### 冪等
+
+同樣的指令跑第二次不會產生任何差異（有回歸測試涵蓋）。
+
+---
+
 ## 腳本會自動判斷什麼
 
 | 偵測 | 依據 | 影響的參數 |
@@ -81,7 +123,23 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 `run-actionlint` 一律開啟 —— 導入之後你的 repo 就有 workflow 了，
 而 actionlint 的 image 內建 shellcheck，會連 `run:` 區塊的 bash 一起檢查，很划算。
 
-已存在的 `.github/workflows` 會先**備份**成 `.github/workflows.backup-N`，不會直接覆蓋。
+偵測值只在「該 key 原本不存在」時才會寫入 —— 升級既有專案時不會覆寫你調過的設定。
+
+## 回歸測試
+
+`scripts/test-adopt.sh` 涵蓋五個情境，改動腳本後請先跑過：
+
+```bash
+./scripts/test-adopt.sh
+```
+
+| 情境 | 驗什麼 |
+|---|---|
+| A 全新導入 | 偵測結果正確寫入、不產生多餘的 `.new` |
+| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋 |
+| C 冪等 | 跑第二次沒有任何 diff |
+| D `--dry-run` | 一個檔案都沒動 |
+| E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換 |
 
 ---
 

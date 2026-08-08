@@ -1,41 +1,35 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  一鍵把 ci-standards 公版導入一個專案（Windows PowerShell 5.1 / PowerShell 7）。
+  把 ci-standards 公版導入 / 升級一個專案（Windows PowerShell 5.1 原生，零安裝）。
 
 .DESCRIPTION
-  與同目錄的 adopt.sh 功能相同，給不想開 Git Bash 的 Windows 使用者。
+  與同目錄的 adopt.sh 行為一致，兩者的測試情境也相同（見 scripts/test-adopt.sh）。
+
+  兩種模式會自動判斷：
+    install —— 目標沒有呼叫端，整份範本鋪上去並依偵測結果填參數
+    upgrade —— 目標已有呼叫端，改用「就地合併」：
+                保留使用者調過的參數與 on: 觸發設定、更新 uses:、
+                移除公版已廢除的 input、補上公版新增的 input
+
+  專案專屬的檔案（copilot-instructions.md、pull_request_template.md、
+  dependabot.yml、copilot-setup-steps.yml）**絕不覆蓋** —— 已存在就只放一份
+  .new 供比對。
 
   相依：只需要 git 與 Windows 內建的 PowerShell 5.1。
-  刻意不用 gh / jq / yq / python / curl —— 鎖死的公司環境上那些都不保證存在。
-  導入這一步完全不碰網路（除非要自己 clone 公版）。
-
-.PARAMETER Target
-  要導入的專案目錄。預設為目前目錄。
-
-.PARAMETER Std
-  ci-standards 本機 clone 的路徑。不給的話會依序找 $env:CODE_WORK\ci-standards、
-  腳本自己所在的 repo，最後才用 HTTPS 淺層 clone。
-
-.PARAMETER Ref
-  要指向的公版版本，預設 v1。
-
-.PARAMETER DryRun
-  只印偵測結果，不動任何檔案。
+  不用 gh / jq / yq / python / curl —— 受管制的公司環境上那些都不保證存在。
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\adopt.ps1
+  powershell -ExecutionPolicy Bypass -File .\adopt.ps1 -DryRun
 
   公司電腦若因群組原則擋住 .ps1，用上面這種寫法就好，不需要改機器的執行原則。
-
-.EXAMPLE
-  .\adopt.ps1 -Target ..\MyProject -Std C:\code\ci-standards
 #>
 [CmdletBinding()]
 param(
-  [string]$Target = (Get-Location).Path,
-  [string]$Std    = "",
-  [string]$Ref    = "v1",
+  [string]$Target   = (Get-Location).Path,
+  [string]$Std      = "",
+  [string]$Ref      = "v1",
+  [string]$UsesRepo = "singi0771/ci-standards",
   [switch]$DryRun
 )
 
@@ -43,46 +37,42 @@ $ErrorActionPreference = 'Stop'
 $StdRepoUrl = 'https://github.com/singi0771/ci-standards.git'
 
 function Die([string]$m) { Write-Host "[X] $m" -ForegroundColor Red; exit 1 }
+function Warn([string]$m) { Write-Host "[!] $m" -ForegroundColor Yellow }
 
 # YAML 一律寫成「UTF-8 無 BOM + LF」。
-# Set-Content -Encoding UTF8 在 PS 5.1 會寫入 BOM，有些 YAML 解析器會因此爆掉；
-# 而 Windows 預設的 CRLF 會讓 actionlint / shellcheck 對 run: 區塊產生怪警告。
+# PS 5.1 的 Set-Content -Encoding UTF8 會寫 BOM，有些 YAML 解析器會因此爆掉；
+# Windows 預設的 CRLF 則會讓 actionlint / shellcheck 對 run: 區塊產生怪警告。
 function Write-TextFile([string]$Path, [string]$Text) {
   $lf  = $Text -replace "`r`n", "`n"
-  $enc = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($Path, $lf, $enc)
+  [System.IO.File]::WriteAllText($Path, $lf, (New-Object System.Text.UTF8Encoding($false)))
 }
-function Read-TextFile([string]$Path) {
-  return [System.IO.File]::ReadAllText($Path)
-}
-
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-  Die "找不到 git。這是唯一的必要相依。"
+function Read-Lines([string]$Path) {
+  return ([System.IO.File]::ReadAllText($Path) -replace "`r`n", "`n") -split "`n"
 }
 
-# -Std / -Target 都可能是相對路徑，而下面會 Set-Location 到目標 repo 根目錄。
-# 先在「使用者當初所在的目錄」把 -Std 解成絕對路徑，否則
-# `adopt.ps1 -Target ..\MyProject -Std .\ci-standards` 會找不到公版。
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die "找不到 git。這是唯一的必要相依。" }
+
+# -Std / -Target 可能是相對路徑，而下面會 Set-Location 到目標 repo 根目錄。
 if ($Std) {
   if (-not (Test-Path -LiteralPath $Std)) { Die "-Std 指的路徑不存在：$Std" }
   $Std = (Resolve-Path -LiteralPath $Std).Path
 }
 
-# ── 1. 確認目標是 git repo ───────────────────────────────────
+# ── 目標 repo ────────────────────────────────────────────────
 if (-not (Test-Path -LiteralPath $Target)) { Die "進不去 $Target" }
 Set-Location -LiteralPath $Target
 $TargetRoot = (& git rev-parse --show-toplevel 2>$null)
-if ($LASTEXITCODE -ne 0 -or -not $TargetRoot) {
-  Die "$Target 不是 git repo（請先 git init 或 clone）"
-}
-$TargetRoot = $TargetRoot.Trim()
-Set-Location -LiteralPath $TargetRoot
+if ($LASTEXITCODE -ne 0 -or -not $TargetRoot) { Die "$Target 不是 git repo（請先 git init 或 clone）" }
+Set-Location -LiteralPath ($TargetRoot.Trim())
+$TargetRoot = (Get-Location).Path
 
-# ── 2. 找到公版範本 ──────────────────────────────────────────
+# ── 公版範本 ─────────────────────────────────────────────────
 $TmpClone = ""
 if (-not $Std) {
   $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
   $cands = @()
+  # 只有 CODE_WORK 真的有值才加進候選，否則會組出 "\ci-standards" 這種
+  # 落在磁碟根目錄的路徑，機器上剛好有同名目錄就會誤判成公版。
   if ($env:CODE_WORK) { $cands += (Join-Path $env:CODE_WORK 'ci-standards') }
   $cands += (Join-Path $scriptDir '..')
   foreach ($c in $cands) {
@@ -103,133 +93,238 @@ if (-not $Std) {
 $Tpl = Join-Path $Std 'templates\consumer-repo\.github'
 if (-not (Test-Path -LiteralPath $Tpl)) { Die "$Std 底下找不到 templates\consumer-repo\.github" }
 
-Write-Host "-- 目標: $TargetRoot"
-Write-Host "-- 公版: $Std (ref: $Ref)"
-Write-Host ""
-
-# ── 3. 偵測技術棧 ────────────────────────────────────────────
-function Test-AnyFile([string]$Filter, [int]$Depth) {
-  $items = Get-ChildItem -Path . -Filter $Filter -Recurse -Depth $Depth -File -ErrorAction SilentlyContinue |
-           Where-Object { $_.FullName -notmatch '\\\.git\\' } | Select-Object -First 1
-  return [bool]$items
-}
-
-$HasDockerfile = Test-Path -LiteralPath 'Dockerfile'
-$HasPy = (Test-Path 'requirements.txt') -or (Test-Path 'pyproject.toml') -or
-         (Test-Path 'setup.py') -or (Test-AnyFile '*.py' 2)
-$HasSh = Test-AnyFile '*.sh' 3
-
-$PyVer = '3.12'
-if (Test-Path -LiteralPath '.python-version') {
-  $PyVer = (Read-TextFile '.python-version').Trim()
-}
-
-function B([bool]$v) { if ($v) { 'true' } else { 'false' } }
-
-Write-Host "偵測結果:"
-Write-Host ("  Dockerfile   : {0}   -> run-docker-build / scan-docker-image" -f (B $HasDockerfile))
-Write-Host ("  Python       : {0} (版本 {1})   -> run-python" -f (B $HasPy), $PyVer)
-Write-Host ("  shell script : {0}   -> run-shellcheck" -f (B $HasSh))
-Write-Host ""
-
 function Remove-TmpClone {
   if ($TmpClone -and (Test-Path -LiteralPath $TmpClone)) {
     Remove-Item -LiteralPath $TmpClone -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 
-if ($DryRun) {
-  Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"
-  Remove-TmpClone
-  exit 0
+Write-Host "-- 目標: $TargetRoot"
+Write-Host "-- 公版: $Std (ref: $Ref, uses: $UsesRepo)"
+Write-Host ""
+
+# ── 偵測技術棧 ───────────────────────────────────────────────
+# 註：Get-ChildItem 的 -Depth 自 PowerShell 5.0 起提供，本腳本要求 >= 5.1，可用。
+function Test-AnyFile([string]$Filter, [int]$Depth) {
+  $hit = Get-ChildItem -Path . -Filter $Filter -Recurse -Depth $Depth -File -ErrorAction SilentlyContinue |
+         Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' } | Select-Object -First 1
+  return [bool]$hit
+}
+function B([bool]$v) { if ($v) { 'true' } else { 'false' } }
+
+$HasDockerfile = Test-Path -LiteralPath 'Dockerfile'
+$HasPy = (Test-Path 'requirements.txt') -or (Test-Path 'pyproject.toml') -or
+         (Test-Path 'setup.py') -or (Test-AnyFile '*.py' 1)
+$HasSh = Test-AnyFile '*.sh' 2
+$PyVer = '3.12'
+if (Test-Path -LiteralPath '.python-version') {
+  $PyVer = ([System.IO.File]::ReadAllText('.python-version')).Trim()
 }
 
-# ── 4. 備份既有 workflow ─────────────────────────────────────
-$wf = '.github\workflows'
-if ((Test-Path -LiteralPath $wf) -and (Get-ChildItem -LiteralPath $wf -Force | Measure-Object).Count -gt 0) {
-  $n = 1
-  while (Test-Path -LiteralPath ("$wf.backup-$n")) { $n++ }
-  $bk = "$wf.backup-$n"
-  Copy-Item -LiteralPath $wf -Destination $bk -Recurse
-  Write-Host "[!] 已有 .github\workflows，先備份到 $bk" -ForegroundColor Yellow
-  Get-ChildItem -LiteralPath $bk | ForEach-Object { Write-Host "     $($_.Name)" }
-  Write-Host ""
+$Mode = 'install'
+if ((Test-Path '.github\workflows\ci.yml') -or (Test-Path '.github\workflows\security.yml')) {
+  $Mode = 'upgrade'
 }
 
-# ── 5. 複製範本 ──────────────────────────────────────────────
-New-Item -ItemType Directory -Force -Path '.github' | Out-Null
-Copy-Item -Path (Join-Path $Tpl '*') -Destination '.github' -Recurse -Force
-Write-Host "[OK] 已複製範本到 .github\"
+Write-Host "偵測結果:"
+Write-Host ("  模式         : {0}" -f $Mode)
+Write-Host ("  Dockerfile   : {0}" -f (B $HasDockerfile))
+Write-Host ("  Python       : {0} (版本 {1})" -f (B $HasPy), $PyVer)
+Write-Host ("  shell script : {0}" -f (B $HasSh))
+Write-Host ""
 
-# ── 6. 依偵測結果改參數 ──────────────────────────────────────
-$ciPath = '.github\workflows\ci.yml'
-$ci = Read-TextFile $ciPath
-$ciWith = @"
-    with:
-      python-version: "$PyVer"
-      run-python: $(B $HasPy)
-      run-docker-build: $(B $HasDockerfile)
-      run-actionlint: true
-      run-shellcheck: $(B $HasSh)
-"@
-# 取代第一個 with: 區塊（含其下所有 6 空格縮排的行）
-$ci = [regex]::Replace($ci, '(?m)^    with:\r?\n(?:      .*\r?\n)+', ($ciWith -replace "`r`n","`n") + "`n", 1)
-Write-TextFile $ciPath $ci
-
-$secPath = '.github\workflows\security.yml'
-$sec = Read-TextFile $secPath
-$sec = [regex]::Replace($sec, '(?m)^(\s*)scan-docker-image:.*$', ('${1}scan-docker-image: ' + (B $HasDockerfile)))
-$sec = [regex]::Replace($sec, '(?m)^(\s*)python-version:.*$',   ('${1}python-version: "' + $PyVer + '"'))
-Write-TextFile $secPath $sec
-Write-Host "[OK] 已依偵測結果調整 ci.yml / security.yml"
-
-# ── 7. 換掉 @v1 為指定的 ref ─────────────────────────────────
-if ($Ref -ne 'v1') {
-  Get-ChildItem -LiteralPath $wf -Filter '*.yml' | ForEach-Object {
-    $t = Read-TextFile $_.FullName
-    # 只換行尾的 @v1（uses: 那幾行）。註解裡的 @v1 不在行尾，不會被動到。
-    $t = [regex]::Replace($t, '(?m)@v1$', "@$Ref")
-    Write-TextFile $_.FullName $t
+# ── 公版宣告了哪些 input（事實來源是公版自己，不在腳本裡寫死清單）──
+function Get-ReusableInputs([string]$Path) {
+  $names = @()
+  $inBlk = $false
+  foreach ($line in (Read-Lines $Path)) {
+    if ($line -match '^    inputs:\s*$') { $inBlk = $true; continue }
+    if ($inBlk -and ($line -match '^\S' -or $line -match '^  [a-z]')) { $inBlk = $false }
+    if ($inBlk -and $line -match '^      ([A-Za-z0-9_-]+):\s*$') { $names += $Matches[1] }
   }
-  Write-Host "[OK] 已把 uses: 的 ref 換成 $Ref"
+  return $names
+}
+
+$ReusableFor = @{
+  'ci.yml'                          = 'ci-reusable.yml'
+  'security.yml'                    = 'security-reusable.yml'
+  'copilot-autofix-ci-security.yml' = 'copilot-autofix-reusable.yml'
+  'copilot-autofix-review.yml'      = 'copilot-autofix-review-reusable.yml'
+  'copilot-autoreview-gate.yml'     = 'copilot-autoreview-reusable.yml'
+}
+
+# 就地更新 uses: 的 owner/repo 與 ref。
+# 刻意跳過 `uses: ./...` —— 公版自己 dogfooding 用相對路徑呼叫自己的 reusable。
+function Update-UsesLines([string[]]$Lines) {
+  $out = @()
+  foreach ($line in $Lines) {
+    if ($line -match '^\s*uses:\s*\./') { $out += $line; continue }
+    if ($line -match '^(\s*uses:\s*)\S+/\.github/workflows/([A-Za-z0-9._-]+\.yml)@\S+\s*$') {
+      $out += ("{0}{1}/.github/workflows/{2}@{3}" -f $Matches[1], $UsesRepo, $Matches[2], $Ref)
+      continue
+    }
+    $out += $line
+  }
+  return $out
+}
+
+# 過濾 with: 區塊：註解原樣保留、公版仍有的 key 保留使用者的值、
+# 公版已廢除的 key 移除（留著會讓 workflow 直接 invalid input 起不來）、最後補上缺的 key。
+function Merge-WithBlock([string[]]$Lines, [string[]]$Known, [string[]]$Additions, [ref]$Dropped) {
+  $out = @(); $inBlk = $false; $seen = @{}
+  function Append-Missing {
+    param($seen, $Known, $Additions)
+    $add = @()
+    foreach ($a in $Additions) {
+      if (-not $a) { continue }
+      $ak = ($a -split ':')[0]
+      if (-not $seen.ContainsKey($ak) -and ($Known -contains $ak)) { $add += ("      " + $a) }
+    }
+    return $add
+  }
+  foreach ($line in $Lines) {
+    if (-not $inBlk -and $line -match '^    with:\s*$') { $out += $line; $inBlk = $true; continue }
+    if ($inBlk) {
+      if ($line -match '^      ') {
+        if ($line -match '^      #') { $out += $line; continue }
+        if ($line -match '^      ([A-Za-z0-9_-]+):') {
+          $k = $Matches[1]; $seen[$k] = $true
+          if ($Known -contains $k) { $out += $line } else { $Dropped.Value += $k }
+          continue
+        }
+        $out += $line; continue
+      }
+      $out += (Append-Missing $seen $Known $Additions)
+      $inBlk = $false
+    }
+    $out += $line
+  }
+  if ($inBlk) { $out += (Append-Missing $seen $Known $Additions) }
+  return $out
+}
+
+# 全新安裝：整個 with: 區塊直接換成偵測結果
+function Set-WithBlock([string[]]$Lines, [string[]]$Additions) {
+  $out = @(); $inBlk = $false; $done = $false
+  foreach ($line in $Lines) {
+    if (-not $done -and $line -match '^    with:\s*$') {
+      $out += $line
+      foreach ($a in $Additions) { if ($a) { $out += ("      " + $a) } }
+      $inBlk = $true; $done = $true; continue
+    }
+    if ($inBlk -and $line -match '^      ') { continue }
+    $inBlk = $false
+    $out += $line
+  }
+  return $out
+}
+
+$CiAdditions = @(
+  ('python-version: "{0}"' -f $PyVer),
+  ('run-python: {0}'       -f (B $HasPy)),
+  ('run-docker-build: {0}' -f (B $HasDockerfile)),
+  'run-actionlint: true',
+  ('run-shellcheck: {0}'   -f (B $HasSh))
+)
+$SecAdditions = @(
+  ('python-version: "{0}"'    -f $PyVer),
+  ('scan-docker-image: {0}'   -f (B $HasDockerfile))
+)
+
+$Plumbing = @('ci.yml','security.yml','copilot-autofix-ci-security.yml',
+              'copilot-autofix-review.yml','copilot-autoreview-gate.yml')
+$ProjectOwned = @('workflows\copilot-setup-steps.yml','copilot-instructions.md',
+                  'pull_request_template.md','dependabot.yml')
+
+Write-Host "計畫:"
+foreach ($n in $Plumbing) {
+  if (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
+  else { Write-Host "  + 新增  .github\workflows\$n" }
+}
+foreach ($r in $ProjectOwned) {
+  if (Test-Path ".github\$r") { Write-Host "  = 保留  .github\$r（只另存 .new）" }
+  else { Write-Host "  + 新增  .github\$r" }
+}
+Write-Host ""
+
+if ($DryRun) { Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"; Remove-TmpClone; exit 0 }
+
+New-Item -ItemType Directory -Force -Path '.github\workflows' | Out-Null
+$Created = @(); $Merged = @(); $Kept = @(); $DroppedReport = @()
+
+foreach ($n in $Plumbing) {
+  $dst = ".github\workflows\$n"
+  $known = @()
+  $reu = Join-Path $Std ("\.github\workflows\" + $ReusableFor[$n])
+  if (Test-Path -LiteralPath $reu) { $known = Get-ReusableInputs $reu }
+
+  if (-not (Test-Path -LiteralPath $dst)) {
+    Copy-Item -LiteralPath (Join-Path $Tpl "workflows\$n") -Destination $dst -Force
+    $lines = Read-Lines $dst
+    if ($n -eq 'ci.yml')       { $lines = Set-WithBlock $lines $CiAdditions }
+    if ($n -eq 'security.yml') { $lines = Set-WithBlock $lines $SecAdditions }
+    $lines = Update-UsesLines $lines
+    Write-TextFile $dst ($lines -join "`n")
+    $Created += $n
+  } else {
+    $dropped = @()
+    $adds = @()
+    if ($n -eq 'ci.yml')       { $adds = $CiAdditions }
+    if ($n -eq 'security.yml') { $adds = $SecAdditions }
+    $lines = Merge-WithBlock (Read-Lines $dst) $known $adds ([ref]$dropped)
+    $lines = Update-UsesLines $lines
+    Write-TextFile $dst ($lines -join "`n")
+    foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
+    $Merged += $n
+  }
+}
+
+foreach ($r in $ProjectOwned) {
+  $src = Join-Path $Tpl $r
+  $dst = ".github\$r"
+  if (-not (Test-Path -LiteralPath $src)) { continue }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+  if (Test-Path -LiteralPath $dst) {
+    if ((Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash) { $Kept += ($r + "(相同)") }
+    else { Copy-Item -LiteralPath $src -Destination ($dst + ".new") -Force; $Kept += $r }
+  } else {
+    Copy-Item -LiteralPath $src -Destination $dst -Force
+    $Created += $r
+  }
 }
 
 Remove-TmpClone
 
-# ── 8. 後續步驟 ──────────────────────────────────────────────
+Write-Host "-----------------------------------------------------------"
+if ($Created.Count) { Write-Host ("+ 新增: " + ($Created -join ' ')) }
+if ($Merged.Count)  { Write-Host ("~ 合併: " + ($Merged  -join ' ')) }
+if ($Kept.Count)    { Write-Host ("= 保留（未覆蓋，另存 .new）: " + ($Kept -join ' ')) }
+if ($DroppedReport.Count) {
+  Write-Host ""
+  Warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）:"
+  $DroppedReport | ForEach-Object { Write-Host $_ }
+}
+Write-Host "-----------------------------------------------------------"
+
 @'
 
------------------------------------------------------------
-[OK] 檔案就位。接下來（依序）：
+接下來:
 
- 1. [必改] .github\copilot-instructions.md
+ 1. git diff  <- 先看清楚改了什麼，尤其是升級模式
+
+ 2. 若有 *.new 檔案: 那是新版範本，跟現有的比對後自行取捨，處理完把 .new 刪掉。
+    (copilot-instructions.md 這類是專案專屬內容，腳本刻意不覆蓋。)
+
+ 3. [必改] 全新導入務必改 .github\copilot-instructions.md ——
     把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
-    沒改是導入後最常見的失敗原因 —— Copilot 會照著錯的指令跑。
-
- 2. 檢查產生的內容
-      git diff --stat
-      type .github\workflows\ci.yml
-
- 3. 若專案沒有 pip / docker 相依，把 .github\dependabot.yml 裡
-    用不到的 package-ecosystem 區塊刪掉。
 
  4. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards
       git add .github
-      git commit -m "chore: 導入 ci-standards 公版"
+      git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
 
- 5. 等第一次 CI 跑完（check 名稱要先存在於 GitHub），再開分支保護。
-    三選一：
-      a) scripts/setup-branch-protection.sh <owner>/<repo>   （需要 gh + bash）
-      b) repo -> Settings -> Rules -> Rulesets -> 手動建立
-      c) 組織層級 ruleset 一次涵蓋所有 repo（推薦，搬到 org 之後）
+ 5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
 
- [i] 第一次一定會有東西紅 —— 那是掃描器真的找到問題。
-     先判斷是誤判還是真弱點，不要為了讓它變綠就關掉檢查。
-
- [i] 三支 copilot-auto* 在「導入這件事」的 PR 上不會生效 ——
-     workflow_run 觸發器只認 default branch 上的檔案，
-     要合併進 main 之後的下一個 PR 才會動。不是壞掉。
------------------------------------------------------------
+ [i] job id (ci / security) 刻意不動 —— 分支保護的 check 名稱綁著它。
 '@ | Write-Host

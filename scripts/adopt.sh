@@ -60,9 +60,17 @@ cd "$TARGET_ROOT"
 TMP_CLONE=""
 if [ -z "$STD" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  for cand in "${CODE_WORK:-}/ci-standards" "$SCRIPT_DIR/.."; do
+  CANDS="$SCRIPT_DIR/.."
+  # 只有 CODE_WORK 真的有值才加進候選 —— 否則 "${CODE_WORK:-}/ci-standards"
+  # 會變成絕對路徑 /ci-standards，機器上剛好有同名目錄就會誤判成公版。
+  if [ -n "${CODE_WORK:-}" ]; then CANDS="$CODE_WORK/ci-standards
+$CANDS"; fi
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
     if [ -d "$cand/templates/consumer-repo/.github" ]; then STD="$(cd "$cand" && pwd)"; break; fi
-  done
+  done <<EOF
+$CANDS
+EOF
 fi
 if [ -z "$STD" ]; then
   info "本機找不到公版，改用 HTTPS 淺層 clone（只需要 443 埠）…"
@@ -138,10 +146,13 @@ reusable_for() {
   esac
 }
 
-# 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）
+# 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）。
+# 刻意跳過 `uses: ./...` —— 公版自己 dogfooding 時用相對路徑呼叫自己的 reusable，
+# 把它改成 owner/repo@ref 會讓 PR 上跑的不再是「這個 PR 的版本」。
 patch_uses() {
   awk -v repo="$USES_REPO" -v ref="$REF" '
-    /^[[:space:]]*uses:[[:space:]]*[^ ]*\/\.github\/workflows\// {
+    /^[[:space:]]*uses:[[:space:]]*\.\// { print; next }
+    /^[[:space:]]*uses:[[:space:]]*[^ ]+\/\.github\/workflows\// {
       n=split($0, a, "/.github/workflows/")
       if (n==2) {
         split(a[2], b, "@")

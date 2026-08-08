@@ -27,17 +27,23 @@ check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（預期 [$3］，實�
 has()    { if grep -qF "$2" "$1"; then ok "$3"; else bad "$3"; fi; }
 hasnt()  { if grep -qF "$2" "$1"; then bad "$3"; else ok "$3"; fi; }
 
+# ⚠️ 不要寫成 new_repo x —— 命令替換會開子 shell，cd 不會影響主 shell，
+# 所有測試就會跑在呼叫者的當前目錄上（我第一版就是這樣把真的 repo 改掉了）。
+# 這裡直接在主 shell 切目錄，不回傳值。
 new_repo() {
-  d="$WORK/$1"; mkdir -p "$d"; cd "$d"
-  git init -q .; git config user.email t@t; git config user.name t
+  REPO_DIR="$WORK/$1"
+  mkdir -p "$REPO_DIR"
+  cd "$REPO_DIR"
+  git init -q .
+  git config user.email t@t
+  git config user.name t
   git commit -q --allow-empty -m init
-  echo "$d"
 }
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 A：全新導入（Python + Docker + shell script）\n'
 # ═════════════════════════════════════════════════════════════
-d="$(new_repo fresh)"
+new_repo fresh
 printf 'FROM python:3.11\n' > Dockerfile
 printf 'flask\n'            > requirements.txt
 printf '3.11\n'             > .python-version
@@ -56,7 +62,7 @@ if [ ! -e ".github/copilot-instructions.md.new" ]; then ok "全新導入不會�
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 B：升級既有的舊版呼叫端\n'
 # ═════════════════════════════════════════════════════════════
-d="$(new_repo upgrade)"
+new_repo upgrade
 printf 'FROM python:3.12\n' > Dockerfile
 printf 'flask\n'            > requirements.txt
 mkdir -p .github/workflows
@@ -147,14 +153,14 @@ fi
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 D：--dry-run 不得動到任何檔案\n'
 # ═════════════════════════════════════════════════════════════
-d="$(new_repo dryrun)"
+new_repo dryrun
 "$ADOPT" --std "$STD" --dry-run >/dev/null
 if [ ! -d .github ]; then ok "--dry-run 沒有建立任何檔案"; else bad "--dry-run 動到檔案了"; fi
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 E：--uses-repo（搬到組織時換掉 owner/repo）\n'
 # ═════════════════════════════════════════════════════════════
-d="$(new_repo orgmove)"
+new_repo orgmove
 "$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
 has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 owner/repo 已換成 ACME"
 
