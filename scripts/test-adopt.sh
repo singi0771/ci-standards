@@ -176,6 +176,34 @@ new_repo orgmove
 has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 owner/repo 已換成 ACME"
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 F：巢狀結構（外層資料夾包著真正的 clone）\n'
+# ═════════════════════════════════════════════════════════════
+# OneDrive / 網路磁碟常見：CodingProject/AdminAutoTools/AdminAutoTools/
+# 只回「不是 git repo」會讓人以為 clone 壞了，應該要提示往下一層。
+mkdir -p "$WORK/wrapper"
+cd "$WORK/wrapper"
+new_repo wrapper/inner
+cd "$WORK/wrapper"
+OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
+case "$OUT" in
+  *"你要的應該是其中之一"*) ok "外層目錄會提示往下一層找" ;;
+  *) bad "外層目錄沒有提示子目錄（實際輸出：$OUT）" ;;
+esac
+case "$OUT" in
+  *"/wrapper/inner"*) ok "提示中列出了正確的子目錄" ;;
+  *) bad "提示中沒有列出 inner" ;;
+esac
+
+# 真的沒有任何 git repo 時，維持原本的簡短訊息
+mkdir -p "$WORK/empty-dir"
+cd "$WORK/empty-dir"
+OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
+case "$OUT" in
+  *"請先 git init 或 clone"*) ok "沒有子 repo 時維持原訊息" ;;
+  *) bad "沒有子 repo 時訊息不對（實際輸出：$OUT）" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════
 printf '\n───────────────────────────────\n'
 printf '通過 %d／失敗 %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then exit 1; fi
