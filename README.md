@@ -96,11 +96,30 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 ### 步驟 1 — 複製呼叫端範本
 
-在**目標專案根目錄**執行：
+**一鍵版（推薦）** —— 會自動偵測技術棧並把參數填好，跨 macOS / Windows：
+
+```bash
+cd /path/to/your-project
+
+/path/to/ci-standards/scripts/adopt.sh              # macOS / Linux / Git Bash
+```
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.ps1   # Windows
+```
+
+先加 `--dry-run` / `-DryRun` 看它偵測到什麼，確認無誤再真的跑。
+**只需要 `git`，不需要 `gh`**；內網、離線、Proxy 的做法見 [`docs/ADOPT.md`](docs/ADOPT.md)。
+
+用了一鍵版的話，**步驟 2 的 ① ② 可以跳過**（腳本已經填好），只剩 ③ 要自己改。
+
+<details>
+<summary>手動版</summary>
 
 ```bash
 cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 ```
+
+</details>
 
 複製過去的東西：
 
@@ -516,9 +535,13 @@ ci-standards/
 │   ├── CODEOWNERS
 │   └── dependabot.yml                 ← 本 repo 只有 github-actions 相依
 │
+├── .gitattributes                     ← 強制 LF 簽出；沒有它 Windows 會踩到 CRLF 的坑
 ├── scripts/
-│   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset
+│   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
+│   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝）
+│   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
 ├── docs/
+│   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
 │   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
 │   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
 │   ├── MIGRATION-TO-ORG.md            ← 把本 repo 搬到組織底下的 checklist
@@ -569,6 +592,7 @@ ci-standards/
 
 | 文件 | 給誰看 |
 |---|---|
+| [`docs/ADOPT.md`](docs/ADOPT.md) | 一鍵導入 —— Windows / macOS、內網與離線做法、`gh` 是不是必要 |
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含排查步驟 |
 | [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 管理者 —— 搬到組織底下的 checklist |

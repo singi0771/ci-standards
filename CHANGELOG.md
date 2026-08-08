@@ -12,7 +12,26 @@
 
 ## [未發佈]
 
-（目前沒有未發佈的變更。`v1` 指向 `v1.1.0`。）
+### 新增
+- **一鍵導入腳本**，跨平台雙版本：
+  - `scripts/adopt.sh` —— macOS / Linux / Windows Git Bash
+  - `scripts/adopt.ps1` —— Windows PowerShell 5.1（**系統內建，零安裝**）
+
+  會自動偵測 Dockerfile / Python / shell script 並把 `ci.yml`、`security.yml`
+  的參數填好，已存在的 `.github/workflows` 會先備份不會覆蓋。
+
+  **相依只有 `git`** —— 刻意不用 `gh` / `jq` / `yq` / `python` / `curl`，
+  因為受管制的公司環境上那些都不保證裝得起來。導入本身是純檔案操作，不碰網路。
+- `docs/ADOPT.md` —— 跨平台用法、內網／離線／Proxy 的做法，以及
+  「哪些步驟其實不需要 `gh`」的對照表（結論：`gh` 完全是選配）。
+- **`.gitattributes`** —— 強制 `.sh` / `.yml` / `.ps1` 以 LF 簽出。
+  沒有它的話，Git for Windows 預設 `core.autocrlf=true` 會把 shell script
+  轉成 CRLF，bash 會噴 `bad interpreter: /usr/bin/env: ...^M` ——
+  而且 `\r` 不顯示，錯誤訊息完全看不出原因。推廣到 Windows 環境前必須先有這個。
+
+### 變更
+- README 的「步驟 1」改為以一鍵導入為主、手動複製收進 `<details>`。
+  用一鍵版時步驟 2 的 ①② 可以跳過。
 
 ---
 

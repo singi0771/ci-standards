@@ -1,0 +1,31 @@
+# 換行處理 —— 沒有這個檔案，Windows 會踩到很難查的坑。
+#
+# Git for Windows 預設 core.autocrlf=true：簽出時把 LF 轉成 CRLF。
+# 對 shell script 來說那是致命的 —— bash 讀到行尾的 \r 會噴
+#   bash: ./adopt.sh: /usr/bin/env: bad interpreter: No such file or directory
+# 而且錯誤訊息完全看不出原因（\r 不會顯示）。
+#
+# YAML 也一樣：CRLF 的 workflow 檔多數情況可以跑，但 actionlint / shellcheck
+# 對 run: 區塊的解析會出現莫名其妙的警告。
+#
+# 所以：文字檔一律以 LF 存進 repo，並強制以 LF 簽出。
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+
+# PowerShell 在 Windows 上以 CRLF 為慣例，且 PS 5.1 對 LF 也完全沒問題；
+# 統一用 LF，避免同一個 repo 兩種行尾。
+*.ps1   text eol=lf
+
+# 二進位檔不要做任何轉換
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
