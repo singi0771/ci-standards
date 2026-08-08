@@ -52,7 +52,28 @@ fi
 
 # ── 目標 repo ────────────────────────────────────────────────
 cd "$TARGET" || die "進不去 $TARGET"
-git rev-parse --git-dir >/dev/null 2>&1 || die "$TARGET 不是 git repo（請先 git init 或 clone）"
+# 不是 git repo 時，往下找一層再回報。
+# OneDrive / 網路磁碟很常見「外層資料夾包著真正的 clone」這種結構
+# （例如 CodingProject/AdminAutoTools/AdminAutoTools/），
+# 只回一句「不是 git repo」會讓人以為 clone 壞了。
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  SUGGEST=""
+  for d in ./*/; do
+    [ -d "$d" ] || continue
+    if [ -d "$d.git" ]; then
+      SUGGEST="$SUGGEST
+      $(cd "$d" && pwd)"
+    fi
+  done
+  if [ -n "$SUGGEST" ]; then
+    die "$TARGET 不是 git repo，但它底下這些子目錄是 —— 你要的應該是其中之一：
+$SUGGEST
+
+    cd 進去之後再跑一次，或用 --target 指過去。
+    （OneDrive／網路磁碟常見：外層資料夾包著真正的 clone）"
+  fi
+  die "$TARGET 不是 git repo（請先 git init 或 clone）"
+fi
 TARGET_ROOT="$(git rev-parse --show-toplevel)"
 cd "$TARGET_ROOT"
 

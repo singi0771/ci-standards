@@ -62,7 +62,20 @@ if ($Std) {
 if (-not (Test-Path -LiteralPath $Target)) { Die "進不去 $Target" }
 Set-Location -LiteralPath $Target
 $TargetRoot = (& git rev-parse --show-toplevel 2>$null)
-if ($LASTEXITCODE -ne 0 -or -not $TargetRoot) { Die "$Target 不是 git repo（請先 git init 或 clone）" }
+if ($LASTEXITCODE -ne 0 -or -not $TargetRoot) {
+  # 往下找一層再回報。OneDrive / 網路磁碟很常見「外層資料夾包著真正的 clone」
+  # 這種結構，只回一句「不是 git repo」會讓人以為 clone 壞了。
+  $suggest = Get-ChildItem -Directory -ErrorAction SilentlyContinue |
+             Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
+             ForEach-Object { "      " + $_.FullName }
+  if ($suggest) {
+    Die ("$Target 不是 git repo，但它底下這些子目錄是 —— 你要的應該是其中之一：`n" +
+         ($suggest -join "`n") +
+         "`n`n    cd 進去之後再跑一次，或用 -Target 指過去。" +
+         "`n    （OneDrive／網路磁碟常見：外層資料夾包著真正的 clone）")
+  }
+  Die "$Target 不是 git repo（請先 git init 或 clone）"
+}
 Set-Location -LiteralPath ($TargetRoot.Trim())
 $TargetRoot = (Get-Location).Path
 
