@@ -117,13 +117,18 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 # ── 4. 備份既有 workflow ─────────────────────────────────────
-if [ -d .github/workflows ] && [ -n "$(ls -A .github/workflows 2>/dev/null)" ]; then
+# 用 find 而不是 ls —— 檔名含空白或特殊字元時，解析 ls 的輸出會出錯（shellcheck SC2012）。
+if [ -d .github/workflows ] && [ -n "$(find .github/workflows -mindepth 1 -print -quit 2>/dev/null)" ]; then
   BK=".github/workflows.backup"
-  n=1; while [ -e "$BK-$n" ]; do n=$((n+1)); done
+  n=1
+  while [ -e "$BK-$n" ]; do n=$((n+1)); done
   BK="$BK-$n"
   cp -R .github/workflows "$BK"
   info "⚠️  已有 .github/workflows，先備份到 $BK"
-  ls -1 "$BK" | sed 's/^/     /'
+  # ${f##*/} 取檔名，不必另外開 basename 程序；glob 展開不需要解析任何輸出。
+  for f in "$BK"/*; do
+    if [ -e "$f" ]; then printf '     %s\n' "${f##*/}"; fi
+  done
   info ""
 fi
 
