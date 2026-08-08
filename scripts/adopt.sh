@@ -1,61 +1,62 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-# 一鍵把 ci-standards 公版導入一個專案（macOS / Linux / Windows Git Bash）
+# 把 ci-standards 公版導入 / 升級一個專案（macOS / Linux / Windows Git Bash）
 #
-# 用法：
-#   ./adopt.sh                          # 導入目前目錄
-#   ./adopt.sh --target ../MyProject    # 導入指定目錄
-#   ./adopt.sh --std ~/code/ci-standards   # 指定公版 clone 的位置
-#   ./adopt.sh --ref v1.1.0             # 釘死特定版本（預設 v1）
-#   ./adopt.sh --dry-run                # 只印要做什麼，不動檔案
+#   ./adopt.sh                       # 導入或升級目前目錄
+#   ./adopt.sh --dry-run             # 只印計畫，不動任何檔案
+#   ./adopt.sh --target ../MyProj    # 指定目標
+#   ./adopt.sh --std ~/ci-standards  # 指定公版 clone 位置
+#   ./adopt.sh --ref v1.1.0          # 釘死特定版本（預設 v1）
+#   ./adopt.sh --uses-repo ORG/ci-standards   # 搬到組織後換掉 uses: 的 owner/repo
 #
-# 相依：只需要 git 與內建 shell（POSIX 工具：awk / find / cp）。
-#   刻意不用 gh / jq / yq / python / curl —— 鎖死的公司 Windows 上
-#   那些都不保證存在。導入這一步完全不碰網路（除非要自己 clone 公版）。
+# 相依：只需要 git 與內建 shell（awk / find / cp）。
+#   刻意不用 gh / jq / yq / python / curl —— 受管制的公司 Windows 上
+#   那些都不保證存在。導入本身是純檔案操作，不碰網路。
 #
-# Windows：用 Git Bash 執行（Git for Windows 內建）。
-#   PowerShell 使用者請改用同目錄的 adopt.ps1。
+# Windows：用 Git Bash 執行，或改用同目錄的 adopt.ps1（PowerShell 5.1 原生）。
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
 STD_REPO_URL="https://github.com/singi0771/ci-standards.git"
+DEFAULT_USES_REPO="singi0771/ci-standards"
 
 TARGET="$PWD"
 STD=""
 REF="v1"
+USES_REPO="$DEFAULT_USES_REPO"
 DRY_RUN=false
 
-die() { printf '❌ %s\n' "$1" >&2; exit 1; }
+die()  { printf '❌ %s\n' "$1" >&2; exit 1; }
 info() { printf '%s\n' "$1"; }
+warn() { printf '⚠️  %s\n' "$1"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --target)  TARGET="${2:?--target 需要一個路徑}"; shift 2 ;;
-    --std)     STD="${2:?--std 需要一個路徑}";       shift 2 ;;
-    --ref)     REF="${2:?--ref 需要一個 tag/branch}"; shift 2 ;;
-    --dry-run) DRY_RUN=true; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --target)    TARGET="${2:?--target 需要一個路徑}";     shift 2 ;;
+    --std)       STD="${2:?--std 需要一個路徑}";           shift 2 ;;
+    --ref)       REF="${2:?--ref 需要一個 tag/branch}";    shift 2 ;;
+    --uses-repo) USES_REPO="${2:?--uses-repo 需要 owner/repo}"; shift 2 ;;
+    --dry-run)   DRY_RUN=true; shift ;;
+    -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
     *) die "不認得的參數：$1（用 --help 看用法）" ;;
   esac
 done
 
 command -v git >/dev/null 2>&1 || die "找不到 git。這是唯一的必要相依。"
 
-# --std / --target 都可能是相對路徑，而下面會 cd 到目標 repo 根目錄。
-# 先在「使用者當初所在的目錄」把 --std 解成絕對路徑，否則
-# `adopt.sh --target ../MyProject --std ./ci-standards` 會找不到公版。
+# --std / --target 可能是相對路徑，而下面會 cd 到目標 repo 根目錄。
+# 先在使用者當初所在的目錄把 --std 解成絕對路徑。
 if [ -n "$STD" ]; then
   STD="$(cd "$STD" 2>/dev/null && pwd)" || die "--std 指的路徑不存在"
 fi
 
-# ── 1. 確認目標是 git repo ───────────────────────────────────
+# ── 目標 repo ────────────────────────────────────────────────
 cd "$TARGET" || die "進不去 $TARGET"
 git rev-parse --git-dir >/dev/null 2>&1 || die "$TARGET 不是 git repo（請先 git init 或 clone）"
 TARGET_ROOT="$(git rev-parse --show-toplevel)"
 cd "$TARGET_ROOT"
 
-# ── 2. 找到公版範本 ──────────────────────────────────────────
-# 順序：--std 參數 → $CODE_WORK/ci-standards → 腳本自己所在的 repo → 淺層 clone
+# ── 公版範本 ─────────────────────────────────────────────────
 TMP_CLONE=""
 if [ -z "$STD" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -73,75 +74,134 @@ fi
 TPL="$STD/templates/consumer-repo/.github"
 [ -d "$TPL" ] || die "$STD 底下找不到 templates/consumer-repo/.github"
 
+cleanup_tmp() { if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi; }
+trap cleanup_tmp EXIT
+
 info "── 目標：$TARGET_ROOT"
-info "── 公版：$STD（ref: $REF）"
+info "── 公版：$STD（ref: $REF，uses: $USES_REPO）"
 info ""
 
-# ── 3. 偵測技術棧 ────────────────────────────────────────────
-# 一律用 if，不用 `cmd && VAR=true` —— 那種寫法在 set -e 下的行為很容易誤判，
-# 而這個 repo 自己的規範就是「不要讓判斷失敗被吃掉」。
+# ── 偵測技術棧 ───────────────────────────────────────────────
 found_any() {
   [ -n "$(find . -maxdepth "$1" -name "$2" -not -path './.git/*' -print -quit 2>/dev/null)" ]
 }
 
 HAS_DOCKERFILE=false
 if [ -f Dockerfile ]; then HAS_DOCKERFILE=true; fi
-
 HAS_PY=false
 if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || found_any 2 '*.py'; then
   HAS_PY=true
 fi
-
 HAS_SH=false
 if found_any 3 '*.sh'; then HAS_SH=true; fi
-
 PYVER="3.12"
-if [ -f .python-version ]; then
-  PYVER="$(tr -d ' \r\n' < .python-version)"
+if [ -f .python-version ]; then PYVER="$(tr -d ' \r\n' < .python-version)"; fi
+
+# ── 判斷模式：全新安裝 vs 升級 ───────────────────────────────
+MODE="install"
+if [ -f .github/workflows/ci.yml ] || [ -f .github/workflows/security.yml ]; then
+  MODE="upgrade"
 fi
 
 info "偵測結果："
-info "  Dockerfile   : $HAS_DOCKERFILE   → run-docker-build / scan-docker-image"
-info "  Python       : $HAS_PY (版本 $PYVER)   → run-python"
-info "  shell script : $HAS_SH   → run-shellcheck"
+info "  模式         : $MODE $( [ "$MODE" = upgrade ] && echo '（已有呼叫端，改用合併模式）' || echo '（全新導入）')"
+info "  Dockerfile   : $HAS_DOCKERFILE"
+info "  Python       : $HAS_PY（版本 $PYVER）"
+info "  shell script : $HAS_SH"
 info ""
 
-cleanup_tmp() {
-  if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi
+# ─────────────────────────────────────────────────────────────
+# 讀公版 reusable 宣告了哪些 input。
+# 用「公版自己的宣告」當事實來源，而不是在腳本裡寫死一份清單 ——
+# 公版加減 input 時這裡自動跟上，不會漂移。
+# ─────────────────────────────────────────────────────────────
+reusable_inputs() {
+  awk '
+    /^    inputs:$/ { inblk=1; next }
+    inblk && /^[^ ]/ { inblk=0 }
+    inblk && /^  [a-z]/ { inblk=0 }
+    inblk && match($0, /^      [A-Za-z0-9_-]+:[[:space:]]*$/) {
+      line=$0; sub(/^ +/, "", line); sub(/:[[:space:]]*$/, "", line); print line
+    }
+  ' "$1"
 }
 
-if [ "$DRY_RUN" = true ]; then
-  info "（--dry-run：到此為止，沒有動任何檔案）"
-  cleanup_tmp
-  exit 0
-fi
+# caller 檔名 → 對應的公版 reusable
+reusable_for() {
+  case "$1" in
+    ci.yml)                        echo "$STD/.github/workflows/ci-reusable.yml" ;;
+    security.yml)                  echo "$STD/.github/workflows/security-reusable.yml" ;;
+    copilot-autofix-ci-security.yml) echo "$STD/.github/workflows/copilot-autofix-reusable.yml" ;;
+    copilot-autofix-review.yml)    echo "$STD/.github/workflows/copilot-autofix-review-reusable.yml" ;;
+    copilot-autoreview-gate.yml)   echo "$STD/.github/workflows/copilot-autoreview-reusable.yml" ;;
+    *) echo "" ;;
+  esac
+}
 
-# ── 4. 備份既有 workflow ─────────────────────────────────────
-# 用 find 而不是 ls —— 檔名含空白或特殊字元時，解析 ls 的輸出會出錯（shellcheck SC2012）。
-if [ -d .github/workflows ] && [ -n "$(find .github/workflows -mindepth 1 -print -quit 2>/dev/null)" ]; then
-  BK=".github/workflows.backup"
-  n=1
-  while [ -e "$BK-$n" ]; do n=$((n+1)); done
-  BK="$BK-$n"
-  cp -R .github/workflows "$BK"
-  info "⚠️  已有 .github/workflows，先備份到 $BK"
-  # ${f##*/} 取檔名，不必另外開 basename 程序；glob 展開不需要解析任何輸出。
-  for f in "$BK"/*; do
-    if [ -e "$f" ]; then printf '     %s\n' "${f##*/}"; fi
-  done
-  info ""
-fi
+# 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）
+patch_uses() {
+  awk -v repo="$USES_REPO" -v ref="$REF" '
+    /^[[:space:]]*uses:[[:space:]]*[^ ]*\/\.github\/workflows\// {
+      n=split($0, a, "/.github/workflows/")
+      if (n==2) {
+        split(a[2], b, "@")
+        sub(/[^ ]+$/, repo "/.github/workflows/" b[1] "@" ref, $0)
+      }
+    }
+    { print }
+  ' "$1" > "$1.tmp"
+  mv "$1.tmp" "$1"
+}
 
-# ── 5. 複製範本 ──────────────────────────────────────────────
-mkdir -p .github
-cp -R "$TPL/." .github/
-info "✅ 已複製範本到 .github/"
+# 過濾 with: 區塊：
+#   - 註解與空行原樣保留（不會弄丟 # max-attempts: "3" 這種提示）
+#   - key 仍存在於公版 → 保留使用者現有的值（絕不覆寫他調過的設定）
+#   - key 已被公版移除 → 刪掉並回報（留著會讓 workflow 直接 invalid input 起不來）
+#   - 最後補上「公版有、但這個檔案沒有」的 key（只補偵測得出來的那幾個）
+filter_with_block() {
+  f="$1"; known="$2"; additions="$3"
+  awk -v known="$known" -v additions="$additions" -v dropfile="$f.dropped" '
+    BEGIN { split(known, K, "\n"); for (i in K) if (K[i] != "") kn[K[i]]=1 }
+    /^    with:[[:space:]]*$/ { print; inblk=1; next }
+    inblk && /^      / {
+      line=$0
+      if (line ~ /^      #/ || line ~ /^[[:space:]]*$/) { print; next }
+      if (match(line, /^      [A-Za-z0-9_-]+:/)) {
+        k=line; sub(/^ +/, "", k); sub(/:.*$/, "", k)
+        seen[k]=1
+        if (k in kn) { print } else { print k >> dropfile }
+        next
+      }
+      print; next
+    }
+    inblk {
+      # with: 區塊結束 —— 把缺的 key 補上
+      split(additions, A, "\n")
+      for (i=1; i<=length(A); i++) {
+        if (A[i] == "") continue
+        ak=A[i]; sub(/:.*$/, "", ak)
+        if (!(ak in seen) && (ak in kn)) print "      " A[i]
+      }
+      inblk=0
+    }
+    { print }
+    END {
+      if (inblk) {
+        split(additions, A, "\n")
+        for (i=1; i<=length(A); i++) {
+          if (A[i] == "") continue
+          ak=A[i]; sub(/:.*$/, "", ak)
+          if (!(ak in seen) && (ak in kn)) print "      " A[i]
+        }
+      }
+    }
+  ' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+}
 
-# ── 6. 依偵測結果改參數 ──────────────────────────────────────
-# 用 awk 而不是 sed -i：BSD sed（macOS）與 GNU sed（Linux/Git Bash）的
-# -i 參數不相容，寫成兩套很容易在其中一個平台上默默失效。
-patch_with_block() {
-  local f="$1" blk="$2"
+# 全新安裝時，直接把整個 with: 區塊換成偵測結果
+replace_with_block() {
+  f="$1"; blk="$2"
   awk -v blk="$blk" '
     /^    with:$/ && !seen { print; printf "%s", blk; inblk=1; seen=1; next }
     inblk && /^      / { next }
@@ -150,72 +210,127 @@ patch_with_block() {
   mv "$f.tmp" "$f"
 }
 
-patch_key() {
-  local f="$1" key="$2" val="$3"
-  awk -v k="$key" -v v="$val" '
-    $0 ~ "^[[:space:]]*" k ":" { sub(/:.*/, ": " v) } { print }
-  ' "$f" > "$f.tmp"
-  mv "$f.tmp" "$f"
-}
+CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""
 
-CI_WITH="      python-version: \"$PYVER\"
-      run-python: $HAS_PY
-      run-docker-build: $HAS_DOCKERFILE
-      run-actionlint: true
-      run-shellcheck: $HAS_SH
-"
-patch_with_block .github/workflows/ci.yml "$CI_WITH"
-patch_key .github/workflows/security.yml "scan-docker-image" "$HAS_DOCKERFILE"
-patch_key .github/workflows/security.yml "python-version" "\"$PYVER\""
-info "✅ 已依偵測結果調整 ci.yml / security.yml"
+# ── 兩類檔案，兩種策略 ───────────────────────────────────────
+# PLUMBING：純管線，可以就地升級（保留使用者的參數與 on: 觸發設定）
+PLUMBING="ci.yml security.yml copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
+# PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
+PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml"
 
-# ── 7. 換掉 @v1 為指定的 ref ─────────────────────────────────
-if [ "$REF" != "v1" ]; then
-  # 只換行尾的 @v1（也就是 uses: 那幾行）。註解裡提到的 @v1 不在行尾，不會被動到。
-  for f in .github/workflows/*.yml; do
-    awk -v r="$REF" '{ gsub(/@v1$/, "@" r); print }' "$f" > "$f.tmp"
-    mv "$f.tmp" "$f"
-  done
-  info "✅ 已把 uses: 的 ref 換成 $REF"
+CI_ADDITIONS="python-version: \"$PYVER\"
+run-python: $HAS_PY
+run-docker-build: $HAS_DOCKERFILE
+run-actionlint: true
+run-shellcheck: $HAS_SH"
+
+SEC_ADDITIONS="python-version: \"$PYVER\"
+scan-docker-image: $HAS_DOCKERFILE"
+
+plan_line() { info "  $1"; }
+
+info "計畫："
+for name in $PLUMBING; do
+  if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/$name（保留既有參數、更新 uses:、移除已廢除的 input）"
+  else plan_line "＋ 新增  .github/workflows/$name"; fi
+done
+for rel in $PROJECT_OWNED; do
+  if [ -f ".github/$rel" ]; then plan_line "＝ 保留  .github/$rel（已存在，只另存 .new 供比對）"
+  else plan_line "＋ 新增  .github/$rel"; fi
+done
+info ""
+
+if [ "$DRY_RUN" = true ]; then
+  info "（--dry-run：到此為止，沒有動任何檔案）"
+  exit 0
 fi
 
-cleanup_tmp
+mkdir -p .github/workflows
 
-# ── 8. 後續步驟 ──────────────────────────────────────────────
+# ── PLUMBING ─────────────────────────────────────────────────
+for name in $PLUMBING; do
+  dst=".github/workflows/$name"
+  reu="$(reusable_for "$name")"
+  known=""
+  if [ -n "$reu" ] && [ -f "$reu" ]; then known="$(reusable_inputs "$reu")"; fi
+
+  if [ ! -f "$dst" ]; then
+    cp "$TPL/workflows/$name" "$dst"
+    case "$name" in
+      ci.yml)       replace_with_block "$dst" "$(printf '%s\n' "$CI_ADDITIONS"  | sed 's/^/      /')" ;;
+      security.yml) replace_with_block "$dst" "$(printf '%s\n' "$SEC_ADDITIONS" | sed 's/^/      /')" ;;
+    esac
+    patch_uses "$dst"
+    CREATED="$CREATED $name"
+  else
+    rm -f "$dst.dropped"
+    case "$name" in
+      ci.yml)       filter_with_block "$dst" "$known" "$CI_ADDITIONS" ;;
+      security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
+      *)            filter_with_block "$dst" "$known" "" ;;
+    esac
+    patch_uses "$dst"
+    if [ -s "$dst.dropped" ]; then
+      while IFS= read -r k; do
+        DROPPED_REPORT="$DROPPED_REPORT
+    $name → 移除已廢除的 input：$k"
+      done < "$dst.dropped"
+    fi
+    rm -f "$dst.dropped"
+    MERGED="$MERGED $name"
+  fi
+done
+
+# ── PROJECT_OWNED ────────────────────────────────────────────
+for rel in $PROJECT_OWNED; do
+  src="$TPL/$rel"; dst=".github/$rel"
+  [ -f "$src" ] || continue
+  mkdir -p "$(dirname "$dst")"
+  if [ -f "$dst" ]; then
+    if cmp -s "$src" "$dst"; then
+      KEPT="$KEPT $rel(相同)"
+    else
+      cp "$src" "$dst.new"
+      KEPT="$KEPT $rel"
+    fi
+  else
+    cp "$src" "$dst"
+    CREATED="$CREATED $rel"
+  fi
+done
+
+# ── 報告 ─────────────────────────────────────────────────────
+info "───────────────────────────────────────────────────────────"
+if [ -n "$CREATED" ]; then info "＋ 新增：$CREATED"; fi
+if [ -n "$MERGED" ];  then info "↻ 合併：$MERGED"; fi
+if [ -n "$KEPT" ];    then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
+if [ -n "$DROPPED_REPORT" ]; then
+  info ""
+  warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）：$DROPPED_REPORT"
+fi
+info "───────────────────────────────────────────────────────────"
+
 cat <<'NEXT'
 
-───────────────────────────────────────────────────────────
-✅ 檔案就位。接下來（依序）：
+接下來：
 
- 1. ⚠️ 必改：.github/copilot-instructions.md
+ 1. git diff  ← 先看清楚改了什麼，尤其是升級模式
+
+ 2. 若有 *.new 檔案：那是新版範本，跟你現有的比對後自行取捨，
+    處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
+    腳本刻意不覆蓋。）
+
+ 3. ⚠️ 全新導入務必改 .github/copilot-instructions.md ——
     把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
-    沒改是導入後最常見的失敗原因 —— Copilot 會照著錯的指令跑。
-
- 2. 檢查產生的內容
-      git diff --stat
-      cat .github/workflows/ci.yml
-
- 3. 若專案沒有 pip / docker 相依，把 .github/dependabot.yml 裡
-    用不到的 package-ecosystem 區塊刪掉。
+    沒改是導入後最常見的失敗原因。
 
  4. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards
-      git add .github
-      git commit -m "chore: 導入 ci-standards 公版"
+      git add .github && git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
 
- 5. 等第一次 CI 跑完（check 名稱要先存在於 GitHub），再開分支保護。
-    三選一：
-      a) scripts/setup-branch-protection.sh <owner>/<repo>   （需要 gh）
-      b) repo → Settings → Rules → Rulesets → 手動建立
-      c) 組織層級 ruleset 一次涵蓋所有 repo（推薦，搬到 org 之後）
-    詳見公版 README 的「分支保護」一節。
+ 5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
 
- ⓘ 第一次一定會有東西紅 —— 那是掃描器真的找到問題。
-   先判斷是誤判還是真弱點，不要為了讓它變綠就關掉檢查。
-
- ⓘ 三支 copilot-auto* 在「導入這件事」的 PR 上不會生效 ——
-   workflow_run 觸發器只認 default branch 上的檔案，
-   要合併進 main 之後的下一個 PR 才會動。不是壞掉。
-───────────────────────────────────────────────────────────
+ ⓘ job id（ci / security）刻意不動 —— 分支保護的 check 名稱綁著它，
+   改了既有 ruleset 就會對不上。
 NEXT

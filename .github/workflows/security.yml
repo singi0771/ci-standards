@@ -1,29 +1,13 @@
-# 本 repo 自己的安全掃描 —— 公版對自己也要適用（dogfooding）。
 name: Security Scan
-
 on:
-  push:
-    branches: [main]
-    paths-ignore: ["**/*.md", "docs/**"]
-  # pull_request 不加 paths-ignore —— Security Gate 是 required check，
-  # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死
   pull_request:
   schedule:
-    - cron: "0 3 * * 1"        # 每週一完整重掃
-
-concurrency:
-  group: security-${{ github.ref }}
-  cancel-in-progress: true
-
+    - cron: "30 19 * * 3"        # 這個專案自己調過的排程，必須保留
 jobs:
   security:
-    uses: ./.github/workflows/security-reusable.yml
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1.1.0
     with:
-      scan-docker-image: false   # 本 repo 沒有 Dockerfile
-      fail-on-findings: true
-      # 本 repo 是 public，理論上可以設 true 把結果寫進 Security 分頁（不需要 GHAS），
-      # 但 security-reusable 的 workflow 層 permissions 是 contents: read，
-      # 而被呼叫的 reusable 只能「縮減」呼叫端授予的權限、不能擴張 ——
-      # 亦即呼叫端就算給了 security-events: write 也可能被縮掉、upload 403。
-      # 這條路徑還沒實測過，先維持 false，另外開一次驗證再打開。
-      upload-sarif: false
+      python-version: "3.9"
+      severity: "CRITICAL,HIGH,MEDIUM"
+      fail-on-findings: false
+      scan-docker-image: true
