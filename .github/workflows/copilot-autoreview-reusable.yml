@@ -157,8 +157,13 @@ jobs:
             && echo "Copilot review requested." \
             || echo "Warning: Copilot review API call failed. Check repo Copilot settings."
 
-      # 5) @copilot 觸發 coding agent（用 printf 避免 YAML block 縮排問題）
-      - name: Trigger Copilot coding agent
+      # 5) 貼去重標記留言（<!-- auto-review-request:SHA --> 是步驟 3 guard 的記帳依據）
+      #
+      # 這裡「不」@copilot：github-actions[bot] 發的 mention 會被 Copilot coding agent
+      # 忽略（防自動化迴圈），實測從未喚醒過 agent —— 別再假裝有用。
+      # 「依 review 意見自動修正」由 autofix-review workflow 負責：review 送出且帶
+      # inline 意見時，用真人 PAT 發 @copilot（見 copilot-autofix-review-reusable.yml）。
+      - name: Post review-request marker comment
         if: ${{ steps.guard.outputs.action == 'review' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -166,10 +171,10 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ inputs.head-sha }}
         run: |
-          # 不要叫 Copilot「approve 此 PR」——Copilot code review 送出的是 COMMENT 類型的
-          # review，它不會（也不能）approve。寫成那樣只會讓人等一個永遠不會出現的 approval。
+          # 不要寫「請 approve 此 PR」——Copilot code review 只會送 COMMENT 型 review，
+          # 不會（也不能）approve；寫了只會讓人等一個永遠不會出現的 approval。
           # shellcheck disable=SC2016  # 單引號內的反引號是 Markdown 語法，不是命令替換
-          BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`）\n\n@copilot 請審閱此 PR 的程式碼品質、安全性與最佳實踐（含邏輯正確性、錯誤處理、命名清晰度）。若發現任何問題，請直接修正後 commit。\n\n審查意見處理完畢後，由人工確認並 Merge。' \
+          BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`），已嘗試透過 API 請 Copilot 進行 code review。\n\nReview 若帶修改意見，將由 autofix workflow 自動請 Copilot coding agent 修正；意見處理完畢後，由人工確認並 Merge。' \
             "$HEAD_SHA" "$HEAD_SHA")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \
