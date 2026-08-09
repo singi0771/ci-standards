@@ -63,7 +63,7 @@ jobs:
             --config auto \
             --error --sarif --output=semgrep.sarif
       - name: Upload SARIF to Security tab
-        if: ${{ always() && inputs.upload-sarif }}
+        if: ${{ inputs.upload-sarif }}
         uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           sarif_file: semgrep.sarif
