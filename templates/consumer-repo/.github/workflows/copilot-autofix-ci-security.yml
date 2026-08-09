@@ -1,6 +1,9 @@
 # 薄殼：CI/Security 失敗 → 呼叫公版讓 Copilot 自動修。
 # 觸發器必須在本地（workflow_run），但邏輯全在中央公版；改邏輯只要移動 @v1，本檔幾乎不需再動。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+#
+# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`（設定方式見公版 README）——
+#    @copilot mention 必須由真人帳號發出，bot 發的會被 coding agent 忽略。
 name: Copilot Autofix — CI/Security
 
 on:
@@ -25,3 +28,5 @@ jobs:
       run-id:        ${{ github.event.workflow_run.id }}
       run-url:       ${{ github.event.workflow_run.html_url }}
       # max-attempts: "3"   # 要調整每個 PR 自動修正次數上限時取消註解
+    secrets:
+      copilot-trigger-pat: ${{ secrets.COPILOT_TRIGGER_PAT }}

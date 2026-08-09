@@ -90,7 +90,28 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 2. 開 Issue → 右側 Assignees **指派給 Copilot**
 3. Copilot 先跑該 repo 的 `copilot-setup-steps.yml` 準備環境，再修碼、跑測試、開 PR
 
-### 🟡 已實測：Agent 可用，但 Actions 貼的 `@copilot` 喚不醒它
+### ✅ 1.2.0 起：`@copilot` 改由 `COPILOT_TRIGGER_PAT` 發出，Agent 會動了
+
+自動觸發那條線已修復 —— mention 改用**有 Copilot 授權之使用者的 fine-grained PAT**
+以真人身分發出，不再受 bot 防迴圈限制。**每個要啟用迴圈的 repo 都要設定一次**：
+
+1. 有 Copilot 授權的帳號 → Settings → Developer settings →
+   Fine-grained personal access tokens → Generate new token
+2. Repository access **只勾該 repo**；權限 **Issues: Read and write** +
+   **Pull requests: Read and write**，其餘不給；效期照公司政策（到期要換）
+3. 該 repo → Settings → Secrets and variables → Actions → New repository secret，
+   名稱 `COPILOT_TRIGGER_PAT`
+4. 驗收：開一個測試 PR 讓 Copilot 審出意見，確認 `@copilot` 留言的**作者是那個真人帳號**
+   且 Agent 有動工。若留言作者仍是 `github-actions[bot]`，代表 secret 沒傳到（檢查薄殼
+   的 `secrets:` 區塊）；run log 會有 `::warning::` 提示。
+
+> 仍存在的人工關卡：Copilot 推的 commit 觸發的 run 要人按一次「Approve and run workflows」
+> （或人推空 commit 繞過），見
+> [KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md#copilot-觸發的-workflow-run-會卡在-action_required)。
+
+以下為 1.1.0 時代的歷史紀錄（定位過程），保留供排查參考：
+
+### 🟡 歷史：Agent 可用，但 Actions 貼的 `@copilot` 喚不醒它（1.2.0 已修復）
 
 三支 `copilot-auto*` 的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言，
 作者是 `github-actions[bot]`。**這個前提沒有成立**：

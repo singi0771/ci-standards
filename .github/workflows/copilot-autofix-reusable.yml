@@ -26,6 +26,10 @@ on:
         description: "每個 PR 自動修正次數上限"
         type: string
         default: "3"
+    secrets:
+      copilot-trigger-pat:
+        description: "有 Copilot 授權之使用者的 PAT，用來發 @copilot mention 喚醒 coding agent（github-actions[bot] 發的 mention 會被忽略）"
+        required: false
 
 permissions:
   pull-requests: write
@@ -142,7 +146,9 @@ jobs:
       - name: Post Copilot fix request
         if: ${{ steps.guard.outputs.action == 'fix' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          # ⚠️ mention 一定要用真人 PAT 發：Copilot 會忽略 github-actions[bot] 的 @copilot
+          GH_TOKEN: ${{ secrets.copilot-trigger-pat || github.token }}
+          HAS_PAT: ${{ secrets.copilot-trigger-pat != '' }}
           GH_REPO: ${{ github.repository }}
           WORKFLOW_NAME: ${{ inputs.workflow-name }}
           RUN_URL: ${{ inputs.run-url }}
@@ -151,6 +157,9 @@ jobs:
           ATTEMPTS: ${{ steps.guard.outputs.attempts }}
           MAX: ${{ inputs.max-attempts }}
         run: |
+          if [ "$HAS_PAT" != "true" ]; then
+            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由薄殼傳入。"
+          fi
           ATTEMPT=$(( ATTEMPTS + 1 ))
           BODY=$(printf '<!-- auto-fix-attempt -->\n🔴 **%s 失敗，自動修正中（第 %d/%s 次）**\n\n失敗的 jobs：\n%s\n\n詳細 log：%s\n\n@copilot 請分析上述失敗原因，直接修正程式碼並 commit 到本 PR 分支。修正後 CI 會自動重跑，不需手動觸發。若為安全掃描問題，請優先以修改程式碼解決，避免使用 ignore 規則。' \
             "$WORKFLOW_NAME" "$ATTEMPT" "$MAX" "$FAILED_JOBS" "$RUN_URL")

@@ -315,6 +315,16 @@ foreach ($r in $ProjectOwned) {
 
 Remove-TmpClone
 
+# 1.2.0 契約檢查：升級模式不會補 if:/secrets:，缺了要提醒重新複製。
+# @copilot mention 必須由真人 PAT 發出（bot 發的會被 coding agent 忽略）。
+$PatWarn = @()
+foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.yml')) {
+  $dst = ".github/workflows/$name"
+  if ((Test-Path $dst) -and -not (Select-String -Path $dst -Pattern 'copilot-trigger-pat' -Quiet)) {
+    $PatWarn += "    $name -> 缺 secrets: copilot-trigger-pat（1.2.0 契約變更）"
+  }
+}
+
 Write-Host "-----------------------------------------------------------"
 if ($Created.Count) { Write-Host ("+ 新增: " + ($Created -join ' ')) }
 if ($Merged.Count)  { Write-Host ("~ 合併: " + ($Merged  -join ' ')) }
@@ -323,6 +333,11 @@ if ($DroppedReport.Count) {
   Write-Host ""
   Warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）:"
   $DroppedReport | ForEach-Object { Write-Host $_ }
+}
+if ($PatWarn.Count) {
+  Write-Host ""
+  Warn "以下薄殼是舊契約，升級模式不會自動改 if:/secrets: -- 請從 templates/ 重新複製，並在 repo secrets 設定 COPILOT_TRIGGER_PAT（見公版 README「自動修復閉環」）:"
+  $PatWarn | ForEach-Object { Write-Host $_ }
 }
 Write-Host "-----------------------------------------------------------"
 
