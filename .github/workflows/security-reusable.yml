@@ -106,8 +106,12 @@ jobs:
           # 讓所有 PR 全紅過。這種情況退回 --no-resolve 重掃一次：
           # 直接依賴照掃、間接依賴本次略過，並以 warning 明示涵蓋率降級，
           # 不是靜默放行（若 --no-resolve 那輪掃到弱點，仍照常擋下）。
-          if [ "$EXIT" -ne 0 ] && echo "$OUT" | grep -q "failed resolution.*rpc error"; then
-            echo "::warning::deps.dev 依賴解析服務故障，改以 --no-resolve 重掃（本輪不含 manifest 間接依賴弱點）"
+          # 只在「第一輪弱點數為 0、純粹是解析錯誤」時才 fallback。
+          # 第一輪若已掃出弱點，不得讓視野較窄（略過間接依賴）的第二輪蓋過
+          # 結果變綠 —— 那正是 review 指出的 masking 風險。
+          if [ "$EXIT" -ne 0 ] && echo "$OUT" | grep -q "failed resolution.*rpc error" \
+             && ! echo "$OUT" | grep -qE "Total [1-9][0-9]* packages? affected"; then
+            echo "::warning::deps.dev 依賴解析服務故障（第一輪弱點數 0），改以 --no-resolve 重掃（本輪不含 manifest 間接依賴弱點）"
             set +e
             osv-scanner --recursive --no-resolve ./
             EXIT=$?
