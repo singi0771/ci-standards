@@ -1,5 +1,16 @@
-# 中央「公版」Reusable：Copilot（或人）送出 changes_requested 後，請 Copilot Coding Agent 依意見自動修。
+# 中央「公版」Reusable：review 有修改意見時，請 Copilot Coding Agent 依意見自動修。
 # consumer 端放一支 pull_request_review 觸發的薄殼呼叫本檔。
+#
+# 涵蓋兩種 review：
+#   1. 人送出的 changes_requested
+#   2. Copilot code review 送出的 COMMENTED（Copilot 永遠不會 request changes，
+#      只送 COMMENTED —— 薄殼若只認 changes_requested，Copilot 的意見永遠不會進自動修正迴圈）
+#
+# ⚠️ @copilot mention 必須由「有 Copilot 授權的使用者」發出才會喚醒 coding agent；
+#    github-actions[bot]（github.token）發的 mention 會被 Copilot 忽略（防自動化迴圈）。
+#    所以 consumer 必須傳入 copilot-trigger-pat（該使用者的 fine-grained PAT，
+#    需要 Issues:write + Pull requests:write）。沒傳的話本 workflow 會退回 github.token
+#    並發出 warning —— 留言照貼（保留次數記帳），但 agent 不會動工。
 name: Reusable — Copilot Autofix (Review)
 
 on:
@@ -26,10 +37,24 @@ on:
         description: "review 的 html_url"
         type: string
         required: true
+      review-id:
+        description: "review 的 database id。有給且 review-state=commented 時，會先確認該 review 有 inline 意見才動作（Copilot 審完沒問題也是送 COMMENTED，不能一律觸發）"
+        type: string
+        required: false
+        default: ""
+      review-state:
+        description: "review 的 state（changes_requested / commented）"
+        type: string
+        required: false
+        default: ""
       max-attempts:
         description: "依 review 自動修正次數上限"
         type: string
         default: "3"
+    secrets:
+      copilot-trigger-pat:
+        description: "有 Copilot 授權之使用者的 PAT，用來發 @copilot mention 喚醒 coding agent（bot token 的 mention 會被忽略）"
+        required: false
 
 permissions:
   pull-requests: write
@@ -46,8 +71,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
+          REVIEW_ID: ${{ inputs.review-id }}
+          REVIEW_STATE: ${{ inputs.review-state }}
           MAX: ${{ inputs.max-attempts }}
         run: |
+          # COMMENTED 型 review（= Copilot 的 review）要先確認真的有 inline 意見。
+          # Copilot「審完沒問題」也是送一則 COMMENTED review（0 則 inline comment），
+          # 那種不該觸發修正迴圈、也不該吃掉一次 attempt。
+          if [ -n "$REVIEW_ID" ] && [ "$REVIEW_STATE" = "commented" ]; then
+            N_INLINE=$(gh api --paginate \
+              "repos/$GH_REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" \
+              | jq -s 'add | length')
+            if [ "${N_INLINE:-0}" -eq 0 ]; then
+              echo "action=skip" >> "$GITHUB_OUTPUT"
+              echo "attempts=0" >> "$GITHUB_OUTPUT"
+              echo "COMMENTED review #$REVIEW_ID has no inline comments (clean review) — nothing to fix."
+              exit 0
+            fi
+            echo "COMMENTED review #$REVIEW_ID has $N_INLINE inline comment(s) — eligible for autofix."
+          fi
+
           COMMENTS=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments")
 
           ATTEMPTS=$(echo "$COMMENTS" \
@@ -74,7 +117,9 @@ jobs:
       - name: Post Copilot agent fix request
         if: ${{ steps.guard.outputs.action == 'fix' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          # ⚠️ mention 一定要用真人 PAT 發：Copilot 會忽略 github-actions[bot] 的 @copilot
+          GH_TOKEN: ${{ secrets.copilot-trigger-pat || github.token }}
+          HAS_PAT: ${{ secrets.copilot-trigger-pat != '' }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
           REVIEWER: ${{ inputs.reviewer }}
@@ -83,8 +128,11 @@ jobs:
           ATTEMPTS: ${{ steps.guard.outputs.attempts }}
           MAX: ${{ inputs.max-attempts }}
         run: |
+          if [ "$HAS_PAT" != "true" ]; then
+            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由薄殼傳入。"
+          fi
           ATTEMPT=$(( ATTEMPTS + 1 ))
-          BODY=$(printf '<!-- review-fix-attempt -->\n@copilot **%s 提出了 code review 修改要求（第 %d/%s 次自動修正）**，請根據以下意見直接修正程式碼並 commit：\n\n%s\n\n完整 review：%s\n\n修正後 CI 會自動重跑，通過後 review 將再次評估。' \
+          BODY=$(printf '<!-- review-fix-attempt -->\n@copilot **%s 提出了 code review 意見（第 %d/%s 次自動修正）**，請閱讀該 review 的每一則 inline 意見，逐條修正程式碼並 commit；不認同的意見請在該則下方回覆理由：\n\n%s\n\n完整 review：%s\n\n修正後 CI 會自動重跑，通過後 review 將再次評估。' \
             "$REVIEWER" "$ATTEMPT" "$MAX" "$REVIEW_BODY" "$REVIEW_URL")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \
