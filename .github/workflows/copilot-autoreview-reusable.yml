@@ -174,7 +174,7 @@ jobs:
           # 不要寫「請 approve 此 PR」——Copilot code review 只會送 COMMENT 型 review，
           # 不會（也不能）approve；寫了只會讓人等一個永遠不會出現的 approval。
           # shellcheck disable=SC2016  # 單引號內的反引號是 Markdown 語法，不是命令替換
-          BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`），已透過 API 請 Copilot 進行 code review。\n\nReview 若帶修改意見，將由 autofix workflow 自動請 Copilot coding agent 修正；意見處理完畢後，由人工確認並 Merge。' \
+          BODY=$(printf '<!-- auto-review-request:%s -->\n🤖 **CI & Security Gate 全部通過**（commit `%s`），已嘗試透過 API 請 Copilot 進行 code review。\n\nReview 若帶修改意見，將由 autofix workflow 自動請 Copilot coding agent 修正；意見處理完畢後，由人工確認並 Merge。' \
             "$HEAD_SHA" "$HEAD_SHA")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \
