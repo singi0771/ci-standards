@@ -1,6 +1,9 @@
-# 薄殼：CI 與 Security 都對同一 SHA 通過 → 呼叫公版請 Copilot 審 + 觸發 coding agent。
+# 薄殼：CI 與 Security 都對同一 SHA 通過 → 呼叫公版透過 API 請 Copilot 審。
 # 邏輯全在中央公版；改邏輯只要移動 @v1，本檔幾乎不需再動。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+#
+# 1.2.0 起 gate 只負責「請審」：review 帶意見時的自動修正
+# 由 copilot-autofix-review.yml 那條路（真人 PAT 發 @copilot）接手。
 name: Copilot Auto Review
 
 on:

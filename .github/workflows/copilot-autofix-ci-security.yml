@@ -1,6 +1,9 @@
 # 薄殼（本 repo 自用）：CI/Security 失敗 → 讓 Copilot 自動修。
 # 用 ./ 呼叫本 repo 的公版。注意 workflow_run 觸發器只認 default branch 上的檔案，
 # 所以這支要合併進 main 之後才會生效。
+#
+# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`——@copilot mention 必須由真人帳號發出，
+#    bot 發的會被 coding agent 忽略；沒設的話這條路只會貼留言、不會有人修。
 name: Copilot Autofix — CI/Security
 
 on:
@@ -23,3 +26,5 @@ jobs:
       workflow-name: ${{ github.event.workflow_run.name }}
       run-id:        ${{ github.event.workflow_run.id }}
       run-url:       ${{ github.event.workflow_run.html_url }}
+    secrets:
+      copilot-trigger-pat: ${{ secrets.COPILOT_TRIGGER_PAT }}

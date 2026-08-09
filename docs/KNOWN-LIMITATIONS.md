@@ -40,7 +40,15 @@ CI 與 Security 會在數秒內相繼失敗，正好用來驗證去重機制。
 
 ## Copilot Coding Agent 對 Actions 貼的 `@copilot` 沒有反應
 
-**狀態：🟡 已定位到單一原因，有解法待實作**
+**狀態：✅ 1.2.0 已解決 —— mention 改由 `COPILOT_TRIGGER_PAT`（真人 PAT）發出**
+
+解法（2026-08-09，ci-standards PR #12）：`copilot-autofix-review-reusable.yml` 與
+`copilot-autofix-reusable.yml` 新增 optional secret `copilot-trigger-pat`，
+發 `@copilot` 留言時改用它；consumer 薄殼把 repo secret `COPILOT_TRIGGER_PAT` 傳入。
+PAT 身分＝真人身分，不受 bot 防迴圈限制。設定步驟見 README「自動修復閉環」。
+未設定 secret 時退回 bot token 並發 `::warning::`（行為等同舊版：留言照貼、Agent 不理）。
+
+以下為歷史紀錄（定位過程），保留供排查參考：
 
 `copilot-autofix-*` 三支的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言。
 留言作者是 `github-actions[bot]`。實測結果：
@@ -128,7 +136,17 @@ PR 留言裡的隱藏 marker 計數，改開 Issue 就要改成用 label 或 Iss
 
 ## Copilot 觸發的 workflow run 會卡在 `action_required`
 
-**狀態：🔴 已證實，且這是「自動修」真正的擋路石**
+**狀態：🟡 已證實仍存在（GitHub 硬規定），但有兩個實用解法（2026-08-09 更新）**
+
+1. **按一次核准**：PR 頁面或 Actions 分頁按「Approve and run workflows」。
+   每輪 Copilot 推送後按一次即可，成本是一次點擊。
+2. **人推空 commit 繞過**（實測有效，ci-standards PR #12 就是這樣解鎖的）：
+   ```
+   git commit --allow-empty -m "chore: retrigger CI（human push 免核准）" && git push
+   ```
+   人類 push 觸發的 run 不需核准，會對同一 PR 的新 SHA 完整回報 required checks。
+3. 注意：`action_required` 的 run **無法用 API 核准**（`POST /actions/runs/{id}/approve`
+   只支援 fork PR，對 Copilot 觸發的 run 回 403），只能走網頁或上面的空 commit。
 
 ### 實測
 

@@ -69,14 +69,17 @@ Gate job 用 `if: always()` 執行、自己判斷「skipped 算過、failure 才
 
 免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
 
-> 🔴 **「修」這一格有兩道關卡還沒開通**（2026-08-01 實測）：
+> ✅ **「bot 喚不醒 Agent」已在 1.2.0 解決**：`@copilot` mention 改由
+> **`COPILOT_TRIGGER_PAT`**（有 Copilot 授權之使用者的 PAT）以真人身分發出。
+> 佐證（2026-08-09，本 repo PR #12）：Agent 對真人入口的觸發會實際動工 ——
+> 在**人類開的 PR** 上依 review 意見連推 3 個修正 commit；bot 身分的 mention 則從未喚醒過它。
+> 設定方式見[自動修復閉環](#自動修復閉環選配需-copilot-business)；首次導入後建議實測一輪。
 >
-> 1. **Copilot 開的 PR，其 CI/Security run 卡在 `action_required`** → required check 永遠不回報
->    → **那個 PR 永遠 merge 不了**，除非有人手動按 Approve and run。這條要先解。
-> 2. Actions 貼的 `@copilot` 留言喚不醒 Agent（GitHub 的 bot 防迴圈限制）→ 只能人工開 Issue 起頭。
->
-> Agent 本身是好的（指派 Issue → 立刻開 PR ✅），Code Review 也正常 ✅。
-> **導入時請把「修」當成手動一步**，排查步驟見 [已知限制](docs/KNOWN-LIMITATIONS.md)。
+> 🟡 **仍存在的一道人工關卡**（GitHub 硬規定，改不掉）：
+> **Copilot 推的 commit，觸發的 CI/Security run 會卡在 `action_required`**，
+> 需要人在 PR 頁面按一次「Approve and run workflows」才會跑。
+> 每輪 Copilot 修正後按一次即可；不想按的替代法是自己推個空 commit
+> （`git commit --allow-empty`，人類 push 觸發的 run 不需核准）。
 
 > **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
 > 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，
@@ -128,9 +131,9 @@ cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 | `workflows/security.yml` | 呼叫安全公版 | ✅ 改 `uses:` 與 `with:` |
 | `workflows/ci.yml` | 呼叫 CI 公版 | ✅ 改 `uses:` |
 | `workflows/copilot-setup-steps.yml` | Copilot Coding Agent 動工前的環境準備 | 依專案相依調整 |
-| `workflows/copilot-autofix-ci-security.yml` | CI/Security 失敗 → 自動 @copilot 修，含重試上限與升級 | 不用改（需 Copilot Business） |
-| `workflows/copilot-autofix-review.yml` | Copilot review 要求變更 → 自動 @copilot 依意見修 | 不用改（需 Copilot Business） |
-| `workflows/copilot-autoreview-gate.yml` | CI+Security 全過 → 自動請 Copilot 審 + 觸發 coding agent | 不用改（需 Copilot Business） |
+| `workflows/copilot-autofix-ci-security.yml` | CI/Security 失敗 → 以 PAT `@copilot` 修，含重試上限與升級 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
+| `workflows/copilot-autofix-review.yml` | review 帶意見（真人或 Copilot）→ 以 PAT `@copilot` 依意見修 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
+| `workflows/copilot-autoreview-gate.yml` | CI+Security 全過 → 透過 API 自動請 Copilot 審 | 不用改（需 Copilot Business） |
 | `dependabot.yml` | pip / docker / actions 每週自動更新 | 有前端再加 npm 區塊 |
 | `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，前四段是待填的佔位符 |
 | `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
@@ -223,8 +226,10 @@ gh pr create
 
 ### 掃到弱點 → 交給 Copilot 修
 
-> ✅ **這條路已實測可用**（2026-08-01）。目前不能用的是「CI 紅了自動 @copilot」那條，
-> 見[已知限制](docs/KNOWN-LIMITATIONS.md)。所以「修」這一步要由人開 Issue 起頭。
+> ✅ **這條路已實測可用**（2026-08-01）。「CI 紅了自動 @copilot」與「review 意見自動修」
+> 兩條自動路徑自 1.2.0 起也已開通（需設定 `COPILOT_TRIGGER_PAT`，見
+> [自動修復閉環](#自動修復閉環選配需-copilot-business)）；人工開 Issue 起頭仍然可用，
+> 適合處理排程掃描（非 PR 情境）發現的弱點。
 
 1. 依掃描結果開 Issue，把弱點檔案、行號、掃描器訊息貼進去
 2. Issue 右側 Assignees **指派給 Copilot**
@@ -251,34 +256,59 @@ gh pr create
 > **架構**：這三支 consumer 端只是**十幾行的薄殼**（觸發器 + 一行 `uses:`），所有邏輯放在公版的三支 `*-reusable.yml`。改邏輯只要動公版、移 `v1`，**各專案下次觸發就反應式同步**，跟 ci/security 一樣不必逐一改。詳見[為什麼薄殼](#為什麼是薄殼而非整包複製)。
 
 ```
-             ┌──────────────────────────────────────────────────┐
-             ▼                                                    │
-  你開 PR ─▶ CI + Security ──失敗──▶ copilot-autofix-ci-security ──▶ @copilot 修 ─┐
+             ┌───────────────────────────────────────────────────────────┐
+             ▼                                                           │
+  你開 PR ─▶ CI + Security ──失敗──▶ copilot-autofix-ci-security ──▶ @copilot 修 ─┤
              │                        （最多 3 次，超過就升級人工）              │
              │全過                                                              │
              ▼                                                                  │
-     copilot-autoreview-gate ──▶ 請 Copilot 審 + 觸發 coding agent ─────────────┘
-             │                    （每個 PR 最多 3 次；Copilot 修完 commit
-             │                      → 新 SHA 全綠 → 再審，這條迴圈靠上限收斂）
-             │
-      真人 reviewer 按 Request changes ──▶ copilot-autofix-review ──▶ @copilot 依意見修
-             │                              （最多 3 次）
+     copilot-autoreview-gate ──▶ 透過 API 請 Copilot 審                          │
+             │                                                                  │
+             ├── review 帶 inline 意見（Copilot COMMENTED 或真人 Request changes）│
+             ▼                                                                  │
+     copilot-autofix-review ──▶ 用 COPILOT_TRIGGER_PAT 發 @copilot ──▶ Agent 修 ─┘
+             │                   （最多 3 次；空 review 不觸發）
+             │  ⚠️ Agent 推的 commit 觸發的 CI 要人按一次 Approve and run
              ▼
-        你看完 Copilot 的意見，決定 Merge
+        意見都處理完、全綠 → 你決定 Merge
 ```
 
-> **注意這裡沒有「Copilot approve」這一格。** Copilot 只會留 COMMENT，不會 approve。
-> `copilot-autofix-review` 那條路徑吃的是 `changes_requested`，實務上**只有真人 reviewer 會觸發**——
-> 這是刻意的：autoreview 貼的留言已經要求 Copilot「發現問題直接修正後 commit」，
-> 若再接上 Copilot 自己的 COMMENT review，兩支 workflow 會互相觸發成無窮迴圈。
+> **注意這裡沒有「Copilot approve」這一格。** Copilot 只會留 COMMENT，不會 approve，
+> 最後的 Merge 一定是人。
+>
+> **1.2.0 的兩個關鍵改變**（缺一不可，缺了迴圈就是死的）：
+> 1. `copilot-autofix-review` 現在**也吃 Copilot 的 COMMENTED review**（它永遠不會送
+>    changes_requested）。空的「審完沒問題」review 由公版判斷跳過，迴圈收斂靠
+>    max-attempts 上限，不再靠「不接 commented」。
+> 2. `@copilot` mention 改由 **`COPILOT_TRIGGER_PAT` secret** 以真人身分發出 ——
+>    實測證明 `github-actions[bot]` 發的 mention 會被 Agent 直接忽略，
+>    舊版等於從來沒有真正觸發過自動修正。
 
 | consumer 薄殼 | 顯示名 | 呼叫的公版 | 觸發時機 → 做什麼 |
 |---|---|---|---|
 | `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | `copilot-autofix-reusable.yml` | CI/Security 失敗 → 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 |
-| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | **真人** review `changes_requested` → `@copilot` 依意見修碼 |
-| `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 請 Copilot 審 + 觸發 coding agent |
+| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | 真人 `changes_requested` **或 Copilot COMMENTED（帶 inline 意見）** → 以 PAT 發 `@copilot` 依意見修碼 |
+| `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 透過 API 請 Copilot 審 |
+
+### 啟用自動修正必做：設定 `COPILOT_TRIGGER_PAT`
+
+沒有這個 secret，review→修正那條路**不會動**（公版會在 run log 發 warning，留言照貼但 Agent 不理）。
+
+1. 用**有 Copilot 授權**的帳號到 GitHub → Settings → Developer settings →
+   Fine-grained personal access tokens → Generate new token
+2. Repository access：**只勾目標 repo**；權限給 **Issues: Read and write** 與
+   **Pull requests: Read and write**，其他一律不給
+3. 到目標 repo → Settings → Secrets and variables → Actions →
+   New repository secret，名稱 `COPILOT_TRIGGER_PAT`，貼上 token
+
+> 為什麼需要 PAT：GitHub 規定 Copilot coding agent 只回應「真人」的 `@copilot` mention，
+> `github-actions[bot]`（`GITHUB_TOKEN`）發的一律忽略（防 bot 互相觸發的無窮迴圈）。
+> 這是平台限制，不是本 repo 的設計選擇。
 
 **內建的安全閥（避免無限燒 Credits）：**
+
+- **空 review 不觸發**：Copilot「審完沒問題」也是送一則 COMMENTED review；公版會先數該
+  review 的 inline 意見數，0 則就跳過，不進修正迴圈、不吃 attempt 次數。
 
 - **修正次數上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏 marker 計數；達上限改貼 `needs-human-review` label 升級人工，不再自動修。
 - **審查次數上限**：`max-review-requests`（預設 3）。Copilot 依意見 commit → 新 SHA → CI/Security 又全綠 → 又請審，**這條迴圈本身沒有終點**，靠這個上限收斂。
@@ -475,6 +505,7 @@ with:
 | PR 上找不到 `security / Security Gate` 這個 check | 還沒跑過第一次，或 job id 被改過 | 先讓 workflow 跑完一次，再回 ruleset 設定 |
 | `pytest` 失敗但專案根本沒測試 | pytest 沒收到測試會回 exit code 5 | 加一支最小 smoke test，或在 `pyproject.toml` 設定 pytest 選項 |
 | OSV-Scanner 紅、其他都綠 | 相依套件有已知 CVE | 看 log 的套件名 → 升版（Dependabot PR 通常已經開好了） |
+| OSV-Scanner 紅、log 顯示 `rpc error: Internal` 且弱點數 0 | Google deps.dev 解析服務故障（上游問題，1.2.0 起會自動退回 `--no-resolve` 重掃並發 warning） | 免處理；若持續紅代表 fallback 沒觸發，檢查 log 的 `failed resolution` 字樣 |
 | gitleaks 抓到已經撤銷的舊 token | 密鑰留在 git 歷史裡 | **先去平台撤銷金鑰**，再把 fingerprint 加進 `.gitleaksignore` |
 | Trivy 一堆 MEDIUM 擋門 | `severity` 設太寬 | 收斂成 `CRITICAL,HIGH` |
 | `upload-sarif: true` 報權限錯誤 | 公版預設不要求 `security-events: write` | 呼叫端 job 自行加 `permissions:`，且 repo 要有 GHAS 或為 public |

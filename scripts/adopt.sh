@@ -341,6 +341,29 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
+# ── 1.2.0 契約檢查：升級模式不會補 if:/secrets:，缺了要提醒重新複製 ──
+# @copilot mention 必須由真人 PAT 發出（bot 發的會被 coding agent 忽略），
+# 所以這兩支薄殼需要 secrets: 區塊把 COPILOT_TRIGGER_PAT 傳進公版。
+PAT_WARN=""
+for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
+  dst=".github/workflows/$name"
+  [ -f "$dst" ] || continue
+  missing=""
+  if ! grep -q "copilot-trigger-pat" "$dst"; then
+    missing="secrets: copilot-trigger-pat"
+  fi
+  # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
+  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
+  if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
+    if [ -n "$missing" ]; then missing="$missing、COMMENTED 觸發條件"
+    else missing="COMMENTED 觸發條件"; fi
+  fi
+  if [ -n "$missing" ]; then
+    PAT_WARN="$PAT_WARN
+    $name → 缺 $missing（1.2.0 契約變更）"
+  fi
+done
+
 # ── 報告 ─────────────────────────────────────────────────────
 info "───────────────────────────────────────────────────────────"
 if [ -n "$CREATED" ]; then info "＋ 新增：$CREATED"; fi
@@ -349,6 +372,10 @@ if [ -n "$KEPT" ];    then info "＝ 保留（未覆蓋，另存 .new）：$KEPT
 if [ -n "$DROPPED_REPORT" ]; then
   info ""
   warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）：$DROPPED_REPORT"
+fi
+if [ -n "$PAT_WARN" ]; then
+  info ""
+  warn "以下薄殼是舊契約，升級模式不會自動改 if:/secrets: —— 請從 templates/ 重新複製，並在 repo secrets 設定 COPILOT_TRIGGER_PAT（見公版 README「自動修復閉環」）：$PAT_WARN"
 fi
 info "───────────────────────────────────────────────────────────"
 

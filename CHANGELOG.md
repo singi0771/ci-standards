@@ -10,9 +10,55 @@
 
 ---
 
-## [未發佈]
+## [1.2.0] — 2026-08-09
 
-### 新增
+**這一版讓「Copilot 依 review 意見自動修正」第一次真正動起來。**
+實測（AdminAutoTools PR #52–#63）證明 1.1.0 的自動修正迴圈存在兩個致命斷點，
+等於**從未實際運作過**——所有「採納 Copilot 意見」的修正 commit 其實都是人工完成的：
+
+1. **觸發條件錯配**：autofix-review 薄殼只認 `changes_requested`，但 Copilot code review
+   永遠只送 `COMMENTED`（它不會、也不能 request changes）→ Copilot 的意見從不觸發自動修正。
+2. **mention 無效**：`@copilot` 留言由 `github-actions[bot]`（`GITHUB_TOKEN`）發出，
+   coding agent 會忽略 bot 的 mention（GitHub 防 bot 迴圈機制）→ 就算觸發了也叫不動 Agent。
+
+### 新增 —— Copilot 迴圈開通（ci-standards PR #12）
+
+- `copilot-autofix-review-reusable.yml`：
+  - 新增 `review-id` / `review-state` 輸入：COMMENTED review 先確認**真的有 inline 意見**
+    才動作（Copilot「審完沒問題」也是送 COMMENTED，0 則意見即跳過，不吃 attempt 次數）；
+    `review-state=commented` 但缺 `review-id` 時 fail-closed 直接跳過。
+  - 新增 `copilot-trigger-pat` secret：`@copilot` mention 改由**有 Copilot 授權的使用者 PAT**
+    發出；未設定時退回 bot token 並發 `::warning::`（留言照貼保留記帳，但 Agent 不會動工）。
+- `copilot-autofix-reusable.yml`（CI/Security 失敗那條）：同樣新增 `copilot-trigger-pat`
+  secret 與未設定警告 —— 這條的 mention 過去同樣是 bot 發的、同樣無效。
+- `copilot-autoreview-reusable.yml`：步驟 5 移除無效的 `@copilot` mention，改為純去重
+  標記＋狀態說明（「請審」走 API 本來就有效；「修」的職責交給 autofix-review 那條路）。
+- consumer 範本 `copilot-autofix-review.yml` / `copilot-autofix-ci-security.yml`：
+  觸發條件與 `secrets:` 傳遞同步更新（見下方相容性）。
+- **觸發條件資安強化**（採納 PR #14 的 Copilot 審查意見）：真人 `changes_requested`
+  限定信任身分（OWNER/MEMBER/COLLABORATOR）——公開 repo 上陌生帳號的 review
+  不得驅動 agent 執行其指示；Copilot login 改精確比對（`contains` 可被相似帳號名繞過）。
+- 本 repo **自用薄殼**同步至新契約（dogfooding：1.2.0 起 ci-standards 自己的 PR
+  也走完整迴圈；需在本 repo secrets 設 `COPILOT_TRIGGER_PAT`）。
+- `adopt` 契約檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
+  仍會被警告，避免「半升級」被誤判為相容。
+- README 新增 **`COPILOT_TRIGGER_PAT` 設定步驟**（fine-grained PAT，
+  Issues:write + Pull requests:write，範圍限單一 repo）。
+
+### 修正 —— OSV-Scanner 不再被上游故障癱瘓（ci-standards PR #13）
+
+- 🔴 **deps.dev 解析服務故障會讓所有 PR 全紅**（2026-08-08 起連續兩天實測）：
+  osv-scanner 對 manifest（requirements.txt）做間接依賴解析時，Google deps.dev 回
+  `rpc error: Internal`，即使**實際弱點數為 0** 也以 exit 1 收場 → Security Gate 全面擋門，
+  且錯誤訊息被誤標成「Vulnerabilities found!」。
+- 修法：偵測到「非零 exit + `failed resolution`/`rpc error` 字樣 + **第一輪弱點數為 0**」
+  三個條件同時成立，才自動以 `--no-resolve` 重掃一次 —— 直接依賴照掃、有弱點照擋，
+  僅 manifest 間接依賴當輪降級，並以 `::warning::` 明示。
+  第一輪已掃出弱點時**不進 fallback**，避免視野較窄的第二輪把弱點判定蓋成綠燈
+  （此守門條件採納自 Copilot code review 意見 —— 也是本迴圈第一次實戰自我修正）。
+
+### 新增 —— 一鍵導入（自 [未發佈] 收入本版）
+
 - **一鍵導入腳本**，跨平台雙版本：
   - `scripts/adopt.sh` —— macOS / Linux / Windows Git Bash
   - `scripts/adopt.ps1` —— Windows PowerShell 5.1（**系統內建，零安裝**）
@@ -46,6 +92,20 @@
 ### 變更
 - README 的「步驟 1」改為以一鍵導入為主、手動複製收進 `<details>`。
   用一鍵版時步驟 2 的 ①② 可以跳過。
+
+### 相容性 —— 既有 consumer 要做的事
+
+- 公版新增的 input 與 secret 都是 optional，**舊薄殼呼叫新公版不會壞**，
+  只是自動修正迴圈維持原本的「不會動」狀態。
+- **要啟用迴圈，既有專案必須做兩件事**：
+  1. 在 repo secrets 加 `COPILOT_TRIGGER_PAT`（設定步驟見 README）。
+  2. **重新複製** `copilot-autofix-review.yml` 與 `copilot-autofix-ci-security.yml`
+     兩支薄殼 —— 這是罕見的**薄殼契約變更**（`if:` 觸發條件 + `secrets:` 區塊），
+     `adopt` 的升級模式只同步 `uses:` 與 `with:`，**不會**更新這兩個部分
+     （腳本偵測到缺 `secrets:` 時會提醒）。
+- 已知仍存在的人工關卡（GitHub 硬規定）：Copilot 推的 commit 觸發的 workflow run
+  需要人按一次「Approve and run workflows」；替代法是自己推空 commit。
+  詳見 `docs/KNOWN-LIMITATIONS.md`。
 
 ---
 

@@ -1,6 +1,20 @@
-# 薄殼：Copilot（或人）送出 changes_requested → 呼叫公版讓 Copilot 依意見自動修。
+# 薄殼：review 帶修改意見 → 呼叫公版讓 Copilot Coding Agent 依意見自動修。
 # 邏輯全在中央公版；改邏輯只要移動 @v1，本檔幾乎不需再動。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+#
+# 觸發涵蓋兩種 review（1.2.0 起）：
+#   1. 真人 reviewer 按 Request changes（changes_requested）
+#   2. Copilot code review 的 COMMENTED —— Copilot 永遠不會 request changes，
+#      只送 COMMENTED；只認 changes_requested 的話，Copilot 的審查意見永遠
+#      進不了自動修正迴圈。「審完沒問題」的空 COMMENTED review 由公版判斷
+#      （0 則 inline 意見即跳過），不會誤觸發、也不會吃掉 attempt 次數。
+#      迴圈收斂靠 max-attempts 上限，不再靠「不接 commented」。
+#
+# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`：有 Copilot 授權之使用者的
+#    fine-grained PAT（權限：Issues:write + Pull requests:write，範圍限本 repo）。
+#    @copilot mention 必須由真人帳號發出 —— github-actions[bot] 發的會被
+#    Copilot coding agent 忽略（GitHub 防 bot 迴圈機制），沒設這個 secret
+#    迴圈不會動工（公版會發 warning 提示）。設定方式見公版 README。
 name: Copilot Autofix — Review
 
 on:
@@ -13,21 +27,27 @@ permissions:
 
 jobs:
   autofix-review:
-    # review 要求變更、且非 Dependabot PR 才呼叫公版
-    #
-    # 注意：這條路徑實務上是給「真人 reviewer 按 Request changes」用的。
-    # Copilot code review 送出的是 COMMENT 類型 review（state = commented），
-    # 不會是 changes_requested，所以不會走到這裡 —— 這是刻意的：
-    # copilot-autoreview-gate 貼的留言已經要求 Copilot「發現問題就直接修正後 commit」，
-    # 若這裡再接 commented，兩邊會互相觸發成無窮迴圈。
+    # 信任的人（OWNER/MEMBER/COLLABORATOR）要求變更、或 Copilot 留下 COMMENTED review；
+    # Dependabot PR 不進迴圈。
+    # - 真人限定信任身分：公開 repo 上陌生帳號的 review 不得驅動 agent 執行其指示
+    # - Copilot login 精確比對（不用 contains，會被相似帳號名繞過）；
+    #   [bot] 後綴視 API 來源而異，兩種寫法都收
     if: >
-      github.event.review.state == 'changes_requested' &&
+      ((github.event.review.state == 'changes_requested' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
+       (github.event.review.state == 'commented' &&
+        (github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
+         github.event.review.user.login == 'copilot-pull-request-reviewer'))) &&
       !contains(github.event.pull_request.user.login, 'dependabot')
     uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
     with:
-      pr-number:   ${{ github.event.pull_request.number }}
-      pr-author:   ${{ github.event.pull_request.user.login }}
-      reviewer:    ${{ github.event.review.user.login }}
-      review-body: ${{ github.event.review.body }}
-      review-url:  ${{ github.event.review.html_url }}
+      pr-number:    ${{ github.event.pull_request.number }}
+      pr-author:    ${{ github.event.pull_request.user.login }}
+      reviewer:     ${{ github.event.review.user.login }}
+      review-body:  ${{ github.event.review.body }}
+      review-url:   ${{ github.event.review.html_url }}
+      review-id:    ${{ format('{0}', github.event.review.id) }}
+      review-state: ${{ github.event.review.state }}
       # max-attempts: "3"   # 要調整依 review 自動修正次數上限時取消註解
+    secrets:
+      copilot-trigger-pat: ${{ secrets.COPILOT_TRIGGER_PAT }}
