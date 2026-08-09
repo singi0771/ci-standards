@@ -75,6 +75,8 @@ jobs:
           REVIEW_STATE: ${{ inputs.review-state }}
           MAX: ${{ inputs.max-attempts }}
         run: |
+          set -euo pipefail
+
           # COMMENTED 型 review（= Copilot 的 review）要先確認真的有 inline 意見。
           # Copilot「審完沒問題」也是送一則 COMMENTED review（0 則 inline comment），
           # 那種不該觸發修正迴圈、也不該吃掉一次 attempt。
