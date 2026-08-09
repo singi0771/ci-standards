@@ -78,6 +78,13 @@ jobs:
           # COMMENTED 型 review（= Copilot 的 review）要先確認真的有 inline 意見。
           # Copilot「審完沒問題」也是送一則 COMMENTED review（0 則 inline comment），
           # 那種不該觸發修正迴圈、也不該吃掉一次 attempt。
+          if [ -z "$REVIEW_ID" ] && [ "$REVIEW_STATE" = "commented" ]; then
+            echo "action=skip" >> "$GITHUB_OUTPUT"
+            echo "attempts=0" >> "$GITHUB_OUTPUT"
+            echo "COMMENTED review did not include review-id — skipping to avoid triggering autofix for a clean review."
+            exit 0
+          fi
+
           if [ -n "$REVIEW_ID" ] && [ "$REVIEW_STATE" = "commented" ]; then
             N_INLINE=$(gh api --paginate \
               "repos/$GH_REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" \
