@@ -97,9 +97,22 @@ jobs:
           FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         run: |
           set +e
-          osv-scanner --recursive ./
+          OUT=$(osv-scanner --recursive ./ 2>&1)
           EXIT=$?
           set -e
+          echo "$OUT"
+          # deps.dev 端故障（rpc Internal）時，manifest 的間接依賴解析會失敗，
+          # osv-scanner 即使實際弱點為 0 也以非零收場 —— 2026-08-08 起連續兩天
+          # 讓所有 PR 全紅過。這種情況退回 --no-resolve 重掃一次：
+          # 直接依賴照掃、間接依賴本次略過，並以 warning 明示涵蓋率降級，
+          # 不是靜默放行（若 --no-resolve 那輪掃到弱點，仍照常擋下）。
+          if [ "$EXIT" -ne 0 ] && echo "$OUT" | grep -q "failed resolution.*rpc error"; then
+            echo "::warning::deps.dev 依賴解析服務故障，改以 --no-resolve 重掃（本輪不含 manifest 間接依賴弱點）"
+            set +e
+            osv-scanner --recursive --no-resolve ./
+            EXIT=$?
+            set -e
+          fi
           if [ "$EXIT" -eq 0 ]; then
             echo "✅ No vulnerabilities found."
           elif [ "$EXIT" -eq 1 ]; then
