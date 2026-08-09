@@ -63,7 +63,14 @@ jobs:
             --config auto \
             --error --sarif --output=semgrep.sarif
       - name: Upload SARIF to Security tab
-        if: ${{ inputs.upload-sarif }}
+        # always() 是刻意的：semgrep 用 --error，掃到問題時「這一步就是 failed」。
+        # 拿掉它的話後續步驟會被 GitHub 跳過 —— 變成「只有什麼都沒掃到才上傳報告」，
+        # 最需要報告的時候反而不傳。（2026-08-09 PR #15 一度改錯成這樣。）
+        #
+        # hashFiles 才是原本 review 想解的問題：semgrep 若在寫出 SARIF 前就崩潰，
+        # 這裡安靜跳過，而不是讓 upload 找不到檔案而讓整個 job 變紅。
+        # 下面的 artifact 步驟用 if-no-files-found: ignore 達成同一件事。
+        if: ${{ always() && inputs.upload-sarif && hashFiles('semgrep.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           sarif_file: semgrep.sarif
