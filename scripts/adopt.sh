@@ -347,9 +347,20 @@ done
 PAT_WARN=""
 for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
   dst=".github/workflows/$name"
-  if [ -f "$dst" ] && ! grep -q "copilot-trigger-pat" "$dst"; then
+  [ -f "$dst" ] || continue
+  missing=""
+  if ! grep -q "copilot-trigger-pat" "$dst"; then
+    missing="secrets: copilot-trigger-pat"
+  fi
+  # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
+  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
+  if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
+    if [ -n "$missing" ]; then missing="$missing、COMMENTED 觸發條件"
+    else missing="COMMENTED 觸發條件"; fi
+  fi
+  if [ -n "$missing" ]; then
     PAT_WARN="$PAT_WARN
-    $name → 缺 secrets: copilot-trigger-pat（1.2.0 契約變更）"
+    $name → 缺 $missing（1.2.0 契約變更）"
   fi
 done
 

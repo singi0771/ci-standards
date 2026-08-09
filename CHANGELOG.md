@@ -35,6 +35,13 @@
   標記＋狀態說明（「請審」走 API 本來就有效；「修」的職責交給 autofix-review 那條路）。
 - consumer 範本 `copilot-autofix-review.yml` / `copilot-autofix-ci-security.yml`：
   觸發條件與 `secrets:` 傳遞同步更新（見下方相容性）。
+- **觸發條件資安強化**（採納 PR #14 的 Copilot 審查意見）：真人 `changes_requested`
+  限定信任身分（OWNER/MEMBER/COLLABORATOR）——公開 repo 上陌生帳號的 review
+  不得驅動 agent 執行其指示；Copilot login 改精確比對（`contains` 可被相似帳號名繞過）。
+- 本 repo **自用薄殼**同步至新契約（dogfooding：1.2.0 起 ci-standards 自己的 PR
+  也走完整迴圈；需在本 repo secrets 設 `COPILOT_TRIGGER_PAT`）。
+- `adopt` 契約檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
+  仍會被警告，避免「半升級」被誤判為相容。
 - README 新增 **`COPILOT_TRIGGER_PAT` 設定步驟**（fine-grained PAT，
   Issues:write + Pull requests:write，範圍限單一 repo）。
 

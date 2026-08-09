@@ -320,8 +320,19 @@ Remove-TmpClone
 $PatWarn = @()
 foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.yml')) {
   $dst = ".github/workflows/$name"
-  if ((Test-Path $dst) -and -not (Select-String -Path $dst -Pattern 'copilot-trigger-pat' -Quiet)) {
-    $PatWarn += "    $name -> 缺 secrets: copilot-trigger-pat（1.2.0 契約變更）"
+  if (-not (Test-Path $dst)) { continue }
+  $missing = @()
+  if (-not (Select-String -Path $dst -Pattern 'copilot-trigger-pat' -Quiet)) {
+    $missing += 'secrets: copilot-trigger-pat'
+  }
+  # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
+  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
+  if ($name -eq 'copilot-autofix-review.yml' -and
+      -not (Select-String -Path $dst -Pattern "'commented'" -SimpleMatch -Quiet)) {
+    $missing += 'COMMENTED 觸發條件'
+  }
+  if ($missing.Count) {
+    $PatWarn += "    $name -> 缺 $($missing -join '、')（1.2.0 契約變更）"
   }
 }
 

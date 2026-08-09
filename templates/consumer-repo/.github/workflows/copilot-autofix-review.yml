@@ -27,11 +27,17 @@ permissions:
 
 jobs:
   autofix-review:
-    # 人要求變更、或 Copilot 留下 COMMENTED review；Dependabot PR 不進迴圈
+    # 信任的人（OWNER/MEMBER/COLLABORATOR）要求變更、或 Copilot 留下 COMMENTED review；
+    # Dependabot PR 不進迴圈。
+    # - 真人限定信任身分：公開 repo 上陌生帳號的 review 不得驅動 agent 執行其指示
+    # - Copilot login 精確比對（不用 contains，會被相似帳號名繞過）；
+    #   [bot] 後綴視 API 來源而異，兩種寫法都收
     if: >
-      (github.event.review.state == 'changes_requested' ||
+      ((github.event.review.state == 'changes_requested' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
        (github.event.review.state == 'commented' &&
-        contains(github.event.review.user.login, 'copilot-pull-request-reviewer'))) &&
+        (github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
+         github.event.review.user.login == 'copilot-pull-request-reviewer'))) &&
       !contains(github.event.pull_request.user.login, 'dependabot')
     uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
     with:

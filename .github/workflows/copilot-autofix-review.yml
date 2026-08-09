@@ -1,6 +1,15 @@
-# 薄殼（本 repo 自用）：真人 reviewer 按 Request changes → 讓 Copilot 依意見修。
-# Copilot code review 送的是 COMMENT（state = commented），不會走到這裡，這是刻意的 ——
-# 接上去會與 copilot-autoreview-gate 互相觸發成無窮迴圈。
+# 薄殼（本 repo 自用，dogfooding）：review 帶修改意見 → 呼叫公版讓 Copilot 依意見自動修。
+# 用 ./ 相對路徑呼叫自己的 reusable —— PR 上跑的永遠是「這個 PR 的版本」。
+#
+# 觸發涵蓋兩種 review（1.2.0 起）：
+#   1. 信任的真人 reviewer（OWNER/MEMBER/COLLABORATOR）按 Request changes ——
+#      限定信任身分，公開 repo 上陌生帳號的 review 不得驅動 agent 執行其指示
+#   2. Copilot code review 的 COMMENTED（login 精確比對，不用 contains ——
+#      contains 會被相似帳號名繞過；[bot] 後綴視 API 來源而異，兩種寫法都收）
+#   空的「審完沒問題」COMMENTED review 由公版判斷跳過；迴圈收斂靠 max-attempts。
+#
+# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`（設定方式見 README「自動修復閉環」）——
+#    @copilot mention 必須由真人帳號發出，bot 發的會被 coding agent 忽略。
 name: Copilot Autofix — Review
 
 on:
@@ -9,17 +18,27 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write     # 達上限時貼 needs-human-review label 用
+  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會靜默 403）
 
 jobs:
   autofix-review:
+    # 信任的人要求變更、或 Copilot 留下 COMMENTED review；Dependabot PR 不進迴圈
     if: >
-      github.event.review.state == 'changes_requested' &&
+      ((github.event.review.state == 'changes_requested' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
+       (github.event.review.state == 'commented' &&
+        (github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
+         github.event.review.user.login == 'copilot-pull-request-reviewer'))) &&
       !contains(github.event.pull_request.user.login, 'dependabot')
     uses: ./.github/workflows/copilot-autofix-review-reusable.yml
     with:
-      pr-number:   ${{ github.event.pull_request.number }}
-      pr-author:   ${{ github.event.pull_request.user.login }}
-      reviewer:    ${{ github.event.review.user.login }}
-      review-body: ${{ github.event.review.body }}
-      review-url:  ${{ github.event.review.html_url }}
+      pr-number:    ${{ github.event.pull_request.number }}
+      pr-author:    ${{ github.event.pull_request.user.login }}
+      reviewer:     ${{ github.event.review.user.login }}
+      review-body:  ${{ github.event.review.body }}
+      review-url:   ${{ github.event.review.html_url }}
+      review-id:    ${{ format('{0}', github.event.review.id) }}
+      review-state: ${{ github.event.review.state }}
+      # max-attempts: "3"   # 要調整依 review 自動修正次數上限時取消註解
+    secrets:
+      copilot-trigger-pat: ${{ secrets.COPILOT_TRIGGER_PAT }}
