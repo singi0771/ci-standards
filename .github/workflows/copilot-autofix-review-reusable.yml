@@ -81,7 +81,7 @@ jobs:
           if [ -z "$REVIEW_ID" ] && [ "$REVIEW_STATE" = "commented" ]; then
             echo "action=skip" >> "$GITHUB_OUTPUT"
             echo "attempts=0" >> "$GITHUB_OUTPUT"
-            echo "COMMENTED review did not include review-id — skipping to avoid triggering autofix for a clean review."
+            echo "COMMENTED review received without review-id input — cannot verify inline comments, skipping autofix."
             exit 0
           fi
 
