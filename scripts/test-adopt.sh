@@ -265,7 +265,7 @@ cd "$WORK/wrapper"
 OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"你要的應該是其中之一"*) ok "外層目錄會提示往下一層找" ;;
-  *) bad "外層目錄沒有提示子目錄（實際輸出：$OUT）" ;;
+  *) bad "外層目錄沒有提示子目錄（實際輸出：${OUT}）" ;;
 esac
 case "$OUT" in
   *"/wrapper/inner"*) ok "提示中列出了正確的子目錄" ;;
@@ -278,7 +278,7 @@ cd "$WORK/empty-dir"
 OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"請先 git init 或 clone"*) ok "沒有子 repo 時維持原訊息" ;;
-  *) bad "沒有子 repo 時訊息不對（實際輸出：$OUT）" ;;
+  *) bad "沒有子 repo 時訊息不對（實際輸出：${OUT}）" ;;
 esac
 
 # ═════════════════════════════════════════════════════════════

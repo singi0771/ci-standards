@@ -14,6 +14,40 @@
 
 ---
 
+## [1.2.2] — 2026-08-13
+
+**`adopt.sh` 在 macOS 上完全跑不起來。** 一樣只動導入工具，reusable 與
+`templates/` 一個字都沒動，指向 `@v1` 的專案 CI 行為完全不變。
+
+1.2.1 的回歸測試「43 項全過」是在雲端（Linux + bash 5.x + GNU awk）跑出來的。
+macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也就是說
+`docs/ADOPT.md` 列在第一順位的平台，腳本從第 120 行就直接中止。
+
+### 修正
+
+- **bash 3.2 會把全形標點的首位元組吃進變數名。**
+  `"── 公版：$STD（ref: ...）"` 這種寫法，在 UTF-8 locale 下的 bash 3.2
+  會解析成變數 `STD\xef`，配上腳本的 `set -u` 就是
+  `STD?: unbound variable`，執行立刻中止。
+
+  bash 5.x 不會，`LC_ALL=C` 也不會 —— 所以 Linux CI 與雲端 session 都測不到。
+  修法：`$VAR` 後面接非 ASCII 字元時一律改成 `${VAR}`（`adopt.sh` 6 處、
+  `test-adopt.sh` 2 處）。
+
+- **BSD awk 不接受 `-v` 的值裡有換行。**
+  `filter_with_block` 與 `replace_with_block` 用 `-v` 傳多行字串
+  （`known` / `additions` / `blk`），macOS 內建的 awk（BWK awk 20200816）會噴
+  `awk: newline in string ... at source line 1` 並放棄整個程式，GNU awk 才容忍。
+  改走 `ENVIRON[]` 傳遞 —— POSIX awk 皆支援，兩邊行為一致。
+
+  症狀有欺騙性：awk 失敗但 `mv` 照常執行，所以檔案會被寫成**空的或半成品**，
+  而腳本不一定會停。
+
+- 回歸測試現已在 macOS（bash 3.2 + BSD awk）實際跑過，43 項全過。
+  這是 `test-adopt.sh` 第一次在 macOS 上執行。
+
+---
+
 ## [1.2.1] — 2026-08-12
 
 **修的是「導入工具」，不是公版邏輯。** reusable 與 `templates/` 一個字都沒動，

@@ -117,7 +117,7 @@ cleanup_tmp() { if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi; }
 trap cleanup_tmp EXIT
 
 info "── 目標：$TARGET_ROOT"
-info "── 公版：$STD（ref: $REF，uses: $USES_REPO）"
+info "── 公版：${STD}（ref: ${REF}，uses: ${USES_REPO}）"
 info ""
 
 # ── 偵測技術棧 ───────────────────────────────────────────────
@@ -145,7 +145,7 @@ fi
 info "偵測結果："
 info "  模式         : $MODE $( [ "$MODE" = upgrade ] && echo '（已有呼叫端，改用合併模式）' || echo '（全新導入）')"
 info "  Dockerfile   : $HAS_DOCKERFILE"
-info "  Python       : $HAS_PY（版本 $PYVER）"
+info "  Python       : ${HAS_PY}（版本 ${PYVER}）"
 info "  shell script : $HAS_SH"
 info ""
 
@@ -202,8 +202,14 @@ patch_uses() {
 #   - 最後補上「公版有、但這個檔案沒有」的 key（只補偵測得出來的那幾個）
 filter_with_block() {
   f="$1"; known="$2"; additions="$3"
-  awk -v known="$known" -v additions="$additions" -v dropfile="$f.dropped" '
-    BEGIN { split(known, K, "\n"); for (i in K) if (K[i] != "") kn[K[i]]=1 }
+  # 多行的值走 ENVIRON，不能用 -v：BSD/macOS 內建的 awk 不接受 -v 的值裡有換行
+  # （會噴 "awk: newline in string"），GNU awk 才容忍。
+  ADOPT_KNOWN="$known" ADOPT_ADDITIONS="$additions" \
+  awk -v dropfile="$f.dropped" '
+    BEGIN {
+      known=ENVIRON["ADOPT_KNOWN"]; additions=ENVIRON["ADOPT_ADDITIONS"]
+      split(known, K, "\n"); for (i in K) if (K[i] != "") kn[K[i]]=1
+    }
     /^    with:[[:space:]]*$/ { print; inblk=1; next }
     inblk && /^      / {
       line=$0
@@ -244,7 +250,9 @@ filter_with_block() {
 # 全新安裝時，直接把整個 with: 區塊換成偵測結果
 replace_with_block() {
   f="$1"; blk="$2"
-  awk -v blk="$blk" '
+  # 同上：$blk 是多行區塊，必須走 ENVIRON
+  ADOPT_BLK="$blk" awk '
+    BEGIN { blk=ENVIRON["ADOPT_BLK"] }
     /^    with:$/ && !seen { print; printf "%s", blk; inblk=1; seen=1; next }
     inblk && /^      / { next }
     { inblk=0; print }
@@ -357,15 +365,15 @@ plan_line() { info "  $1"; }
 
 info "計畫："
 for name in $CONFIGURED; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/$name（保留既有參數、更新 uses:、移除已廢除的 input）"
+  if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for name in $SHELL_FILES; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/$name（薄殼以範本為準；只搬回你調過的旋鈕，舊檔留 .bak）"
+  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（薄殼以範本為準；只搬回你調過的旋鈕，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
-  if [ -f ".github/$rel" ]; then plan_line "＝ 保留  .github/$rel（已存在，只另存 .new 供比對）"
+  if [ -f ".github/$rel" ]; then plan_line "＝ 保留  .github/${rel}（已存在，只另存 .new 供比對）"
   else plan_line "＋ 新增  .github/$rel"; fi
 done
 info ""
@@ -490,7 +498,7 @@ for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
   # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
   # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
   if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
-    if [ -n "$missing" ]; then missing="$missing、COMMENTED 觸發條件"
+    if [ -n "$missing" ]; then missing="${missing}、COMMENTED 觸發條件"
     else missing="COMMENTED 觸發條件"; fi
   fi
   if [ -n "$missing" ]; then

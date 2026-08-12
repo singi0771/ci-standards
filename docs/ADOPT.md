@@ -155,7 +155,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋五個情境，改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋六個情境共 43 項檢查，改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -164,10 +164,29 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 情境 | 驗什麼 |
 |---|---|
 | A 全新導入 | 偵測結果正確寫入、不產生多餘的 `.new` |
-| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋 |
+| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋、三支薄殼整份換新且旋鈕搬回 |
 | C 冪等 | 跑第二次沒有任何 diff |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換 |
+| F 巢狀結構 | 目標是外層資料夾時，提示往下一層找 |
+
+### ⚠️ 一定要在 macOS 上也跑一次
+
+**Linux 全過不代表 macOS 會過。** macOS 的預設環境跟 CI 差很多：
+
+| | Linux / CI / 雲端 session | macOS 預設 |
+|---|---|---|
+| bash | 5.x | **3.2.57**（2007 年，因授權問題不再更新） |
+| awk | GNU awk | **BWK awk**（BSD 系） |
+
+1.2.2 修的兩個 bug 都只在 macOS 重現，而 Linux 上 43 項全過：
+
+- bash 3.2 在 UTF-8 locale 下會把全形標點的首位元組**吃進變數名**
+  （`"$STD（ref…"` → 變數 `STD\xef`），配上 `set -u` 直接中止。
+  寫中文訊息時，`$VAR` 後面接非 ASCII 一律用 `${VAR}`。
+- BSD awk **不接受 `-v` 的值裡有換行**（GNU awk 容忍）。多行字串改走
+  `ENVIRON[]`。這個症狀有欺騙性 —— awk 放棄整個程式，但後面的 `mv`
+  照跑，檔案會被寫成空的或半成品。
 
 ---
 
