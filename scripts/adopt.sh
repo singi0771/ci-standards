@@ -252,11 +252,95 @@ replace_with_block() {
   mv "$f.tmp" "$f"
 }
 
-CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""
+# 讀一個檔案 with: 區塊裡「真的有設定」的 key（被註解掉的不算）
+with_keys() {
+  awk '
+    /^    with:[[:space:]]*$/ { inblk=1; next }
+    inblk && /^      #/ { next }
+    inblk && match($0, /^      [A-Za-z0-9_-]+:/) {
+      k=$0; sub(/^ +/, "", k); sub(/:.*$/, "", k); print k; next
+    }
+    inblk && /^      / { next }
+    inblk && /^[[:space:]]*$/ { next }
+    inblk { inblk=0 }
+  ' "$1"
+}
 
-# ── 兩類檔案，兩種策略 ───────────────────────────────────────
-# PLUMBING：純管線，可以就地升級（保留使用者的參數與 on: 觸發設定）
-PLUMBING="ci.yml security.yml copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
+# 薄殼換新版時，把使用者「自己打開的旋鈕」從舊檔搬到新檔。
+#
+# 判準只有一條：舊檔有設、而新範本沒設。
+#   - 新範本自己就有的 key（head-branch / review-id 這種接線）→ 範本版本才是對的，
+#     使用者那份是舊契約，搬過去等於把 bug 一起搬過去
+#   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
+#   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的旋鈕）才是使用者的設定
+carry_knobs() {
+  _old="$1"; _new="$2"; _known="$3"; _carried="$4"; _dropped="$5"
+  : > "$_carried"; : > "$_dropped"
+  _tplk="$(with_keys "$_new")"
+  with_keys "$_old" | while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    if printf '%s\n' "$_tplk" | grep -qx -- "$k"; then continue; fi
+    if ! printf '%s\n' "$_known" | grep -qx -- "$k"; then
+      printf '%s\n' "$k" >> "$_dropped"; continue
+    fi
+    # 整行搬過去（連值帶註解），不重新組字串
+    awk -v key="$k" '
+      /^    with:[[:space:]]*$/ { inblk=1; next }
+      inblk && index($0, "      " key ":") == 1 { print; exit }
+      inblk && /^      / { next }
+      inblk { exit }
+    ' "$_old" >> "$_carried"
+  done
+}
+
+# 把 carry_knobs 撈出來的那幾行放回新薄殼：
+# 範本裡有對應的註解提示（# max-attempts: "3"）就取代那一行，否則附在 with: 區塊尾巴。
+inject_knobs() {
+  f="$1"; carried="$2"
+  [ -s "$carried" ] || return 0
+  awk -v carriedfile="$carried" '
+    BEGIN {
+      n=0
+      while ((getline line < carriedfile) > 0) {
+        if (line == "") continue
+        k=line; sub(/^ +/, "", k); sub(/:.*$/, "", k)
+        C[k]=line; order[++n]=k
+      }
+    }
+    function flush(  i) {
+      for (i=1; i<=n; i++) if (!(order[i] in done)) { print C[order[i]]; done[order[i]]=1 }
+    }
+    /^    with:[[:space:]]*$/ { print; inblk=1; next }
+    inblk && match($0, /^      #[[:space:]]*[A-Za-z0-9_-]+:/) {
+      k=$0; sub(/^ +#[[:space:]]*/, "", k); sub(/:.*$/, "", k)
+      if (k in C) { print C[k]; done[k]=1; next }
+      print; next
+    }
+    inblk && /^      / { print; next }
+    inblk && /^[[:space:]]*$/ { print; next }
+    inblk { flush(); inblk=0 }
+    { print }
+    END { if (inblk) flush() }
+  ' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+}
+
+CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""
+REFRESHED=""; SHELL_SAME=""; CARRIED_REPORT=""
+
+# ── 三類檔案，三種策略 ───────────────────────────────────────
+# CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
+#   → 就地合併，保留使用者的值與 on: 區塊。
+CONFIGURED="ci.yml security.yml"
+# SHELL_FILES：純薄殼。if: / with: 的接線與 secrets: 都屬於公版契約，
+#   使用者能調的只有註解裡標出來的那幾個旋鈕。
+#   → 整份換成新範本，再把使用者打開過的旋鈕搬回來。
+#
+#   為什麼不能跟 CONFIGURED 一樣就地合併：1.2.0 改的是 if: 條件與 secrets: 區塊
+#   （Copilot 的 COMMENTED review 要能進迴圈、@copilot 必須由真人 PAT 發出），
+#   而就地合併只碰 with:。舊 consumer 升級後會拿到新的 uses: 卻留著舊的 if:，
+#   結果是「版本號變了、自動修迴圈還是壞的」。
+SHELL_FILES="copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
 PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml"
 
@@ -272,8 +356,12 @@ scan-docker-image: $HAS_DOCKERFILE"
 plan_line() { info "  $1"; }
 
 info "計畫："
-for name in $PLUMBING; do
+for name in $CONFIGURED; do
   if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/$name（保留既有參數、更新 uses:、移除已廢除的 input）"
+  else plan_line "＋ 新增  .github/workflows/$name"; fi
+done
+for name in $SHELL_FILES; do
+  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/$name（薄殼以範本為準；只搬回你調過的旋鈕，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -289,8 +377,8 @@ fi
 
 mkdir -p .github/workflows
 
-# ── PLUMBING ─────────────────────────────────────────────────
-for name in $PLUMBING; do
+# ── CONFIGURED：就地合併 ─────────────────────────────────────
+for name in $CONFIGURED; do
   dst=".github/workflows/$name"
   reu="$(reusable_for "$name")"
   known=""
@@ -309,7 +397,6 @@ for name in $PLUMBING; do
     case "$name" in
       ci.yml)       filter_with_block "$dst" "$known" "$CI_ADDITIONS" ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
-      *)            filter_with_block "$dst" "$known" "" ;;
     esac
     patch_uses "$dst"
     if [ -s "$dst.dropped" ]; then
@@ -320,6 +407,53 @@ for name in $PLUMBING; do
     fi
     rm -f "$dst.dropped"
     MERGED="$MERGED $name"
+  fi
+done
+
+# ── SHELL_FILES：整份換新，只搬回使用者的旋鈕 ────────────────
+for name in $SHELL_FILES; do
+  dst=".github/workflows/$name"
+  src="$TPL/workflows/$name"
+  [ -f "$src" ] || continue
+  reu="$(reusable_for "$name")"
+  known=""
+  if [ -n "$reu" ] && [ -f "$reu" ]; then known="$(reusable_inputs "$reu")"; fi
+
+  if [ ! -f "$dst" ]; then
+    cp "$src" "$dst"
+    patch_uses "$dst"
+    CREATED="$CREATED $name"
+    continue
+  fi
+
+  cp "$dst" "$dst.prev"
+  cp "$src" "$dst"
+  carry_knobs "$dst.prev" "$dst" "$known" "$dst.carried" "$dst.dropped"
+  inject_knobs "$dst" "$dst.carried"
+  patch_uses "$dst"
+
+  if [ -s "$dst.carried" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      CARRIED_REPORT="$CARRIED_REPORT
+    $name → 保留你調過的：$(printf '%s' "$line" | sed 's/^ *//')"
+    done < "$dst.carried"
+  fi
+  if [ -s "$dst.dropped" ]; then
+    while IFS= read -r k; do
+      DROPPED_REPORT="$DROPPED_REPORT
+    $name → 移除已廢除的 input：$k"
+    done < "$dst.dropped"
+  fi
+  rm -f "$dst.carried" "$dst.dropped"
+
+  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（冪等性）
+  if cmp -s "$dst.prev" "$dst"; then
+    rm -f "$dst.prev"
+    SHELL_SAME="$SHELL_SAME $name"
+  else
+    mv "$dst.prev" "$dst.bak"
+    REFRESHED="$REFRESHED $name"
   fi
 done
 
@@ -341,9 +475,10 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
-# ── 1.2.0 契約檢查：升級模式不會補 if:/secrets:，缺了要提醒重新複製 ──
-# @copilot mention 必須由真人 PAT 發出（bot 發的會被 coding agent 忽略），
-# 所以這兩支薄殼需要 secrets: 區塊把 COPILOT_TRIGGER_PAT 傳進公版。
+# ── 1.2.0 契約的收尾檢查 ─────────────────────────────────────
+# 薄殼現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
+# 比 1.2.0 舊（或範本被改壞）—— 那就是「導完自動修迴圈還是不會動」，
+# 寧可吵也不要靜靜地過。
 PAT_WARN=""
 for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
   dst=".github/workflows/$name"
@@ -360,22 +495,28 @@ for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
   fi
   if [ -n "$missing" ]; then
     PAT_WARN="$PAT_WARN
-    $name → 缺 $missing（1.2.0 契約變更）"
+    $name → 缺 $missing"
   fi
 done
 
 # ── 報告 ─────────────────────────────────────────────────────
 info "───────────────────────────────────────────────────────────"
-if [ -n "$CREATED" ]; then info "＋ 新增：$CREATED"; fi
-if [ -n "$MERGED" ];  then info "↻ 合併：$MERGED"; fi
-if [ -n "$KEPT" ];    then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
+if [ -n "$CREATED" ];    then info "＋ 新增：$CREATED"; fi
+if [ -n "$MERGED" ];     then info "↻ 合併：$MERGED"; fi
+if [ -n "$REFRESHED" ];  then info "⟳ 換新（薄殼，舊檔留在 .bak）：$REFRESHED"; fi
+if [ -n "$SHELL_SAME" ]; then info "＝ 已是最新：$SHELL_SAME"; fi
+if [ -n "$KEPT" ];       then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
+if [ -n "$CARRIED_REPORT" ]; then
+  info ""
+  info "薄殼換新版時搬回來的設定：$CARRIED_REPORT"
+fi
 if [ -n "$DROPPED_REPORT" ]; then
   info ""
   warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）：$DROPPED_REPORT"
 fi
 if [ -n "$PAT_WARN" ]; then
   info ""
-  warn "以下薄殼是舊契約，升級模式不會自動改 if:/secrets: —— 請從 templates/ 重新複製，並在 repo secrets 設定 COPILOT_TRIGGER_PAT（見公版 README「自動修復閉環」）：$PAT_WARN"
+  warn "薄殼缺 1.2.0 的契約內容 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
 fi
 info "───────────────────────────────────────────────────────────"
 
@@ -389,9 +530,17 @@ cat <<'NEXT'
     處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
+    若有 *.bak 檔案：那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版契約，
+    升級時一律以範本為準，只把你調過的旋鈕搬回來。確認過沒有你自己加的東西
+    （額外的 job、改過的 permissions）就把 .bak 刪掉。
+
  3. ⚠️ 全新導入務必改 .github/copilot-instructions.md ——
     把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
     沒改是導入後最常見的失敗原因。
+
+    另外設好 repo secret COPILOT_TRIGGER_PAT（Settings → Secrets → Actions）——
+    沒設的話 CI 會過，但 Copilot 自動修迴圈不會動工（@copilot 必須由真人帳號
+    發出，github-actions[bot] 發的會被忽略）。設定方式見公版 README。
 
  4. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards

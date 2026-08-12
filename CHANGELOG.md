@@ -12,7 +12,45 @@
 
 ## [未發佈]
 
+### 修正
+- **`scripts/adopt.sh` / `adopt.ps1`：升級模式漏掉 1.2.0 的契約變更。**
+  原本五支呼叫端一律走「就地合併」，而就地合併只碰 `with:` 區塊。
+  1.2.0 真正改的是三支 `copilot-*` 薄殼的 `if:` 條件與 `secrets:` 區塊
+  （多收 Copilot 的 `COMMENTED` review、把 `COPILOT_TRIGGER_PAT` 傳進公版），
+  所以舊 consumer 升級後會拿到**新的 `uses:` 卻留著舊的 `if:` 和缺席的 `secrets:`**
+  —— 版本號變了、自動修迴圈還是壞的。腳本雖然會印一行警告要人「從 templates/ 重新複製」，
+  但一鍵導入卻要人手動補檔，等於這條路沒有真正打通。
+
+  改成**檔案分三類**：
+  - `ci.yml` / `security.yml`（真的帶專案設定）→ 維持就地合併
+  - 三支 `copilot-*` 薄殼（`if:`/`with:` 接線/`secrets:` 都是公版契約）→ **整份換成新範本**，
+    只把使用者自己打開過的旋鈕（`max-attempts`、`max-review-requests`）搬回來，
+    舊檔留成 `.bak`；內容沒變就不留，維持冪等
+  - 專案專屬的四個檔 → 維持絕不覆蓋
+
+  「哪些旋鈕該搬」不寫死：判準是「舊檔有設、而新範本沒設」，且公版 reusable
+  仍認得該 input（不認得的照樣移除並回報）。原本的契約檢查改成收尾用的
+  post-condition —— 會叫就代表 `--std` 指到的公版比 1.2.0 舊。
+
+  回歸測試新增 15 項（`scripts/test-adopt.sh` 情境 B），模擬停在 1.2.0 之前、
+  且調過 `max-attempts` 的 consumer（AdminAutoTools 就是這個狀態）。
+
+- **`scripts/adopt.ps1` 會把檔案寫錯地方（Windows 專屬）。**
+  `Set-Location` 只改 PowerShell 的位置，不改行程的工作目錄；而腳本為了控制
+  「UTF-8 無 BOM + LF」用的是 `[System.IO.File]` 這組 .NET API，相對路徑會解到
+  **PowerShell 當初啟動的目錄**。用 `-Target` 指向別的專案時，`.github\...`
+  會落在錯的地方。補上 `[System.IO.Directory]::SetCurrentDirectory()`。
+
+- `docs/KNOWN-LIMITATIONS.md` 的 `action_required` 一節有**兩份重複的排查步驟**，
+  而且都指向 fork PR 的核准設定 —— 那條路已知無效（Copilot 推的是同 repo 分支不是 fork；
+  `POST /actions/runs/{id}/approve` 對這些 run 回 403，而該 API 只服務 fork PR）。
+  改寫成「這是 GitHub 對 coding agent 的安全設計，沒有開關可調」，並保留那兩個佐證，
+  免得日後有人再花時間去調那個沒用的設定。總表該列也從「這條要先解」一併更正。
+
 ### 變更
+- `docs/ADOPT.md` 升級一節改寫成「三類檔案、三種策略」，並說明薄殼為什麼不能就地合併。
+- 導入完的提示新增「設定 repo secret `COPILOT_TRIGGER_PAT`」——
+  沒設的話 CI 會過，但自動修迴圈不會動工，是導入後最容易漏掉的一步。
 - `docs/SETUP.md` 新增「只留一個 review 觸發源」與「Review thread 一律要求 resolve」兩節。
   GitHub 原生的「每個 PR 自動請 Copilot review」與公版的 `copilot-autoreview-gate`
   同時開著會互相打架：原生那條在 CI 之前就審，違反「先讓免費掃描器擋掉明顯問題、
@@ -21,13 +59,6 @@
   unable to run its full agentic suite）下的 review 提出結論錯誤的建議，
   照做之後把 `security-reusable.yml` 改出一個回歸。
   建議關掉原生自動 review，只留 gate 驅動的那條；thread resolution 則維持強制。
-
-### 修正
-- `docs/KNOWN-LIMITATIONS.md` 的 `action_required` 一節有**兩份重複的排查步驟**，
-  而且都指向 fork PR 的核准設定 —— 那條路已知無效（Copilot 推的是同 repo 分支不是 fork；
-  `POST /actions/runs/{id}/approve` 對這些 run 回 403，而該 API 只服務 fork PR）。
-  改寫成「這是 GitHub 對 coding agent 的安全設計，沒有開關可調」，並保留那兩個佐證，
-  免得日後有人再花時間去調那個沒用的設定。總表該列也從「這條要先解」一併更正。
 
 ---
 

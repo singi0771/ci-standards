@@ -111,6 +111,58 @@ jobs:
       obsolete-flag: "x"
 OLD
 
+# 1.2.0 之前的薄殼：只認 changes_requested、沒有 review-id/review-state、
+# 沒有 secrets: 區塊。AdminAutoTools 就是停在這個版本。
+# 這幾支的 if:/with:/secrets: 是公版契約，不是專案設定 —— 升級時必須整份換掉，
+# 只保留使用者調過的旋鈕（max-attempts / max-review-requests）。
+cat > .github/workflows/copilot-autofix-review.yml <<'OLD'
+name: Copilot Autofix — Review
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  autofix-review:
+    if: ${{ github.event.review.state == 'changes_requested' }}
+    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
+    with:
+      pr-number:    ${{ github.event.pull_request.number }}
+      pr-author:    ${{ github.event.pull_request.user.login }}
+      reviewer:     ${{ github.event.review.user.login }}
+      review-body:  ${{ github.event.review.body }}
+      review-url:   ${{ github.event.review.html_url }}
+      max-attempts: "5"
+      legacy-knob:  "x"
+OLD
+
+cat > .github/workflows/copilot-autoreview-gate.yml <<'OLD'
+name: Copilot Auto Review
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security Scan"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+  actions: read
+
+jobs:
+  autoreview:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    uses: singi0771/ci-standards/.github/workflows/copilot-autoreview-reusable.yml@v1
+    with:
+      head-sha:            ${{ github.event.workflow_run.head_sha }}
+      head-branch:         ${{ github.event.workflow_run.head_branch }}
+      triggered-by:        ${{ github.event.workflow_run.name }}
+      max-review-requests: "7"
+OLD
+
 printf '# 我們自己寫的 Copilot 指引\n專案專屬內容，絕不能被沖掉。\n' > .github/copilot-instructions.md
 
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
@@ -142,6 +194,31 @@ has "$SEC" '  security:'  "job id 'security' 未被更動"
 has ".github/copilot-instructions.md" '專案專屬內容，絕不能被沖掉' "既有 copilot-instructions.md 未被覆蓋"
 if [ -f ".github/copilot-instructions.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
 
+# ── 薄殼：1.2.0 的契約必須真的補進去 ──
+# 這一段是整個升級路徑最會出事的地方：只合併 with: 的話，舊 consumer 會拿到
+# 新的 uses: 卻留著舊的 if: 與缺席的 secrets: —— 版本號變了、自動修迴圈還是壞的。
+REV=".github/workflows/copilot-autofix-review.yml"
+GATE=".github/workflows/copilot-autoreview-gate.yml"
+has "$REV" "'commented'"            "review 薄殼補上 COMMENTED 觸發條件（Copilot 只送 COMMENTED）"
+has "$REV" 'copilot-pull-request-reviewer' "review 薄殼補上 Copilot 帳號比對"
+has "$REV" 'OWNER'                  "review 薄殼補上真人 reviewer 的信任身分檢查"
+has "$REV" 'review-id:'             "review 薄殼補上新版才有的 review-id"
+has "$REV" 'review-state:'          "review 薄殼補上新版才有的 review-state"
+has "$REV" 'copilot-trigger-pat'    "review 薄殼補上 secrets: copilot-trigger-pat"
+has ".github/workflows/copilot-autofix-ci-security.yml" 'copilot-trigger-pat' \
+    "CI/Security 薄殼補上 secrets: copilot-trigger-pat"
+
+# ── 換新時，使用者調過的旋鈕要搬回來；廢除的要丟掉 ──
+has   "$REV"  'max-attempts: "5"'        "薄殼換新後仍保留使用者調過的 max-attempts"
+hasnt "$REV"  'legacy-knob'              "薄殼換新時丟掉公版已不認得的 legacy-knob"
+has   "$GATE" 'max-review-requests: "7"' "薄殼換新後仍保留使用者調過的 max-review-requests"
+hasnt "$GATE" '# max-review-requests'    "被搬回來的旋鈕取代掉範本的註解提示（不會兩份並存）"
+has   "$REV"  'copilot-autofix-review-reusable.yml@v1.1.0' "薄殼的 uses: ref 也有更新"
+
+# ── 舊檔要留下來供比對 ──
+if [ -f "$REV.bak" ]; then ok "被換掉的舊薄殼留成 .bak"; else bad "應留下 .bak"; fi
+has "$REV.bak" 'legacy-knob' ".bak 是原本那份（沒被動過）"
+
 # ── 產生的 YAML 必須合法 ──
 if command -v python3 >/dev/null 2>&1; then
   if python3 -c "
@@ -153,12 +230,13 @@ fi
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 C：冪等性（同樣的指令跑兩次，第二次不應再改動）\n'
 # ═════════════════════════════════════════════════════════════
-rm -f .github/copilot-instructions.md.new
+# 使用者處理完 .new / .bak 之後的正常狀態
+rm -f .github/copilot-instructions.md.new .github/workflows/*.bak
 git add -A >/dev/null 2>&1; git commit -qm "after first adopt"
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
 rm -f .github/copilot-instructions.md.new
 if [ -z "$(git status --porcelain)" ]; then ok "第二次執行沒有產生任何差異"; else
-  bad "第二次執行仍有變動："; git --no-pager diff --stat
+  bad "第二次執行仍有變動："; git --no-pager diff --stat; git status --porcelain
 fi
 
 # ═════════════════════════════════════════════════════════════
