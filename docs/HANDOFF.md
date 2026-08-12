@@ -5,6 +5,11 @@
 > 這是一份**活的**文件。每次做完一段工作就更新「現況快照」與「待辦」，
 > 讓下一個接手的人（或下一個 Claude session）不必重新推導。
 > 歷史細節請看 `CHANGELOG.md`，這裡只寫**現在是什麼狀態、下一步做什麼**。
+>
+> ⚠️ **開始動手前先驗一次快照**（`git log --oneline -1`、
+> `git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'`）。
+> 這份文件可能是幾天前寫的 —— 照著過期的快照做，最糟的情況是重複
+> force-push `v1`。**實際狀態永遠以指令輸出為準，不是以這份文件為準。**
 
 ---
 
@@ -34,7 +39,11 @@
 
 `singi0771/ci-standards` 是**中央公版**：一組 reusable workflow，各專案用一行
 `uses: singi0771/ci-standards/.github/workflows/xxx.yml@v1` 呼叫。
-改公版一次，所有專案下次觸發就同步 —— 這是它存在的全部理由。
+改公版一次、**把 `v1` 移到新的 commit**，所有專案下次觸發就同步 ——
+這是它存在的全部理由。
+
+⚠️ **合併進 `main` 不等於發佈。** 消費端釘的是 `@v1`，`v1` 沒移動的話，
+改再多它們完全不會有感覺。發佈永遠是兩步：合併 → 移 tag（見 §3 的發佈流程）。
 
 三條主線：
 
@@ -43,8 +52,10 @@
 3. **Copilot 自動迴圈**：CI/Security 失敗 → 請 Copilot 修；兩條都過 → 請 Copilot 審；
    審有意見 → 再請 Copilot 修
 
-每條 workflow 最後都有一個 **Gate job**（`ci / CI Gate`、`security / Security Gate`），
-那才是唯一該設為 required status check 的東西。
+**CI 與 Security 各有一個 Gate job**（`ci / CI Gate`、`security / Security Gate`），
+那兩個才是唯一該設為 required status check 的東西。
+Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 `if` 條件，
+被 skip 的 check 永遠不會回報，PR 會直接卡死。
 
 ---
 
@@ -54,8 +65,8 @@
 |---|---|
 | `main` | `ff1f356e63e31816b9ee2fa0a7181fafea64b517` |
 | CHANGELOG | 已定版到 **1.2.1** |
-| `v1` tag | ⚠️ **還停在 `ba8e537`（1.2.0），落後五個 commit** |
-| `v1.2.1` tag | ⚠️ **還沒建立** |
+| `v1` tag | ✅ 已移到 `ff1f356`（1.2.1 已發佈，各專案下次觸發就會吃到） |
+| `v1.2.1` tag | ✅ 已建立（annotated；`v1.2.1^{}` 解析到 `ff1f356`） |
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
 | AdminAutoTools | ⚠️ **停在 1.2.0 之前，自動修迴圈是壞的**，需要重跑 adopt |
 | adopt.sh | ✅ 43 項回歸測試全過 |
@@ -76,33 +87,10 @@
 
 ## 3. 待辦（依序）
 
-### ① 打 tag ← 現在卡在這
+> **1.2.1 已發佈完成**（`v1` 與 `v1.2.1` 都在 `ff1f356`）。
+> 發佈的操作步驟移到本節最後的「發佈流程」，下次公版有實質變更時照那個走。
 
-```bash
-cd "$CODE_WORK/ci-standards"
-git fetch origin --prune
-git checkout main && git pull
-git log --oneline -1        # 必須看到 ff1f356
-
-git tag -a v1.2.1 -m "adopt: 薄殼改為整份換新，補上升級模式漏掉的 1.2.0 契約" ff1f356e63e31816b9ee2fa0a7181fafea64b517
-git push origin v1.2.1
-
-git tag -f v1 ff1f356e63e31816b9ee2fa0a7181fafea64b517
-git push -f origin v1
-
-git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
-```
-
-**驗收**：最後一行的輸出裡，`refs/tags/v1` 與 `refs/tags/v1.2.1` 都指向
-`ff1f356e63e31816b9ee2fa0a7181fafea64b517`。
-
-> tag 刻意釘死 SHA 而不是 HEAD —— 本機 `main` 若落後，用 HEAD 會把 tag 打到錯的 commit。
-
-> **為什麼 tag 要移**：`v1` 是會移動的別名，各專案的 `uses: ...@v1` 在**觸發當下**才解析。
-> 不移動它，公版改再多，所有專案完全不會有感覺。`v1.2.1` 則是不可變的回滾點。
-> 破壞性變更（改 input 名、改 job 名）**不能移 `v1`，要開 `v2`**。
-
-### ② 用 AdminAutoTools 測 adopt（1.2.1 的重點驗證）
+### ① 用 AdminAutoTools 測 adopt（1.2.1 的重點驗證）← 現在卡在這
 
 AdminAutoTools 就在 ci-standards 隔壁，**注意它是巢狀結構**：
 `CodingProject/AdminAutoTools/AdminAutoTools/`（外層資料夾包著真正的 clone）。
@@ -136,7 +124,7 @@ git add .github && git commit -m "chore: 升級 ci-standards 公版至 1.2.1"
 git push -u origin chore/adopt-ci-standards-1.2.1
 ```
 
-### ③ AdminAutoTools 設 repo secret（**最容易漏，漏了就白做**）
+### ② AdminAutoTools 設 repo secret（**最容易漏，漏了就白做**）
 
 GitHub → AdminAutoTools → Settings → Secrets and variables → Actions →
 New repository secret：
@@ -149,7 +137,7 @@ New repository secret：
 因為 `@copilot` mention 必須由真人帳號發出，`github-actions[bot]` 發的會被
 coding agent 忽略（GitHub 的防 bot 迴圈機制）。
 
-### ④ 驗 adopt.ps1（Windows，尚未做過）
+### ③ 驗 adopt.ps1（Windows，尚未做過）
 
 使用者有一台 Windows（PowerShell 7.6.3）。`adopt.ps1` **從未在真 Windows 上跑過**。
 
@@ -162,7 +150,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target "某個測�
 UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已補
 `[System.IO.Directory]::SetCurrentDirectory()`，但**沒實測過**。
 
-### ⑤ 使用者端設定（GitHub 網頁，非程式）
+### ④ 使用者端設定（GitHub 網頁，非程式）
 
 - [ ] **關掉 GitHub 原生的「自動請 Copilot code review」**。它會在 CI 之前就審，
       違反「先讓免費掃描器擋掉明顯問題、確定值得看了才花 AI credits」的設計順序，
@@ -170,7 +158,7 @@ UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已�
       只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
 
-### ⑥ 長期觀察中
+### ⑤ 長期觀察中
 
 - **`action_required`**：Copilot 觸發的 run 會停在待核准，這是 GitHub 對 coding agent
   的安全設計，**沒有開關可調**（別再去調 fork PR 的核准設定，那條路已證實無效，
@@ -180,6 +168,38 @@ UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已�
   數據夠了再決定要不要做自動空 commit 的解法。
 - **搬到 GitHub organization**：步驟見 `docs/MIGRATION-TO-ORG.md`。
   搬完各專案要用 `adopt.sh --uses-repo ORG/ci-standards` 換掉 `uses:` 的 owner。
+
+### 發佈流程（公版每次有實質變更就要做一次）
+
+**合併進 `main` 不是發佈。** 消費端釘 `@v1`，`v1` 沒移動 = 沒有任何專案會有感覺。
+
+```bash
+cd "$CODE_WORK/ci-standards"
+git fetch origin --prune
+git checkout main && git pull
+git log --oneline -1        # 記下這個 SHA，下面用它
+
+git tag -a vX.Y.Z -m "一句話說明這版改了什麼" <上面那個完整 SHA>
+git push origin vX.Y.Z
+
+git tag -f v1 <同一個完整 SHA>
+git push -f origin v1
+
+git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
+```
+
+**驗收**：最後一行的輸出裡 `refs/tags/v1` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA。
+（annotated tag 自己的物件 SHA 不同是正常的，要看 `^{}` 那一行。）
+
+幾個容易出錯的地方：
+
+- **tag 釘死完整 SHA，不要用 HEAD** —— 本機 `main` 若落後，用 HEAD 會打到錯的 commit。
+- **`v1` 是會移動的別名**，各專案的 `uses: ...@v1` 在**觸發當下**才解析，沒有 lockfile。
+  `vX.Y.Z` 則是不可變的回滾點，出事時各專案可以臨時改釘那個。
+- **破壞性變更不能移 `v1`** —— 改 input 名、改 job 名（consumer 的 ruleset 綁著
+  `ci / CI Gate`、`security / Security Gate`）都算，那要開 `v2`。判準見 `CONTRIBUTING.md`。
+- **純文件變更可以不發版**，等下次有實質變更再一起發。
+- **雲端 session 推不了 tag**（policy gateway 對 tag ref 回 403），這一步一律在本機做。
 
 ---
 
