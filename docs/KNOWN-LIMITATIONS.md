@@ -8,7 +8,7 @@
 
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
-| [Copilot 開的 PR 其 CI 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | 🔴 **Copilot 的 PR 永遠 merge 不了**（required check 不回報） | 改 repo 的 Actions 核准設定 —— **這條要先解** |
+| [Copilot 開的 PR 其 CI 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | 每輪 Copilot 推送要人按一次核准 | **GitHub 硬規定，沒有開關可調**。按一次 Approve，或人推空 commit |
 | [Copilot Coding Agent 不回應 Actions 貼的 `@copilot`](#copilot-coding-agent-對-actions-貼的-copilot-沒有反應) | 「自動修」的**自動觸發**那一步 | Agent 本身可用 —— 改成手動「開 Issue 指派 Copilot」即可 |
 | [`upload-sarif: true` 尚未驗證可用](#upload-sarif-true-尚未驗證可用) | Security 分頁整合 | 維持 `false`，用 artifact |
 | [只有 Python 的 lint/test](#ci-reusable-只內建-python-的-linttest) | 非 Python 專案 | `run-python: false` + 自己補一支 |
@@ -174,28 +174,33 @@ Copilot 修好 → 開 PR → CI 卡在 action_required → required check 永�
 **先解這條，再去解 [bot mention](#copilot-coding-agent-對-actions-貼的-copilot-沒有反應) 那條** ——
 順序反了的話，只會得到一堆卡在 `action_required` 的自動 PR。
 
-### 排查
+### ⚠️ 不要再去調 fork PR 的核准設定 —— 那不是這件事的開關
 
-1. Repo → Settings → Actions → General → **Approval for running fork pull request workflows**
-   /「Require approval for ...」那組設定 —— 目前的設定把 Copilot 歸類成需要核准的一方
-2. 放寬到最低必要的層級（例如只對真正的 first-time outside contributor 要求核准）
-3. **驗證方式**：重新指派一個小 Issue 給 Copilot，看它開的 PR 的 CI 會不會自己跑起來。
-   PR #6 就是現成的樣本 —— 到它的 Actions run 按一次 Approve and run，
-   確認按下去之後 Gate 會正常變綠（先確認「只是被擋住」而不是「另有問題」）
+本文件早期版本建議去改
+Settings → Actions → General → **Fork pull request workflows from outside collaborators**。
+**已知那條路無效，不要再花時間。** 兩個佐證：
 
-> 這是安全性與自動化的權衡，不是純技術問題。放寬之後，fork 來的 PR 也更容易跑到你的 Actions。
-> 決定前先確認 repo 可見性與 spending limit（Actions 應設 $0，見 [SETUP §D](SETUP.md#d-額度與帳務)）。
-> 若不願意放寬，就接受「Copilot 的 PR 要人按一次核准」，並把它寫進團隊的日常流程。
+- Copilot 的 push 來自**同一個 repo 的分支**，不是 fork，本來就不在那個設定的管轄範圍
+- `POST /actions/runs/{id}/approve` 對這些 run 回 **403**，而該 API 明確只服務 fork PR ——
+  代表 GitHub 內部把「Copilot 觸發」歸在跟 fork 不同的類別
 
-**排查：**
+這是 GitHub 對 coding agent 的**安全設計**（避免被 prompt injection 誘導去跑 CI），
+不是我們設定錯了。
 
-1. Repo → Settings → Actions → General → **Fork pull request workflows from outside collaborators**
-   —— 若是 `Require approval for first-time contributors` 或更嚴，Copilot 會被歸到需要核准那一類
-2. 放寬到 `Require approval for first-time contributors who are new to GitHub`（或依你的風險胃納選）
-3. 改完之後**重跑一次 canary**，確認 Copilot 觸發的 run 會自動執行
+> 若日後 GitHub 開放對應開關，請把驗證結果更新到這一節，並把上面兩個佐證留著 ——
+> 它們是「為什麼當初排除了 fork 設定」的依據。
 
-> 這是安全性與自動化的權衡，不是純技術問題。public repo 放太寬會讓任何人 fork 後跑你的 Actions，
-> 決定前先確認 repo 的可見性與 spending limit（Actions 應設 $0，見 [SETUP §D](SETUP.md#d-額度與帳務)）。
+### 實務上怎麼過
+
+| 做法 | 成本 | 適用 |
+|---|---|---|
+| PR 頁面按 **Approve and run workflows** | 一次點擊 | 偶爾一兩個 PR |
+| 人推空 commit（見上方指令） | 一次指令 | 手上已經有 terminal |
+| 接受它，寫進團隊日常流程 | 認知成本 | 導入初期 |
+
+**Copilot PR 的數量才是真正的變數。** 如果每天只有一兩個，一次點擊不算負擔；
+如果變成十幾個，就該回頭檢討「是不是讓 Copilot 開太多 PR」，
+而不是想辦法繞過核准 —— 那個核准存在是有理由的。
 
 ---
 

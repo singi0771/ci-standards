@@ -81,8 +81,62 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 ### Copilot Code Review（自動審 PR）
 
 1. Org → Settings → Copilot → Policies → 開啟 **Copilot code review**
-2. 在 repo 或 ruleset 設定「自動要求 Copilot review」，讓每個 PR 自動被審
-3. Copilot 審查時會讀專案的 `.github/copilot-instructions.md`
+2. Copilot 審查時會讀專案的 `.github/copilot-instructions.md`
+3. ⚠️ **不要**再另外開「每個 PR 自動要求 Copilot review」—— 理由見下一節
+
+### ⚠️ 只留一個 review 觸發源
+
+Copilot 會來審 PR 有**兩個**可能的來源，同時開著會互相打架：
+
+| 來源 | 何時觸發 | 設定位置 |
+|---|---|---|
+| **GitHub 原生自動 review** | **PR 一開就審**（CI 還沒跑） | repo/org 設定或 ruleset 的「Require Copilot code review」 |
+| **本公版的 `copilot-autoreview-gate.yml`** | **雙 Gate 全綠之後**才請審，且跳過 Dependabot | 複製範本即有 |
+
+**兩個都開的話會發生什麼**（2026-08-09 PR #15 的真實案例）：
+
+```
+12:14  Dependabot 開 PR（單純 SHA bump，1 檔 +2/-2）
+12:14  原生自動 review 立刻觸發 —— CI 一秒都還沒跑
+12:22  Copilot 送出 review，本文自陳「unable to run its full agentic suite」
+       → 降級模式下只看到 diff 兩行，提出了一個結論錯誤的建議
+12:27  依該建議修改 → 公版被改出一個回歸
+15:04  CI 這時才跑完（而且是綠的）
+```
+
+原生那條**違反這套設計的核心順序**：先讓免費掃描器擋掉明顯問題，
+確定值得看了才花 AI credits 請 Copilot 審。在 CI 之前就審，等於：
+
+- 對「反正會被 CI 擋掉」的 PR 白花 credits
+- 審的是**即將被改掉**的程式碼
+- 連 Dependabot 的純版本更新也審（公版的 gate 刻意跳過這類）
+
+**建議設定：關掉原生自動 review，只留 gate 驅動的那條。**
+
+1. Repo → Settings → **Code review**（或 org → Copilot → Policies）→
+   關閉「automatically request Copilot review on new pull requests」
+2. 若是用 **ruleset** 開的：Settings → Rules → Rulesets → 編輯該 ruleset →
+   取消 **Require Copilot code review**
+3. 驗證：開一個測試 PR，確認 **CI 跑完之前不會出現 Copilot 的 review**，
+   雙 Gate 綠了之後才由 `copilot-autoreview-gate` 貼出請審留言
+
+> 想手動請 Copilot 審某個 PR 隨時可以（PR 頁面 Reviewers → Copilot）。
+> 關掉的只是「每個 PR 都自動審」。
+
+### Review thread 一律要求 resolve（保持開啟）
+
+`setup-branch-protection.sh` 建立的 ruleset 含 `required_review_thread_resolution: true` ——
+**建議維持開啟**，即使它代表每個有 review 的 PR 都要人按一次 Resolve。
+
+理由就在上面那個案例：Copilot 那則意見**結論是錯的，但它指出的邊界情況是真的存在**。
+如果為了省一次點擊而關掉、或寫自動化去 auto-resolve，你會同時失去
+「發現真問題」和「發現假問題」的能力 —— 而假問題的成本是回一則留言，
+真問題的成本是公版帶著一個洞被所有專案吃下去。
+
+**該優化的是觸發頻率（上一節），不是把關卡拿掉。**
+關掉原生自動 review 之後，需要 resolve 的 thread 自然大幅減少：
+Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 PR，
+本來就值得人看一眼。
 
 ### Copilot Coding Agent（把 Issue 變 PR）
 

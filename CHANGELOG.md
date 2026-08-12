@@ -10,6 +10,27 @@
 
 ---
 
+## [未發佈]
+
+### 變更
+- `docs/SETUP.md` 新增「只留一個 review 觸發源」與「Review thread 一律要求 resolve」兩節。
+  GitHub 原生的「每個 PR 自動請 Copilot review」與公版的 `copilot-autoreview-gate`
+  同時開著會互相打架：原生那條在 CI 之前就審，違反「先讓免費掃描器擋掉明顯問題、
+  確定值得看了才花 AI credits」的設計順序，還會審到 Dependabot 的純版本更新
+  （gate 刻意跳過那類）。2026-08-09 PR #15 就是實例 —— 降級模式（Copilot 自陳
+  unable to run its full agentic suite）下的 review 提出結論錯誤的建議，
+  照做之後把 `security-reusable.yml` 改出一個回歸。
+  建議關掉原生自動 review，只留 gate 驅動的那條；thread resolution 則維持強制。
+
+### 修正
+- `docs/KNOWN-LIMITATIONS.md` 的 `action_required` 一節有**兩份重複的排查步驟**，
+  而且都指向 fork PR 的核准設定 —— 那條路已知無效（Copilot 推的是同 repo 分支不是 fork；
+  `POST /actions/runs/{id}/approve` 對這些 run 回 403，而該 API 只服務 fork PR）。
+  改寫成「這是 GitHub 對 coding agent 的安全設計，沒有開關可調」，並保留那兩個佐證，
+  免得日後有人再花時間去調那個沒用的設定。總表該列也從「這條要先解」一併更正。
+
+---
+
 ## [1.2.0] — 2026-08-09
 
 **這一版讓「Copilot 依 review 意見自動修正」第一次真正動起來。**
