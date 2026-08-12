@@ -79,7 +79,15 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ### `upgrade` —— 目標已經有舊版呼叫端
 
-**不覆蓋，改用就地合併。** 這是最容易出事的路徑，所以規則寫死：
+這是最容易出事的路徑，所以規則寫死。**檔案分三類，各有各的策略**：
+
+| 類別 | 檔案 | 策略 |
+|---|---|---|
+| 帶專案設定 | `ci.yml`、`security.yml` | **就地合併**（保留你的值） |
+| 純薄殼 | `copilot-autofix-ci-security.yml`、`copilot-autofix-review.yml`、`copilot-autoreview-gate.yml` | **整份換新**（只搬回你的旋鈕，舊檔留 `.bak`） |
+| 專案專屬 | `copilot-instructions.md` 等四個 | **絕不覆蓋**（只放一份 `.new`） |
+
+#### 1. 帶專案設定的：就地合併
 
 | 情況 | 行為 | 為什麼 |
 |---|---|---|
@@ -94,7 +102,27 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 「公版有哪些 input」是**直接讀公版 reusable 的 `workflow_call.inputs` 宣告**得來的，
 不是腳本裡寫死一份清單 —— 公版加減 input 時自動跟上，不會漂移。
 
-### 絕不覆蓋的檔案
+#### 2. 純薄殼的：整份換新
+
+三支 `copilot-*` 薄殼裡，`if:` 條件、`with:` 的事件接線、`secrets:` 區塊
+**全部屬於公版契約**，不是你的設定。你能調的只有註解裡標出來的那幾個旋鈕
+（`max-attempts`、`max-review-requests`）。所以升級時整份換成新範本，
+只把「你有設、而範本沒設」的旋鈕搬回來，舊檔留成 `.bak`。
+
+**為什麼不能跟第 1 類一樣就地合併？** 因為就地合併只碰 `with:`。
+1.2.0 改的是 `if:` 與 `secrets:`：
+
+- `if:` 要多收 Copilot 的 `COMMENTED` review（Copilot 永遠不送 `changes_requested`）
+- `secrets: copilot-trigger-pat` 要把真人 PAT 傳進公版（`github-actions[bot]` 發的
+  `@copilot` mention 會被 coding agent 忽略）
+
+只合併 `with:` 的話，舊 consumer 升級後會拿到新的 `uses:` 卻留著舊的 `if:`
+和缺席的 `secrets:` —— **版本號變了、自動修迴圈還是壞的，而且 CI 全綠沒有訊號**。
+
+> 換新會蓋掉你自己加在薄殼裡的東西（額外的 job、改過的 `permissions`）。
+> 那些不常見，但真的有的話 `.bak` 裡找得回來 —— 確認完再刪。
+
+#### 3. 絕不覆蓋的檔案
 
 這四個含專案專屬內容，已存在時腳本只放一份 `.new` 給你比對：
 
@@ -103,7 +131,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 - `pull_request_template.md`
 - `dependabot.yml` ← 你可能加過 npm 區塊、改過排程
 
-比對完記得把 `.new` 刪掉。
+比對完記得把 `.new`（和 `.bak`）刪掉。
 
 ### 冪等
 
