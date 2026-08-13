@@ -11,8 +11,13 @@
 # 另外裝 pwsh」，等於**唯一的目標環境正好是壞的那個**。
 #
 # 驗證方式（改完務必跑一次）：
-#   powershell -NoProfile -Command "$e=$null; [System.Management.Automation.Language.Parser]::ParseFile('scripts\adopt.ps1',[ref]$null,[ref]$e); $e.Count"
+#   powershell -NoProfile -Command "$e=$null; [System.Management.Automation.Language.Parser]::ParseFile('scripts\adopt.ps1',[ref]$null,[ref]$e) | Out-Null; $e.Count"
 #   -> 必須輸出 0
+#
+#   `| Out-Null` 不能省 —— ParseFile() 會回傳 ScriptBlockAst，不導掉的話
+#   會先吐一千多行的 AST，$e.Count 淹沒在裡面，根本看不出過了沒。
+#   另外一定要用 `powershell`（5.1），用 `pwsh`（7）永遠是 0 —— 7 預設吃
+#   UTF-8，根本不會重現這個問題，等於白驗。
 #
 # 注意：BOM 只加在**這支腳本自己**。腳本**產出**的 YAML 仍然是
 # UTF-8 無 BOM（見底下 Write-TextFile）—— 那是對的，別一起改。
