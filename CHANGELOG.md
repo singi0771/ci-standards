@@ -25,8 +25,9 @@
   BSD awk 不接受 `-v` 帶換行這兩個具體地雷。
   §6 的對照表也更正：雲端只跑得到 Linux 那條。
 
-- `docs/HANDOFF.md` §3 新增待辦：把 `adopt regression (ubuntu-latest / macos-latest)`
-  兩個 check 加進本 repo 的 ruleset。`adopt-tests.yml` 是獨立 workflow，
+- `docs/HANDOFF.md` §3 新增待辦：把 `adopt regression` 的三個 check
+  （`ubuntu-latest` / `macos-latest` / `windows-latest`）加進本 repo 的 ruleset。
+  `adopt-tests.yml` 是獨立 workflow，
   它的 job **不在 `ci / CI Gate` 底下**，所以現在測試失敗只會在 PR 顯示紅燈、
   不會擋下合併 —— 而 1.2.2 的整個教訓就是「這條路徑沒被守住」。
   這是本 repo 專屬的設定，不進 `scripts/setup-branch-protection.sh`
@@ -43,6 +44,11 @@
 
 - `scripts/test-adopt.sh`：YAML 檢查失敗時印出**檔名與原因**，不再 `2>/dev/null`
   吃掉錯誤。原本只印「YAML 解析失敗」五個字，診斷成本遠高於印訊息的成本。
+
+- `scripts/test-adopt.sh`：有項目被跳過時**不再印「全部通過 ✅」，改為 exit 1**。
+  被跳過的只有「產生的 workflow YAML 是否合法」那一項，而它正是唯一在驗
+  adopt 產出正確性的檢查 —— 缺了它還宣告全過就是假綠燈。
+  CI 有前置斷言擋住，本機這條路徑先前沒人守（採納 PR #22 的 Copilot 審查意見）。
 
 ### 變更（CI）
 - `adopt-tests.yml` 的 matrix 加入 `windows-latest`，並用 `defaults.run.shell: bash`
