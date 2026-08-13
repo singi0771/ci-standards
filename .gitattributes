@@ -20,6 +20,12 @@
 
 # PowerShell 在 Windows 上以 CRLF 為慣例，且 PS 5.1 對 LF 也完全沒問題；
 # 統一用 LF，避免同一個 repo 兩種行尾。
+#
+# ⚠️ 但 `scripts/adopt.ps1` 必須保留 **UTF-8 BOM**（這裡管不到 BOM，只管行尾）。
+#    Windows PowerShell 5.1 沒看到 BOM 就用 ANSI codepage 解讀 .ps1，
+#    繁中機器（cp950）會讓整份中文變亂碼，連 parse 都過不了。
+#    別為了「統一成無 BOM」把它拿掉 —— 理由寫在該檔開頭。
+#    腳本**產出**的 YAML 則維持無 BOM，兩者不要混為一談。
 *.ps1   text eol=lf
 
 # 二進位檔不要做任何轉換

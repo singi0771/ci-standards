@@ -72,7 +72,7 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | 開發機 | ⚠️ **2026-08-13 已從 macOS 移轉到 Windows**（`D:\3_CodingProject`），詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 契約**（2026-08-13 查證：三支薄殼的 `commented`／`review-id`／`review-state`／`copilot-trigger-pat`／`max-attempts` 都在，`COPILOT_TRIGGER_PAT` 也已設）。⚠️ 但三支 copilot 薄殼釘的是 `@main` 不是 `@v1`，見 §3 ⑥ |
 | adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
-| adopt.ps1 | ⚠️ **仍然從未在真的 Windows 上執行過**，只逐段對譯 + 語法檢視。現在開發機就是 Windows，這件事終於做得了（§3 ③） |
+| adopt.ps1 | ✅ **1.2.3 起首次在真 Windows 上驗過**：PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical。⚠️ 但**沒有任何自動測試在守它**（見 §3 ⑦） |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
 
@@ -116,19 +116,50 @@ done
 > coding agent 忽略（GitHub 的防 bot 迴圈機制）。
 > 權限：fine-grained PAT，Issues: write + Pull requests: write，範圍限該 repo。
 
-### ③ 驗 adopt.ps1（Windows）← **現在卡在這，而且現在做得了**
+### ~~③ 驗 adopt.ps1（Windows）~~ ✅ 已完成（1.2.3，2026-08-13）
 
-`adopt.ps1` **從未在真 Windows 上跑過**，只逐段對譯 + 語法檢視。
-2026-08-13 開發機移轉到 Windows 之後，這件事不再需要另外找機器。
+移轉到 Windows 之後做的第一件事，**當場抓到一個致命 bug**：
+`adopt.ps1` 在 Windows PowerShell 5.1 上**連 parse 都過不了**（19 個 parser
+error），而那正是它 `#Requires -Version 5.1` 宣稱支援、主打「受管制公司環境
+不必裝 pwsh」的目標環境。根因是檔案沒有 UTF-8 BOM，5.1 改用 ANSI codepage
+（繁中 = cp950）解讀，中文全變亂碼。1.2.3 加上 BOM 修掉。
+
+驗過的項目：
+
+| 項目 | 結果 |
+|---|---|
+| `powershell.exe` 5.1 parse | 修正前 **19 errors** → 修正後 **0** |
+| `pwsh` 7.6.3 parse | 0（修正前後皆是） |
+| 實跑 install 模式（Python + Docker + shell 偵測） | 5.1 與 7 皆 exit 0 |
+| **與 `adopt.sh` 的產出比對** | **byte-identical**（`diff -r` 無差異） |
+| 產出 YAML 編碼 | UTF-8 無 BOM + LF ✅ |
+| 1.2.1 的 `SetCurrentDirectory()` 修正 | ✅ 從別的工作目錄呼叫，`.github\` 正確落在 `-Target`，公版自身未被污染 |
+
+重跑方式：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target "某個測試專案" -Std . -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target "某個測試專案" -Std . -DryRun
 ```
 
-特別要看：`.github\` 有沒有落在**正確的目錄**。1.2.1 修了一個相關 bug ——
-`Set-Location` 不改行程的工作目錄，而腳本用 `[System.IO.File]` 讀寫（為了控制
-UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已補
-`[System.IO.Directory]::SetCurrentDirectory()`，但**沒實測過**。
+### ⑦ 給 adopt.ps1 加自動守門（1.2.3 留下的缺口）
+
+**BOM 是看不見的，編輯器一次「另存新檔」就可能弄掉，而現在沒有任何東西在守。**
+`adopt-tests.yml` 只測 `adopt.sh`，沒有一步會在 5.1 上 parse `adopt.ps1`。
+
+最小成本的作法：在 `adopt-tests.yml` 的 `windows-latest` job 加一步
+
+```yaml
+- name: adopt.ps1 必須能被 PowerShell 5.1 parse
+  shell: powershell        # 注意：powershell 是 5.1，pwsh 才是 7
+  run: |
+    $e = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+      "$env:GITHUB_WORKSPACE\scripts\adopt.ps1", [ref]$null, [ref]$e) | Out-Null
+    if ($e.Count) { $e | ForEach-Object { Write-Host $_.Message }; exit 1 }
+```
+
+⚠️ 一定要用 `shell: powershell`（5.1），用 `pwsh`（7）會永遠是綠的 ——
+7 預設就吃 UTF-8，根本不會重現這個問題。**用錯 shell 等於白加。**
 
 ### ④ 使用者端設定（GitHub 網頁，非程式）
 
@@ -324,6 +355,28 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   - ⚠️ **`adopt-tests.yml` 的 `windows-latest` 抓不到這個 bug** ——
     runner 的 locale 是 UTF-8。那條 matrix 守的是「Git Bash 這個 shell 環境」，
     真正防住編碼問題的是程式碼裡明寫的 `encoding='utf-8'`。
+
+- **第四次：Windows PowerShell 5.1 沒有 BOM 就不當 UTF-8。**
+  同一天稍晚，`adopt.ps1` 第一次在真 Windows 上執行 —— **連 parse 都過不了**，
+  19 個 parser error。5.1 讀 `.ps1` 沒看到 BOM 就用 ANSI codepage（繁中 = cp950），
+  中文註解全變亂碼，亂碼再湊出讓字串提前結束的位元組。
+
+  - **`.ps1` 含非 ASCII 就必須存 UTF-8 有 BOM。** 1.2.3 已修，理由寫在檔頭與
+    `.gitattributes`，**別為了「統一無 BOM」把它拿掉**。
+  - **腳本產出的 YAML 仍是無 BOM** —— 兩件事不要混為一談。
+  - **pwsh 7 完全正常，所以它藏了很久。** 驗這種東西一定要用
+    `powershell.exe`（5.1），不能用 `pwsh`。
+  - 目前**沒有自動守門**（見 §3 ⑦）。
+
+  ### 這一類問題的通則
+
+  bash 3.2、BSD awk、Python cp950、PowerShell 5.1 —— **四次都是同一句話**：
+
+  > 某個平台的預設值跟開發機不一樣，而那條路徑從來沒有人在那個平台上跑過。
+
+  所以：**「在我的機器上全過」永遠只證明「在我的機器上全過」。**
+  新增任何依賴平台預設值的東西（編碼、shell 版本、內建工具實作），
+  要嘛明確寫死（`encoding='utf-8'`、`${VAR}`、BOM），要嘛在該平台上實測。
 
 - **`git push --dry-run` 會給假成功。** 這個 repo 的網路路徑上，
   `--dry-run` 只做協商、不做 ref 更新，所以「成功」不代表真的推得上去。

@@ -1,4 +1,21 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
+# ⚠️⚠️ 這個檔案必須存成「UTF-8 **有** BOM」。別把 BOM 拿掉。⚠️⚠️
+#
+# Windows PowerShell 5.1 讀 .ps1 時，**沒有 BOM 就用 ANSI codepage 解讀**
+# （繁中機器是 cp950）。本檔的訊息全是中文，於是每個中文字都變成亂碼，
+# 亂碼還會湊出讓字串提前結束的位元組 —— 結果不是「執行出錯」而是
+# **連 parse 都過不了**（實測 19 個 parser error，腳本完全無法載入）。
+#
+# pwsh 7 預設用 UTF-8，所以在 7 上完全正常 —— 這就是它一直沒被發現的原因。
+# 偏偏本檔宣告 `#Requires -Version 5.1`，主打的就是「受管制公司環境不必
+# 另外裝 pwsh」，等於**唯一的目標環境正好是壞的那個**。
+#
+# 驗證方式（改完務必跑一次）：
+#   powershell -NoProfile -Command "$e=$null; [System.Management.Automation.Language.Parser]::ParseFile('scripts\adopt.ps1',[ref]$null,[ref]$e); $e.Count"
+#   -> 必須輸出 0
+#
+# 注意：BOM 只加在**這支腳本自己**。腳本**產出**的 YAML 仍然是
+# UTF-8 無 BOM（見底下 Write-TextFile）—— 那是對的，別一起改。
 <#
 .SYNOPSIS
   把 ci-standards 公版導入 / 升級一個專案（Windows PowerShell 5.1 原生，零安裝）。
