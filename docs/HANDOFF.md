@@ -1,6 +1,7 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-08-13（對應 `main` = `e11d205`，已發佈版本 1.2.2）
+> **最後更新**：2026-08-13（對應 `main` = `a8e2126`，已發佈版本 1.2.2）
+> **開發機已於同日從 macOS 移轉到 Windows** —— §4 整節改寫過，舊路徑全部作廢。
 >
 > 這是一份**活的**文件。每次做完一段工作就更新「現況快照」與「待辦」，
 > 讓下一個接手的人（或下一個 Claude session）不必重新推導。
@@ -63,14 +64,15 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| `main` | `e11d205`（= 1.2.2 + 本文件） |
-| CHANGELOG | 已定版到 **1.2.2**；`e11d205` 只多一份文件，未發版 |
+| `main` | `a8e2126`（= 1.2.2 + 兩份文件更新） |
+| CHANGELOG | 已定版到 **1.2.2**；`a8e2126` 只多文件變更，未發版 |
 | `v1` tag | ✅ 在 `fc239d2`（1.2.2 已發佈） |
 | 最新版本 tag | ✅ `v1.2.2`（`v1.2.2^{}` → `fc239d2`） |
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
-| AdminAutoTools | ⚠️ **停在 1.2.0 之前，自動修迴圈是壞的**，需要重跑 adopt |
-| adopt.sh | ✅ 43 項回歸測試在 **Linux 與 macOS 都跑過**（1.2.2 起 `adopt-tests.yml` 有雙平台 matrix） |
-| adopt.ps1 | ⚠️ **從未在真的 Windows 上執行過**，只逐段對譯 + 語法檢視 |
+| 開發機 | ⚠️ **2026-08-13 已從 macOS 移轉到 Windows**（`D:\3_CodingProject`），詳見 §4 |
+| AdminAutoTools | ✅ **已升到 1.2.1 契約**（2026-08-13 查證：三支薄殼的 `commented`／`review-id`／`review-state`／`copilot-trigger-pat`／`max-attempts` 都在，`COPILOT_TRIGGER_PAT` 也已設）。⚠️ 但三支 copilot 薄殼釘的是 `@main` 不是 `@v1`，見 §3 ⑥ |
+| adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
+| adopt.ps1 | ⚠️ **仍然從未在真的 Windows 上執行過**，只逐段對譯 + 語法檢視。現在開發機就是 Windows，這件事終於做得了（§3 ③） |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
 
@@ -90,56 +92,34 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > **1.2.1 已發佈完成**（`v1` 與 `v1.2.1` 都在 `ff1f356`）。
 > 發佈的操作步驟移到本節最後的「發佈流程」，下次公版有實質變更時照那個走。
 
-### ① 用 AdminAutoTools 測 adopt（1.2.1 的重點驗證）← 現在卡在這
+### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
-AdminAutoTools 就在 ci-standards 隔壁，**注意它是巢狀結構**：
-`CodingProject/AdminAutoTools/AdminAutoTools/`（外層資料夾包著真正的 clone）。
+AdminAutoTools 在 `D:\3_CodingProject\AdminAutoTools\AdminAutoTools\`
+（**巢狀結構**，外層資料夾包著真正的 clone）。
 
-```bash
-cd "$CODE_WORK/AdminAutoTools/AdminAutoTools"
-git checkout main && git pull
-"$CODE_WORK/ci-standards/scripts/adopt.sh" --std "$CODE_WORK/ci-standards" --dry-run
-```
-
-**驗收（dry-run）**：計畫裡三支 `copilot-*` 必須顯示 **`⟳ 換新`** 而不是 `↻ 合併`。
-顯示「合併」就代表 `--std` 指到的公版是舊的，停下來檢查。
-
-確認無誤後拿掉 `--dry-run` 真的跑，然後：
+三支薄殼已經是 1.2.1 契約，驗收條件全數滿足：
 
 ```bash
-git diff                                  # 逐檔看過
-git diff .github/workflows/copilot-autofix-review.yml
+cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
+for m in commented review-id review-state copilot-trigger-pat max-attempts; do
+  grep -q -- "$m" .github/workflows/copilot-autofix-review.yml && echo "OK $m" || echo "MISSING $m"
+done
 ```
 
-**驗收（實跑）**：`copilot-autofix-review.yml` 必須同時出現
-`'commented'`、`review-id:`、`review-state:`、`secrets:` 底下的 `copilot-trigger-pat`，
-而且原本調過的 `max-attempts` 要還在。
+### ~~② AdminAutoTools 設 repo secret~~ ✅ 已完成
 
-確認完刪掉備份、開 PR：
+`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定（`gh secret list --repo cecigehlpj/AdminAutoTools` 可驗）。
 
-```bash
-rm -f .github/workflows/*.bak .github/*.new
-git checkout -b chore/adopt-ci-standards-1.2.1
-git add .github && git commit -m "chore: 升級 ci-standards 公版至 1.2.1"
-git push -u origin chore/adopt-ci-standards-1.2.1
-```
+> 留著這段說明，因為**下一個 consumer 導入時還是會漏**：
+> 沒設的話 CI 會全綠，但 Copilot 自動修迴圈不會動工，而且沒有明顯錯誤 ——
+> `@copilot` mention 必須由真人帳號發出，`github-actions[bot]` 發的會被
+> coding agent 忽略（GitHub 的防 bot 迴圈機制）。
+> 權限：fine-grained PAT，Issues: write + Pull requests: write，範圍限該 repo。
 
-### ② AdminAutoTools 設 repo secret（**最容易漏，漏了就白做**）
+### ③ 驗 adopt.ps1（Windows）← **現在卡在這，而且現在做得了**
 
-GitHub → AdminAutoTools → Settings → Secrets and variables → Actions →
-New repository secret：
-
-- Name：`COPILOT_TRIGGER_PAT`
-- Value：**有 Copilot 授權的使用者**的 fine-grained PAT
-  （權限 Issues: write + Pull requests: write，範圍限該 repo）
-
-**沒設的話 CI 會全綠，但 Copilot 自動修迴圈不會動工**，而且沒有明顯錯誤 ——
-因為 `@copilot` mention 必須由真人帳號發出，`github-actions[bot]` 發的會被
-coding agent 忽略（GitHub 的防 bot 迴圈機制）。
-
-### ③ 驗 adopt.ps1（Windows，尚未做過）
-
-使用者有一台 Windows（PowerShell 7.6.3）。`adopt.ps1` **從未在真 Windows 上跑過**。
+`adopt.ps1` **從未在真 Windows 上跑過**，只逐段對譯 + 語法檢視。
+2026-08-13 開發機移轉到 Windows 之後，這件事不再需要另外找機器。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target "某個測試專案" -Std . -DryRun
@@ -162,17 +142,37 @@ UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已�
 
       adopt regression (ubuntu-latest)
       adopt regression (macos-latest)
+      adopt regression (windows-latest)
 
       現在它們**只會讓 PR 顯示紅燈、不會擋下合併** —— `adopt-tests.yml` 是獨立
       workflow，job 不在 `ci / CI Gate` 底下，而 ruleset 只列了兩個 Gate。
       1.2.2 的整個教訓就是「macOS 這條路徑沒被守住」，補了測試卻沒補守門等於只做一半。
 
-      這兩個 job **沒有 `if` 條件、`pull_request` 也沒有 paths 過濾**，每個 PR 必跑，
+      這三個 job **沒有 `if` 條件、`pull_request` 也沒有 paths 過濾**，每個 PR 必跑，
       所以設成 required 不會造成「skipped 的 check 永不回報 → PR 卡死」。
 
       ⚠️ **不要加進 `scripts/setup-branch-protection.sh`** —— 那支是給 consumer 用的，
       而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
       這是本 repo 專屬的設定，手動加。
+
+### ⑥ 把 AdminAutoTools 的三支 copilot 薄殼從 `@main` 改回 `@v1`
+
+2026-08-13 查到的：AdminAutoTools 的 `ci.yml`／`security.yml` 釘 `@v1`（正確），
+但**三支 `copilot-*` 薄殼釘的是 `@main`**：
+
+```
+copilot-autofix-reusable.yml@main
+copilot-autofix-review-reusable.yml@main
+copilot-autoreview-reusable.yml@main
+```
+
+這等於**繞過整個發佈閘門** —— `@v1` 存在的理由就是「合併進 main 不等於發佈」，
+釘 `@main` 的話任何併進 main 的改動下一次觸發就直接生效，沒有回滾點。
+
+現在剛好沒事（`main` 與 `v1` 只差文件），但**下次動 copilot reusable 就會無預警上線**。
+當初大概是為了讓 1.2.0 的迴圈修正快點生效才這樣釘的，那個理由已經消失了。
+
+改法：`adopt.sh` 升級模式會統一把 `uses:` 換成 `--ref` 指定的值，重跑一次即可。
 
 ### ⑤ 長期觀察中
 
@@ -221,19 +221,44 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 
 ## 4. 環境與路徑
 
+> **2026-08-13 已從 macOS 移轉到 Windows。** 本節整個改寫過。
+> 舊的 macOS 路徑（`/Users/kimi/Library/CloudStorage/OneDrive-.../CodingProject`）
+> 全部作廢 —— 若在別處看到那串路徑或 `$CODE_WORK`、`~/.zshrc`，那是過期資訊。
+
 | 項目 | 值 |
 |---|---|
-| 公司專案根目錄 | `/Users/kimi/Library/CloudStorage/OneDrive-CECIEngineeringConsultants,Inc.,Taiwan/CodingProject` |
-| ci-standards | 上述路徑 + `/ci-standards` |
-| AdminAutoTools | 上述路徑 + `/AdminAutoTools/AdminAutoTools` ← **巢狀** |
-| 個人專案根目錄 | 個人 OneDrive 底下的 `kimi/2_Code`（完整路徑待補） |
+| 開發機 | Windows 11 Enterprise，PowerShell 7 + Git Bash |
+| 公司專案根目錄 | `D:\3_CodingProject`（Git Bash：`/d/3_CodingProject`） |
+| ci-standards | `D:\3_CodingProject\ci-standards` |
+| AdminAutoTools | `D:\3_CodingProject\AdminAutoTools\AdminAutoTools` ← **巢狀** |
+| 移轉備份 | `D:\3_CodingProject\_migration_backup_20260813_1115`（含 robocopy log） |
 
-建議把根目錄寫進 `~/.zshrc`：
+Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
-```bash
-export CODE_WORK="/Users/kimi/Library/CloudStorage/OneDrive-CECIEngineeringConsultants,Inc.,Taiwan/CodingProject"
-alias cw="cd $CODE_WORK"
-```
+| 工具 | 版本 |
+|---|---|
+| bash | 5.2.37 (MSYS) —— **不是** macOS 那個 3.2.57 |
+| awk | GNU Awk 5.0.0 —— **不是** BSD awk |
+| python3 | 3.13，有 PyYAML；**locale 是 cp950，不是 UTF-8**（見 §5） |
+
+⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬），
+那條路徑現在只剩 `adopt-tests.yml` 的 `macos-latest` 在守。本機全過**不代表** macOS 會過。
+
+### 移轉當下踩到的（換機器時會再遇到）
+
+- **`core.filemode` 要設成 `false`。** 從 macOS 帶過來的設定是 `true`，
+  Windows 表達不了 exec bit，Git 會把三支 `.sh` 報成 `100755 → 100644` ——
+  **在這台機器 commit 就會把執行權限從 repo 裡剝掉**，Linux/macOS 的人
+  `./adopt.sh` 直接壞。（歷史上已經修過一次：`9746eda`。）
+
+- **用 robocopy 搬「正在用的」git repo 會搬出拼裝品。** `.git` 與工作檔案
+  在不同同步世代被複製，結果工作區混著四個不同 commit 的檔案、index 還比 HEAD 舊。
+  處理方式：確認每個檔案的 blob 都在歷史裡（就沒有獨有工作），
+  然後 `git reset --hard origin/main` 重建。搬完務必跑一次
+  `git status` + `git diff origin/main` 確認，別假設 robocopy 的 verify log 夠。
+
+- **`.gitattributes` 救了換行。** `* text=auto eol=lf` 讓 `.sh`/`.yml` 在 Windows
+  簽出仍是 LF，沒踩到 `bad interpreter: ...^M`。**別動它。**
 
 ---
 
@@ -283,15 +308,29 @@ alias cw="cd $CODE_WORK"
   - **BSD awk 不接受 `-v` 的值裡有換行**（`awk: newline in string`），GNU awk 才容忍。
     多行字串要走 `ENVIRON[]` 傳給 awk。
 
+- **同一個教訓的第三次：Windows 的 Python 預設不是 UTF-8。**
+  2026-08-13 移轉到 Windows 後第一次跑回歸測試就是 42/43，掛在
+  「所有 workflow YAML 仍可解析」。**產生的 YAML 完全沒問題** ——
+  是測試自己的 `open(f)` 用了 locale 編碼（繁中 Windows 是 **cp950**）去讀
+  含中文註解的 UTF-8 檔，`UnicodeDecodeError` 被誤報成「adopt 產生的 YAML 壞了」。
+
+  - **讀檔一律明寫 `encoding='utf-8'`。** Linux/macOS 的 locale 就是 UTF-8，
+    所以這條路徑在雲端永遠測不到。Python 3.15 才會改預設，在那之前不能省。
+  - **注意這跟 macOS 那兩個是同一類**：「某個平台的預設值跟開發機不一樣」。
+    已經連續三次了 —— bash 3.2、BSD awk、cp950。
+  - **不要用 `2>/dev/null` 吃掉測試的錯誤訊息。** 原本這項失敗只印
+    「YAML 解析失敗」五個字，不知道哪一檔、什麼原因，診斷花掉的時間遠超過
+    印出訊息的成本。現在會印出檔名 + 原因。
+  - ⚠️ **`adopt-tests.yml` 的 `windows-latest` 抓不到這個 bug** ——
+    runner 的 locale 是 UTF-8。那條 matrix 守的是「Git Bash 這個 shell 環境」，
+    真正防住編碼問題的是程式碼裡明寫的 `encoding='utf-8'`。
+
 - **`git push --dry-run` 會給假成功。** 這個 repo 的網路路徑上，
   `--dry-run` 只做協商、不做 ref 更新，所以「成功」不代表真的推得上去。
   推 tag 這種事一律真的推，然後用 `git ls-remote --tags origin` 驗。
 
 - **雲端 session 推不了 tag。** Claude Code on the web 的 policy gateway
   只放行 `claude/*` 分支的 ref，tag ref 回 403。tag 一律在本機打。
-
-- **多行貼上會卡在輸入緩衝區。** zsh 的 bracketed paste 把多行當一整段待送出內容，
-  看起來像「沒反應」。給使用者的指令**寫成一行**，用 `&&` 串接。
 
 - **`claude` 不要串在 `&&` 後面一起貼。** 會 `EINTR` ——
   TUI 啟動要接管 stdin（raw mode），殘留的貼上結束序列會打斷它的第一次讀取。
@@ -300,12 +339,28 @@ alias cw="cd $CODE_WORK"
 - **`less` 沒有 `-F` 會吃掉後續貼上的指令。** 已用
   `git config --global core.pager 'less -FRX'` 修掉。
 
+- **`.gitattributes` 強制 `.sh`/`.yml`/`.ps1` 用 LF**，否則 Git Bash 會出
+  `bad interpreter: ...^M`。移轉到 Windows 之後這條從「預防」變成「正在生效」——
+  **別動它。**
+
+- **Git Bash 會把看起來像路徑的參數改寫成 Windows 路徑（MSYS path conversion）。**
+  `git show "origin/main:docs/HANDOFF.md"` 會變成 `origin\main;docs\HANDOFF.md`
+  然後噴 `unknown revision`。前面加 `MSYS_NO_PATHCONV=1` 就好。
+  這只影響互動操作，不影響腳本本身。
+
+<details>
+<summary>已作廢：macOS 時期的環境坑（2026-08-13 前）</summary>
+
+- **多行貼上會卡在輸入緩衝區。** zsh 的 bracketed paste 把多行當一整段待送出內容，
+  看起來像「沒反應」。給使用者的指令**寫成一行**，用 `&&` 串接。
+  （Windows 換成 PowerShell／Git Bash 之後不再適用，但如果之後又回到
+  zsh／macOS，這條還是會踩。）
+
 - **macOS 的 `~/Library/CloudStorage` 受 TCC 保護。**
   `find ~ ... 2>/dev/null` 會因為 EPERM 什麼都找不到，看起來像「檔案不存在」。
   終端機需要「完整取硬碟取用權」。
 
-- **Windows 路徑相依**：`.gitattributes` 強制 `.sh`/`.yml`/`.ps1` 用 LF，
-  否則 Git Bash 會出 `bad interpreter: ...^M`。別動它。
+</details>
 
 ### 關於 Copilot
 
@@ -323,20 +378,25 @@ alias cw="cd $CODE_WORK"
 
 留著這張表，是為了知道什麼時候該切到本機。
 
-| 事情 | 雲端 | 本機 |
+> **2026-08-13 起「本機」= Windows**（先前是 macOS），這張表已據此更新。
+
+| 事情 | 雲端 | 本機（Windows） |
 |---|---|---|
 | 改公版程式碼、開 PR、盯 CI | ✅ | ✅ |
 | push 到 `claude/*` 分支 | ✅ | ✅ |
 | **push tag** | ❌ 403 | ✅ |
 | **讀寫使用者機器上的專案**（AdminAutoTools 等） | ❌ 看不到 | ✅ |
-| 跑 `adopt.sh` 對真實專案 | ❌ | ✅ |
-| 跑 `adopt.ps1`（需要 Windows） | ❌ | ✅ |
-| 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ✅ 含 macOS |
+| 跑 `adopt.sh` 對真實專案 | ❌ | ✅（Git Bash） |
+| 跑 `adopt.ps1`（需要 Windows） | ❌ | ✅ **現在做得到了**（以前要另外找機器） |
+| 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ⚠️ 只有 Git Bash（bash 5.2 + GNU awk） |
+| **測到 macOS 那條路徑**（bash 3.2 + BSD awk） | ❌ | ❌ **兩邊都不行** |
 
-最後一列是 1.2.2 學到的：雲端跑得過**不代表** macOS 跑得過（bash 3.2 + BSD awk）。
-`adopt-tests.yml` 的雙平台 matrix 補上了這條路徑，不必再靠人工在 Mac 上補跑。
+最後兩列是重點：**移轉到 Windows 之後，本機不再測得到 macOS 那條路徑**
+（以前開發機就是 Mac，等於天然有覆蓋）。現在守住它的只剩
+`adopt-tests.yml` 的 `macos-latest`。**本機 43 項全過，不代表 macOS 會過。**
 
-⚠️ 但它目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml` 是獨立 workflow，
-它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate 設成 required
-（見 §3 待辦 ④）。在那兩個 check 進 ruleset 之前，**綠燈不是保證，是提示**。
-而且**改 shell 腳本時本來就該記得那條 `${VAR}` 規則** —— CI 是最後一道防線，不是第一道。
+⚠️ 而且那些 check 目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml`
+是獨立 workflow，它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate
+設成 required（見 §3 待辦 ④）。在那三個 check 進 ruleset 之前，**綠燈不是保證，是提示**。
+而且**改 shell 腳本時本來就該記得 `${VAR}` 與 `encoding='utf-8'` 那兩條規則** ——
+CI 是最後一道防線，不是第一道。

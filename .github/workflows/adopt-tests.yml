@@ -8,6 +8,14 @@
 #    只跑 Linux 的話，有人把多行值改回 `-v`、或把 ${VAR} 改回 $VAR，
 #    CI 照樣會綠。
 #
+# ⚠️ 為什麼要有 Windows：使用者在 Windows 上是用 Git Bash 跑 adopt.sh 的，
+#    而這條路徑同樣從來沒被測過。2026-08-13 就抓到一個只在 Windows 現形的
+#    測試 bug（Python 預設用 locale 編碼讀 UTF-8 檔）。
+#
+#    但要說清楚範圍：runner 的 locale 是 UTF-8，**抓不到 cp950 那個 bug**。
+#    真正防住它的是 test-adopt.sh 裡明寫的 encoding='utf-8'，這條 matrix
+#    守的是「Git Bash 這個 shell 環境」本身。
+#
 # 刻意用 /bin/bash 而不是 `bash`：macOS runner 的 PATH 上可能有 Homebrew 的
 # bash 5.x，那樣就測不到系統內建的 3.2.57 —— 也就是使用者實際會用到的那個。
 name: Adopt Script Tests
@@ -30,10 +38,16 @@ jobs:
     name: adopt regression (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
-      # 一邊失敗時另一邊仍要跑完 —— 重點就是分辨「兩邊都壞」還是「只有某個平台壞」
+      # 一邊失敗時另一邊仍要跑完 —— 重點就是分辨「全部都壞」還是「只有某個平台壞」
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    # windows-latest 的 run: 預設是 pwsh，底下每一步都是 bash 語法。
+    # 指定 shell: bash 讓三個平台走同一條路（Windows 上會用 Git Bash，
+    # 也正是使用者實際跑 adopt.sh 的環境）。
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -56,8 +70,20 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      # 用 `python` 而不是 `python3`：Windows 的 setup-python 只保證前者在 PATH 上。
       - name: 安裝 PyYAML
-        run: python3 -m pip install --quiet pyyaml
+        run: python -m pip install --quiet pyyaml
+
+      # test-adopt.sh 內部呼叫的是 python3，找不到就會安靜地 skip 掉 YAML 檢查 ——
+      # 而那一項正是 2026-08-13 抓到 Windows bug 的那一項。先斷言它真的可用，
+      # 否則「跳過」會被當成「通過」，又是一次假綠燈。
+      - name: 確認 python3 + PyYAML 真的可用
+        run: |
+          if ! python3 -c 'import yaml' 2>/dev/null; then
+            echo "::error::python3 不存在或缺 PyYAML —— YAML 解析檢查會被靜靜跳過"
+            exit 1
+          fi
+          echo "python3 : $(python3 --version) + PyYAML ✅"
 
       - name: 回歸測試（系統內建 bash）
         run: /bin/bash scripts/test-adopt.sh

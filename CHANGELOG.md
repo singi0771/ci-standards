@@ -25,12 +25,58 @@
   BSD awk 不接受 `-v` 帶換行這兩個具體地雷。
   §6 的對照表也更正：雲端只跑得到 Linux 那條。
 
-- `docs/HANDOFF.md` §3 新增待辦：把 `adopt regression (ubuntu-latest / macos-latest)`
-  兩個 check 加進本 repo 的 ruleset。`adopt-tests.yml` 是獨立 workflow，
+- `docs/HANDOFF.md` §3 新增待辦：把 `adopt regression` 的三個 check
+  （`ubuntu-latest` / `macos-latest` / `windows-latest`）加進本 repo 的 ruleset。
+  `adopt-tests.yml` 是獨立 workflow，
   它的 job **不在 `ci / CI Gate` 底下**，所以現在測試失敗只會在 PR 顯示紅燈、
   不會擋下合併 —— 而 1.2.2 的整個教訓就是「這條路徑沒被守住」。
   這是本 repo 專屬的設定，不進 `scripts/setup-branch-protection.sh`
   （consumer 沒有這支 workflow，列進去會變成永遠不回報的 required check → PR 卡死）。
+
+### 修正
+- `scripts/test-adopt.sh`：讀 workflow 檔時明寫 `encoding='utf-8'`。
+  原本的 `open(f)` 用的是 **locale 編碼**，在繁中 Windows（cp950）上讀這些
+  含中文註解的 UTF-8 檔會噴 `UnicodeDecodeError` —— 於是「這台機器的 locale
+  不是 UTF-8」被誤報成「adopt 產生的 YAML 壞了」。實際產出完全正常。
+
+  這是繼 bash 3.2、BSD awk 之後**同一類問題的第三次**：某個平台的預設值
+  跟開發機不一樣，而那條路徑沒有人測過。Python 3.15 才會把預設改成 UTF-8。
+
+- `scripts/test-adopt.sh`：YAML 檢查失敗時印出**檔名與原因**，不再 `2>/dev/null`
+  吃掉錯誤。原本只印「YAML 解析失敗」五個字，診斷成本遠高於印訊息的成本。
+
+- `scripts/test-adopt.sh`：有項目被跳過時**不再印「全部通過 ✅」，改為 exit 1**。
+  被跳過的只有「產生的 workflow YAML 是否合法」那一項，而它正是唯一在驗
+  adopt 產出正確性的檢查 —— 缺了它還宣告全過就是假綠燈。
+  CI 有前置斷言擋住，本機這條路徑先前沒人守（採納 PR #22 的 Copilot 審查意見）。
+
+### 變更（CI）
+- `adopt-tests.yml` 的 matrix 加入 `windows-latest`，並用 `defaults.run.shell: bash`
+  讓三個平台走同一條路（Windows 上是 Git Bash —— 使用者實際跑 `adopt.sh` 的環境）。
+
+  ⚠️ 範圍要說清楚：runner 的 locale 是 UTF-8，**這條 matrix 抓不到上面那個
+  cp950 bug**。真正防住它的是程式碼裡明寫的 `encoding='utf-8'`；matrix 守的是
+  「Git Bash 這個 shell 環境」本身。
+
+- `adopt-tests.yml` 新增一步：斷言 `python3` + PyYAML 真的可用。
+  `test-adopt.sh` 內部找不到 `python3` 時會**安靜地 skip** YAML 檢查，
+  而那正是抓到這次 bug 的那一項 —— 讓「跳過」當場紅燈，不要變成假綠燈。
+  安裝改用 `python -m pip`（Windows 的 setup-python 只保證 `python` 在 PATH 上）。
+
+- `docs/HANDOFF.md`：開發機 2026-08-13 從 macOS 移轉到 Windows，§4「環境與路徑」
+  整節改寫（舊的 `/Users/kimi/...` 與 `$CODE_WORK` 全部作廢），§6 對照表更新為
+  「本機 = Windows」。同時記下移轉本身踩到的兩個坑：`core.filemode` 要設 `false`
+  （否則在 Windows commit 會剝掉 `.sh` 的執行權限），以及用 robocopy 搬
+  使用中的 git repo 會搬出「工作區混著多個 commit」的拼裝品。
+
+  ⚠️ 連帶影響：**本機不再測得到 macOS 那條路徑**（以前開發機就是 Mac，
+  等於天然有覆蓋），現在只剩 CI 的 `macos-latest` 在守。
+
+- `docs/HANDOFF.md` §2／§3：待辦 ①②（AdminAutoTools 重跑 adopt、設
+  `COPILOT_TRIGGER_PAT`）經查證**其實都已完成**，改標為完成並附驗證指令；
+  ③（驗 `adopt.ps1`）因為開發機變成 Windows 而**從封鎖變成可執行**，升為現在的重點。
+  新增待辦 ⑥：AdminAutoTools 的三支 copilot 薄殼釘的是 `@main` 而不是 `@v1`，
+  等於繞過發佈閘門，要改回來。
 
 ---
 

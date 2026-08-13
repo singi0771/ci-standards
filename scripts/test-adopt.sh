@@ -227,10 +227,28 @@ has "$REV.bak" 'legacy-knob' ".bak 是原本那份（沒被動過）"
 # macOS runner 有 python3 但沒有 PyYAML，ImportError 會被 2>/dev/null 吃掉，
 # 於是「環境缺套件」被誤報成「YAML 解析失敗」。
 if python3 -c 'import yaml' >/dev/null 2>&1; then
-  if python3 -c "
-import yaml,glob,sys
-for f in glob.glob('.github/workflows/*.yml'): yaml.safe_load(open(f))
-" 2>/dev/null; then ok "升級後所有 workflow YAML 仍可解析"; else bad "YAML 解析失敗"; fi
+  # ⚠️ encoding='utf-8' 不能省。Windows 的 Python 預設用 **locale 編碼**
+  #    （繁中版是 cp950），而這些 workflow 含中文註解、是 UTF-8 —— 於是
+  #    `open(f)` 直接噴 UnicodeDecodeError，把「這台機器的 locale 不是 UTF-8」
+  #    誤報成「adopt 產生的 YAML 壞了」。Linux/macOS 的 locale 就是 UTF-8，
+  #    所以這條路徑在雲端永遠測不到（跟 1.2.2 的 macOS 教訓同一類）。
+  #    Python 3.15 才會把預設改成 UTF-8，在那之前一律明寫。
+  #
+  # 錯誤訊息要留著：原本這裡是 2>/dev/null，失敗時只印「YAML 解析失敗」，
+  # 完全看不出是哪一檔、什麼原因，診斷成本很高。
+  if yaml_err="$(python3 -c "
+import yaml,glob
+for f in sorted(glob.glob('.github/workflows/*.yml')):
+    try:
+        yaml.safe_load(open(f, encoding='utf-8'))
+    except Exception as e:
+        # PyYAML 的訊息是多行（原因一行、位置一行），壓成一行才不會被 tail -1 截掉原因
+        raise SystemExit('%s: %s' % (f, ' '.join(str(e).split())))
+" 2>&1)"; then
+    ok "升級後所有 workflow YAML 仍可解析"
+  else
+    bad "YAML 解析失敗：$(printf '%s' "$yaml_err" | tail -1)"
+  fi
 elif command -v python3 >/dev/null 2>&1; then
   skip "workflow YAML 解析檢查（python3 有，但沒裝 PyYAML）"
 else
@@ -299,4 +317,14 @@ else
   printf '通過 %d／失敗 %d\n' "$PASS" "$FAIL"
 fi
 if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
+# 「跳過」不是回歸，但也**不是通過**。
+# 被跳過的只有「產生的 workflow YAML 是否合法」那一項 —— 它正是唯一在驗
+# adopt 產出正確性的檢查，缺了它還印「全部通過 ✅」就是假綠燈。
+# CI 那邊有前置斷言擋住（見 adopt-tests.yml），本機這條路徑靠這裡擋。
+if [ "$SKIP" -gt 0 ]; then
+  printf '⚠️  有 %d 項被跳過 —— 這不是回歸，但「沒驗到」不等於「通過」。\n' "$SKIP"
+  printf '   補齊之後再跑一次：python3 -m pip install pyyaml\n'
+  exit 1
+fi
 printf '全部通過 ✅\n'
