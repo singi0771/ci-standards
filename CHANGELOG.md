@@ -80,6 +80,49 @@
 
 ---
 
+## [1.2.3] — 2026-08-13
+
+**`adopt.ps1` 在它唯一宣稱支援的環境（Windows PowerShell 5.1）連 parse 都過不了。**
+一樣只動導入工具，reusable 與 `templates/` 一個字都沒動，指向 `@v1` 的專案
+CI 行為完全不變。
+
+### 修正
+- `scripts/adopt.ps1` 改存為 **UTF-8 有 BOM**。
+
+  Windows PowerShell 5.1 讀 `.ps1` 時，**沒有 BOM 就用 ANSI codepage 解讀**
+  （繁中機器是 cp950）。本檔訊息全是中文，於是每個中文字都變亂碼，
+  亂碼又湊出讓字串提前結束的位元組 —— 結果不是「執行出錯」，而是
+  **連載入都失敗**（實測 19 個 parser error）。
+
+  pwsh 7 預設 UTF-8，所以在 7 上一切正常 —— 這就是它從未被發現的原因。
+  偏偏本檔宣告 `#Requires -Version 5.1`，主打「受管制公司環境不必另外裝
+  pwsh」，等於**唯一的目標環境正好是壞的那個**。
+
+  範圍：BOM 只加在腳本自己；腳本**產出**的 YAML 仍是 UTF-8 無 BOM（那是對的）。
+
+  這是繼 bash 3.2、BSD awk、Python cp950 之後**同一類問題的第四次**：
+  某個平台的預設值跟開發機不一樣，而那條路徑沒有人測過。
+
+- `.gitattributes` 加註說明，避免有人為了「統一成無 BOM」把它拿掉。
+
+### 驗證
+`adopt.ps1` **首次在真的 Windows 上執行**（此前只有逐段對譯 + 語法檢視）：
+
+- `powershell.exe` 5.1 parse errors：修正前 **19** → 修正後 **0**
+- `pwsh` 7.6.3 parse errors：0（修正前後皆是）
+- 實跑（install 模式，Python + Docker + shell 偵測）：5.1 與 7 皆 exit 0
+- **產出與 `adopt.sh` byte-identical**（`diff -r` 無差異）
+- 產出的 YAML 維持 UTF-8 無 BOM + LF
+- 1.2.1 修的 `SetCurrentDirectory()` 那個相對路徑 bug 確認已修好：
+  從別的工作目錄呼叫，`.github\` 正確落在 `-Target`，公版自身未被污染
+
+> ⚠️ **殘留風險**：BOM 是看不見的，編輯器一次「另存新檔」就可能弄掉，
+> 而目前 **CI 沒有守這條**。`adopt-tests.yml` 只測 `adopt.sh`，
+> 沒有任何一步會在 5.1 上 parse `adopt.ps1`。改這支腳本後請照檔頭那行指令
+> 自己驗一次。加自動守門列在 `docs/HANDOFF.md` §3 的待辦。
+
+---
+
 ## [1.2.2] — 2026-08-13
 
 **`adopt.sh` 在 macOS 上完全跑不起來。** 一樣只動導入工具，reusable 與
