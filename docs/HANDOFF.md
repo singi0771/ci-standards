@@ -157,6 +157,22 @@ UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已�
       而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
       只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
+- [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
+      Require status checks to pass，加入這兩個 context）：
+
+      adopt regression (ubuntu-latest)
+      adopt regression (macos-latest)
+
+      現在它們**只會讓 PR 顯示紅燈、不會擋下合併** —— `adopt-tests.yml` 是獨立
+      workflow，job 不在 `ci / CI Gate` 底下，而 ruleset 只列了兩個 Gate。
+      1.2.2 的整個教訓就是「macOS 這條路徑沒被守住」，補了測試卻沒補守門等於只做一半。
+
+      這兩個 job **沒有 `if` 條件、`pull_request` 也沒有 paths 過濾**，每個 PR 必跑，
+      所以設成 required 不會造成「skipped 的 check 永不回報 → PR 卡死」。
+
+      ⚠️ **不要加進 `scripts/setup-branch-protection.sh`** —— 那支是給 consumer 用的，
+      而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
+      這是本 repo 專屬的設定，手動加。
 
 ### ⑤ 長期觀察中
 
@@ -318,5 +334,9 @@ alias cw="cd $CODE_WORK"
 | 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ✅ 含 macOS |
 
 最後一列是 1.2.2 學到的：雲端跑得過**不代表** macOS 跑得過（bash 3.2 + BSD awk）。
-現在 `adopt-tests.yml` 有雙平台 matrix，PR 上就會擋掉，不必再靠人工在 Mac 上補跑；
-但**改 shell 腳本時仍要記得那條 `${VAR}` 規則**，CI 是最後一道防線不是第一道。
+`adopt-tests.yml` 的雙平台 matrix 補上了這條路徑，不必再靠人工在 Mac 上補跑。
+
+⚠️ 但它目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml` 是獨立 workflow，
+它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate 設成 required
+（見 §3 待辦 ④）。在那兩個 check 進 ruleset 之前，**綠燈不是保證，是提示**。
+而且**改 shell 腳本時本來就該記得那條 `${VAR}` 規則** —— CI 是最後一道防線，不是第一道。

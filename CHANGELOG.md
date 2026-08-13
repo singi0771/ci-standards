@@ -21,8 +21,16 @@
 ### 變更
 - `docs/HANDOFF.md` 同步 1.2.2：更新現況快照（`main`、`v1`、adopt.sh 的驗證狀態），
   並把「43 項全過只證明它在測試那台機器上會過」寫進「踩過的坑」——
-  含 bash 3.2 吃掉全形標點前的變數名、BSD awk 不接受 `-v` 帶換行這兩個具體地雷。
+  含 bash 3.2 會把**全形標點的首位元組併進變數名**（`$STD（` → 變數 `STD\xef`）、
+  BSD awk 不接受 `-v` 帶換行這兩個具體地雷。
   §6 的對照表也更正：雲端只跑得到 Linux 那條。
+
+- `docs/HANDOFF.md` §3 新增待辦：把 `adopt regression (ubuntu-latest / macos-latest)`
+  兩個 check 加進本 repo 的 ruleset。`adopt-tests.yml` 是獨立 workflow，
+  它的 job **不在 `ci / CI Gate` 底下**，所以現在測試失敗只會在 PR 顯示紅燈、
+  不會擋下合併 —— 而 1.2.2 的整個教訓就是「這條路徑沒被守住」。
+  這是本 repo 專屬的設定，不進 `scripts/setup-branch-protection.sh`
+  （consumer 沒有這支 workflow，列進去會變成永遠不回報的 required check → PR 卡死）。
 
 ---
 
