@@ -1,0 +1,75 @@
+# adopt.sh 的回歸測試 —— 這是本 repo 自己的工具測試，不是給 consumer 呼叫的公版。
+#
+# ⚠️ 為什麼一定要有 macOS：1.2.2 修的兩個 bug（bash 3.2 把全形標點的首位元組
+#    吃進變數名、BSD awk 不接受 -v 的值裡有換行）在 Linux 上完全不重現，
+#    而 1.2.1 宣稱的「43 項全過」正是只在 Linux 跑出來的 —— 等於 macOS
+#    這條路徑從來沒被測到，而 docs/ADOPT.md 把它列在第一順位平台。
+#
+#    只跑 Linux 的話，有人把多行值改回 `-v`、或把 ${VAR} 改回 $VAR，
+#    CI 照樣會綠。
+#
+# 刻意用 /bin/bash 而不是 `bash`：macOS runner 的 PATH 上可能有 Homebrew 的
+# bash 5.x，那樣就測不到系統內建的 3.2.57 —— 也就是使用者實際會用到的那個。
+name: Adopt Script Tests
+
+on:
+  push:
+    branches: [main]
+  # pull_request 不加 paths-ignore —— 與本 repo 的 ci.yml 同理
+  pull_request:
+
+concurrency:
+  group: adopt-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-adopt:
+    name: adopt regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一邊失敗時另一邊仍要跑完 —— 重點就是分辨「兩邊都壞」還是「只有某個平台壞」
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 出事時第一個要看的就是這兩個版本
+      - name: 印出 shell 與 awk 版本
+        run: |
+          echo "bash : $(/bin/bash --version | head -1)"
+          echo "awk  : $(awk --version 2>/dev/null | head -1 || awk -W version 2>&1 | head -1)"
+          echo "LANG : ${LANG:-<unset>}"
+
+      # test-adopt.sh 的 new_repo 會逐 repo 設身分，但 runner 沒有 global 設定，
+      # 少數不經 new_repo 的 commit 會失敗，補一份比較保險
+      - name: 設定 git 身分
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+
+      # 沒有 PyYAML 的話，「所有 workflow YAML 仍可解析」那一項會被跳過。
+      # macOS runner 預設就沒有，所以明確裝起來 —— 要的是真的驗到，不是跳過。
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: 安裝 PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: 回歸測試（系統內建 bash）
+        run: /bin/bash scripts/test-adopt.sh
+
+      # 呼應 docs/HANDOFF.md §5：測試曾經污染過本 repo 的 .github/，
+      # 而「git status 乾淨」不等於沒事 —— 被改的檔案若被 commit 了也會乾淨。
+      # 這裡在 CI 上比對工作區，測試跑完不該留下任何差異。
+      - name: 確認測試沒有污染本 repo
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::test-adopt.sh 改動了本 repo 的檔案："
+            git status --porcelain
+            exit 1
+          fi
+          echo "工作區乾淨 ✅"

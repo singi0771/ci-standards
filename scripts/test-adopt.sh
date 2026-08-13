@@ -24,10 +24,13 @@ trap 'rm -rf "$WORK"' EXIT
 # 現在起點就在暫存區，就算某個 cd 失敗也不會波及真的 repo。
 cd "$WORK"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 
 ok()   { printf '  ✅ %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  ❌ %s\n' "$1"; FAIL=$((FAIL+1)); }
+# 「這台機器缺少某個選配工具」不等於「測試失敗」——分開記，否則環境差異
+# 會被誤報成回歸（macOS runner 有 python3 但沒有 PyYAML，就是這種情況）
+skip() { printf '  ⊘ %s（跳過）\n' "$1"; SKIP=$((SKIP+1)); }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1（預期 [$3］，實際 [$2]）"; fi; }
 
 has()    { if grep -qF "$2" "$1"; then ok "$3"; else bad "$3"; fi; }
@@ -220,11 +223,18 @@ if [ -f "$REV.bak" ]; then ok "被換掉的舊薄殼留成 .bak"; else bad "應�
 has "$REV.bak" 'legacy-knob' ".bak 是原本那份（沒被動過）"
 
 # ── 產生的 YAML 必須合法 ──
-if command -v python3 >/dev/null 2>&1; then
+# 先確認 PyYAML 真的裝得起來 —— 只檢查 python3 存在是不夠的：
+# macOS runner 有 python3 但沒有 PyYAML，ImportError 會被 2>/dev/null 吃掉，
+# 於是「環境缺套件」被誤報成「YAML 解析失敗」。
+if python3 -c 'import yaml' >/dev/null 2>&1; then
   if python3 -c "
 import yaml,glob,sys
 for f in glob.glob('.github/workflows/*.yml'): yaml.safe_load(open(f))
 " 2>/dev/null; then ok "升級後所有 workflow YAML 仍可解析"; else bad "YAML 解析失敗"; fi
+elif command -v python3 >/dev/null 2>&1; then
+  skip "workflow YAML 解析檢查（python3 有，但沒裝 PyYAML）"
+else
+  skip "workflow YAML 解析檢查（找不到 python3）"
 fi
 
 # ═════════════════════════════════════════════════════════════
@@ -265,7 +275,7 @@ cd "$WORK/wrapper"
 OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"你要的應該是其中之一"*) ok "外層目錄會提示往下一層找" ;;
-  *) bad "外層目錄沒有提示子目錄（實際輸出：$OUT）" ;;
+  *) bad "外層目錄沒有提示子目錄（實際輸出：${OUT}）" ;;
 esac
 case "$OUT" in
   *"/wrapper/inner"*) ok "提示中列出了正確的子目錄" ;;
@@ -278,11 +288,15 @@ cd "$WORK/empty-dir"
 OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"請先 git init 或 clone"*) ok "沒有子 repo 時維持原訊息" ;;
-  *) bad "沒有子 repo 時訊息不對（實際輸出：$OUT）" ;;
+  *) bad "沒有子 repo 時訊息不對（實際輸出：${OUT}）" ;;
 esac
 
 # ═════════════════════════════════════════════════════════════
 printf '\n───────────────────────────────\n'
-printf '通過 %d／失敗 %d\n' "$PASS" "$FAIL"
+if [ "$SKIP" -gt 0 ]; then
+  printf '通過 %d／失敗 %d／跳過 %d\n' "$PASS" "$FAIL" "$SKIP"
+else
+  printf '通過 %d／失敗 %d\n' "$PASS" "$FAIL"
+fi
 if [ "$FAIL" -gt 0 ]; then exit 1; fi
 printf '全部通過 ✅\n'

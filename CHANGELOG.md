@@ -14,6 +14,68 @@
 
 ---
 
+## [1.2.2] — 2026-08-13
+
+**`adopt.sh` 在 macOS 上完全跑不起來。** 一樣只動導入工具，reusable 與
+`templates/` 一個字都沒動，指向 `@v1` 的專案 CI 行為完全不變。
+
+1.2.1 的回歸測試「43 項全過」是在雲端（Linux + bash 5.x + GNU awk）跑出來的。
+macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也就是說
+`docs/ADOPT.md` 列在第一順位的平台，腳本從第 120 行就直接中止。
+
+### 修正
+
+- **bash 3.2 會把全形標點的首位元組吃進變數名。**
+  `"── 公版：$STD（ref: ...）"` 這種寫法，在 UTF-8 locale 下的 bash 3.2
+  會解析成變數 `STD\xef`，配上腳本的 `set -u` 就是
+  `STD?: unbound variable`，執行立刻中止。
+
+  bash 5.x 不會，`LC_ALL=C` 也不會 —— 所以 Linux CI 與雲端 session 都測不到。
+  修法：`$VAR` 後面接非 ASCII 字元時一律改成 `${VAR}`（`adopt.sh` 6 處、
+  `test-adopt.sh` 2 處）。
+
+- **BSD awk 不接受 `-v` 的值裡有換行。**
+  `filter_with_block` 與 `replace_with_block` 用 `-v` 傳多行字串
+  （`known` / `additions` / `blk`），macOS 內建的 awk（BWK awk 20200816）會噴
+  `awk: newline in string ... at source line 1` 並放棄整個程式，GNU awk 才容忍。
+  改走 `ENVIRON[]` 傳遞 —— POSIX awk 皆支援，兩邊行為一致。
+
+  腳本開頭有 `set -euo pipefail`，所以 awk 的非零狀態會讓它**當場中止** ——
+  後面的 `mv "$f.tmp" "$f"` 不會執行，**原檔完好**，最多留下一個 0 bytes 的
+  `.tmp`。症狀是「導入跑到一半整個停掉」，不是檔案被寫壞。
+
+- 回歸測試現已在 macOS（bash 3.2 + BSD awk）實際跑過，43 項全過。
+  這是 `test-adopt.sh` 第一次在 macOS 上執行。
+
+- **`test-adopt.sh` 會把「環境缺套件」誤報成「測試失敗」。**
+  「所有 workflow YAML 仍可解析」那一項只檢查 `python3` 存在，沒檢查
+  **PyYAML 裝了沒**；`ImportError` 被 `2>/dev/null` 吃掉，於是印出
+  `❌ YAML 解析失敗`。macOS runner 正好有 python3、沒有 PyYAML ——
+  新加的 CI 第一次跑就踩到。
+
+  改成先驗 `python3 -c 'import yaml'`，缺套件時走新的 `skip()`（`⊘`），
+  與 `FAIL` 分開計數、不影響 exit code。CI 那邊則直接把 PyYAML 裝起來，
+  讓這項真的驗到而不是跳過。
+
+### 新增
+
+- **`.github/workflows/adopt-tests.yml`：`test-adopt.sh` 首次進 CI，並跨
+  `ubuntu-latest` × `macos-latest` 兩個平台跑。**
+
+  在此之前這 43 項回歸測試**完全不在 CI 裡**，全靠人記得手動執行 ——
+  1.2.2 這兩個 bug 能活到現在正是因為這個缺口。macOS job 刻意用
+  `/bin/bash`（而非 `bash`）呼叫，避免 runner 的 PATH 上有 Homebrew 的
+  bash 5.x 而測不到系統內建的 3.2.57。
+
+  最後一步會比對 `git status --porcelain`，確保測試沒有污染本 repo ——
+  呼應 2026-08-08 那次「破壞性測試跑在 ci-standards 自己身上、還 commit
+  進 main」的事故。
+
+  這支 workflow 是本 repo 自己的工具測試，**不是給 consumer 呼叫的公版**，
+  也刻意不列為 required check（Gate 仍只有兩個）。
+
+---
+
 ## [1.2.1] — 2026-08-12
 
 **修的是「導入工具」，不是公版邏輯。** reusable 與 `templates/` 一個字都沒動，
