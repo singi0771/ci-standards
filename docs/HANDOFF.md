@@ -74,7 +74,8 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | 最新版本 tag | ✅ `v1.2.3`（`v1.2.3^{}` → `6fed71b`，已驗證與 `v1` 同一 SHA） |
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
 | 開發機 | ⚠️ **2026-08-13 已從 macOS 移轉到 Windows**（`D:\3_CodingProject`），詳見 §4 |
-| AdminAutoTools | ✅ **已升到 1.2.1 契約**（2026-08-13 查證：三支薄殼的 `commented`／`review-id`／`review-state`／`copilot-trigger-pat`／`max-attempts` 都在，`COPILOT_TRIGGER_PAT` 也已設）。⚠️ 但三支 copilot 薄殼釘的是 `@main` 不是 `@v1`，見 §3 ⑥ |
+| AdminAutoTools | ✅ **已升到 1.2.1 契約**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
+| AdminAutoTools 的 CI | 🔴 **2026-08-13 中午起全面停擺**（所有 job `steps=0`，疑似 Actions 配額／spending limit）。**這是目前最該先解的一條**，詳見 §3 |
 | adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
 | adopt.ps1 | ✅ **1.2.3 起首次在真 Windows 上驗過**：PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical。⚠️ 但**沒有任何自動測試在守它**（見 §3 ⑦） |
 
@@ -96,8 +97,10 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > **1.2.3 已發佈完成**（`v1` 與 `v1.2.3^{}` 都在 `6fed71b`，已用 `git ls-remote` 驗過）。
 > 發佈的操作步驟見本節最後的「發佈流程」，下次公版有實質變更時照那個走。
 >
-> **① ② ③ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
-> **現在的重點是 ⑦**（給 `adopt.ps1` 加自動守門）與 ④（GitHub 網頁設定）。
+> **① ② ③ ⑥ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
+> **現在的第一順位是「AdminAutoTools 的 Actions 停擺」**（本節中段，紅字那條）——
+> 在它解決之前，那個 repo 的 CI 與 Copilot 迴圈都是死的，其他事做了也驗不到。
+> 之後才是 ⑦（給 `adopt.ps1` 加自動守門）與 ④（GitHub 網頁設定）。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
@@ -193,7 +196,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
       而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
       這是本 repo 專屬的設定，手動加。
 
-### ⑥ 把 AdminAutoTools 的三支 copilot 薄殼從 `@main` 改回 `@v1`
+### ~~⑥ 把 AdminAutoTools 的三支 copilot 薄殼從 `@main` 改回 `@v1`~~ ✅ 已完成（2026-08-13）
+
+**[`cecigehlpj/AdminAutoTools#65`](https://github.com/cecigehlpj/AdminAutoTools/pull/65) 已合併。**
+在 macOS 上用 `adopt.sh --ref v1` 產生，未手動編輯。三件事一起處理掉：
+
+- 三支薄殼的 `uses:` 從 `@main` 改為 `@v1`
+- 它順帶打開了 `run-shellcheck`（偵測到專案有 `.sh`），因而第一次檢查到三支既有腳本的
+  SC2181／SC3043，**已一併修掉**，否則這個 PR 會把 CI 弄紅
+- 補上兩支 autofix 薄殼缺的 `issues: write`（見下）
+
+> ⚠️ **合併時 CI 是紅的，但那不是這個 PR 的問題** —— 見下方「Actions 全面停擺」。
+> 變更本身在本機驗過：shellcheck 乾淨、`bash -n`／`sh -n` 通過、六支 workflow YAML 可解析。
+
+### 🔴 AdminAutoTools 的 GitHub Actions 從 2026-08-13 中午起全面停擺
+
+**這是目前最該先解的一條。** 症狀：所有 workflow 的所有 job 都在 3–6 秒內 `failure`，
+而 API 顯示 **`steps: []`（job 從未啟動）**——包括 gitleaks、Semgrep 這種不吃相依的。
+
+```bash
+gh api repos/cecigehlpj/AdminAutoTools/actions/runs/<id>/jobs \
+  --jq '.jobs[] | "\(.conclusion) steps=\(.steps|length) \(.name)"'
+```
+
+時間線很乾淨：**06:27 全綠 → 15:22 之後全部 `steps=0`**。
+
+`steps=0` 代表 runner 根本沒接下這個 job，幾乎都是**帳號層級的 Actions 配額或
+消費上限**（AdminAutoTools 是 **private** repo，Actions 分鐘要計費；ci-standards 是
+public 所以不受影響 —— 同一時間它的 CI 全綠）。
+
+去 GitHub → Settings → Billing → **Actions 用量與 spending limit** 確認。
+README 建議把 spending limit 設 $0 以防爆帳單，代價就是**額度用完當天 CI 直接死**，
+而且錯誤訊息完全看不出原因。
+
+> 在這條解決之前，AdminAutoTools 的 Copilot 自動迴圈也不會動 —— 它整條都是 Actions 驅動的。
+
+**這次還順帶抓到一個沒人發現的靜默失效**：兩支 autofix 薄殼**缺 `issues: write`**。
+達 `max-attempts` 上限時要貼 `needs-human-review` label，而 label API 屬 Issues 權限 ——
+少了會 **403 且不報錯**，等於「升級人工」那一步從來沒成功過。1.1.0 就修過公版這個洞
+（見 CHANGELOG），但 consumer 的薄殼沒跟上。
+
+原始問題如下（保留，因為下一個 consumer 可能也這樣釘）：
 
 2026-08-13 查到的：AdminAutoTools 的 `ci.yml`／`security.yml` 釘 `@v1`（正確），
 但**三支 `copilot-*` 薄殼釘的是 `@main`**：
@@ -259,9 +302,17 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 
 ## 4. 環境與路徑
 
-> **2026-08-13 已從 macOS 移轉到 Windows。** 本節整個改寫過。
-> 舊的 macOS 路徑（`/Users/kimi/Library/CloudStorage/OneDrive-.../CodingProject`）
-> 全部作廢 —— 若在別處看到那串路徑或 `$CODE_WORK`、`~/.zshrc`，那是過期資訊。
+> **2026-08-13：現在是「兩台機器並存」，不是單純從 macOS 換到 Windows。**
+> 同一天兩件事平行發生 ——
+> Windows 那台成為**主要開發機**（1.2.3 就是在那裡發佈的）；
+> 而 **macOS 那台同日把專案搬出了 OneDrive**，因為它還在跑服務（見下）。
+>
+> ⚠️ **只有「OneDrive 底下」的舊 macOS 路徑作廢**
+> （`/Users/kimi/Library/CloudStorage/OneDrive-.../CodingProject`）。
+> macOS 本身沒有作廢 —— 若看到那串 **OneDrive** 路徑或指向它的 `$CODE_WORK`，
+> 那才是過期資訊。
+
+**Windows（主要開發機）**
 
 | 項目 | 值 |
 |---|---|
@@ -270,6 +321,21 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 | ci-standards | `D:\3_CodingProject\ci-standards` |
 | AdminAutoTools | `D:\3_CodingProject\AdminAutoTools\AdminAutoTools` ← **巢狀** |
 | 移轉備份 | `D:\3_CodingProject\_migration_backup_20260813_1115`（含 robocopy log） |
+
+**macOS（仍在服役 —— 它在跑服務，不只是開發機）**
+
+| 項目 | 值 |
+|---|---|
+| 公司專案根目錄 | `/Users/kimi/CodingProject`　← **已搬出 OneDrive**，`$CODE_WORK` 與 `~/.zshrc` 已同步更新 |
+| 個人專案根目錄 | `~/Library/CloudStorage/OneDrive-個人/Kimi/2_Code`（`$CODE_PERS`，仍在 OneDrive） |
+| 跑在這台上的服務 | `llmstack`（LiteLLM + open-webui + postgres）、`geearning`（api/dashboard/db）、MLX server（launchd `com.kimi.llmstack.mlx-primary-namecard`，port 18080） |
+| Cloudflare Tunnel | `cloudflared-shared`，在 `~/docker-services/cloudflared`，**不在專案樹裡**，搬遷完全不影響它 |
+
+> 搬出 OneDrive 之後，這三個 compose 專案的 bind mount 已全部指向
+> `/Users/kimi/CodingProject/...`，容器名稱與網路不變（compose 專案名來自資料夾名，
+> 資料夾名沒變）→ Tunnel 的 ingress 指向不受影響。
+> launchd plist 與 `~/.local/bin/llmstack-mlx-primary-namecard` 都寫死過舊路徑，
+> **已一併改掉**（各留 `.bak-migrate`）。
 
 Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
@@ -419,6 +485,35 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 - **macOS 的 `~/Library/CloudStorage` 受 TCC 保護。**
   `find ~ ... 2>/dev/null` 會因為 EPERM 什麼都找不到，看起來像「檔案不存在」。
   終端機需要「完整取硬碟取用權」。
+
+- **🔴 不要把 git repo 放在 OneDrive 裡。** 2026-08-13 搬遷時的實測：
+  OneDrive 的「隨選檔案」佔位檔（`ls -lO` 顯示 `dataless`）**會停止實體化** ——
+  一個 40 KB 的檔案 60 秒讀不下來，`nettop` 抓不到任何 OneDrive 傳輸。
+  症狀不是「慢」，是**整個卡死**：
+
+  - `git status` 直接 `fatal: .git/index: unable to map index file: Operation canceled`
+  - `rsync` 讀到 dataless 檔案就無限期停住（實測卡了 8 分 43 秒才被中止）
+  - AdminAutoTools 的 `.git` 有 **557 個 dataless 檔案，含 loose object**
+
+  **正確的搶救順序**（而不是等 OneDrive 修好）：
+  1. **packfile 通常是好的**，dataless 集中在 loose object → `git log` 多半還讀得出來
+  2. 逐一比對本機 ref 與 `git ls-remote`，找出**只存在本機**的分支
+     （那次 14 個分支只有 1 個是本機獨有）
+  3. 有 remote 的 repo **一律重新 `git clone`**，別搶救 OneDrive 的 `.git`
+  4. 再把**已實體化的檔案疊上去**（排除 `.git`），未提交的修改與 `.env`
+     這類未追蹤檔案就保住了
+  5. 剩下讀不到的**逐檔重試** —— 實體化是間歇性的，那次兩輪救回 18 個
+
+- **複製檔案清單時，`find -type f` 會漏掉兩種東西。** 兩個都在上面那次搬遷實際踩到：
+  - **符號連結**（`-type l`）。漏掉 120 個，其中包含 `.venv/bin/python`，
+    害 MLX server 起不來。要用 `\( -type f -o -type l \)` 並給 rsync `--links`。
+  - **空目錄**（`--files-from` 只建有檔案的路徑）。postgres 因為缺 `pg_notify`
+    而 `FATAL: could not open directory "pg_notify"`，整個 stack 起不來。
+    補法：`rsync -a --include='*/' --exclude='*'` 單獨補一次目錄結構。
+
+  > 附帶一提：Python venv **搬家後不必重建**。`bin/python` 是指向系統 Python 的
+  > 絕對符號連結，`sys.prefix` 由執行檔位置推導，所以路徑換了照樣能跑 ——
+  > 前提是那個 symlink 真的有被複製過去。
 
 </details>
 
