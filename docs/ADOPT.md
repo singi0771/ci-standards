@@ -185,8 +185,9 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
   （`"$STD（ref…"` → 變數 `STD\xef`），配上 `set -u` 直接中止。
   寫中文訊息時，`$VAR` 後面接非 ASCII 一律用 `${VAR}`。
 - BSD awk **不接受 `-v` 的值裡有換行**（GNU awk 容忍）。多行字串改走
-  `ENVIRON[]`。這個症狀有欺騙性 —— awk 放棄整個程式，但後面的 `mv`
-  照跑，檔案會被寫成空的或半成品。
+  `ENVIRON[]`。腳本有 `set -euo pipefail`，所以 awk 一失敗就當場中止、
+  後面的 `mv` 不會執行 —— **原檔完好**，只會留下 0 bytes 的 `.tmp`。
+  症狀是導入跑到一半停掉，不是檔案被寫壞。
 
 ---
 

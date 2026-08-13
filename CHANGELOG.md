@@ -40,11 +40,29 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
   `awk: newline in string ... at source line 1` 並放棄整個程式，GNU awk 才容忍。
   改走 `ENVIRON[]` 傳遞 —— POSIX awk 皆支援，兩邊行為一致。
 
-  症狀有欺騙性：awk 失敗但 `mv` 照常執行，所以檔案會被寫成**空的或半成品**，
-  而腳本不一定會停。
+  腳本開頭有 `set -euo pipefail`，所以 awk 的非零狀態會讓它**當場中止** ——
+  後面的 `mv "$f.tmp" "$f"` 不會執行，**原檔完好**，最多留下一個 0 bytes 的
+  `.tmp`。症狀是「導入跑到一半整個停掉」，不是檔案被寫壞。
 
 - 回歸測試現已在 macOS（bash 3.2 + BSD awk）實際跑過，43 項全過。
   這是 `test-adopt.sh` 第一次在 macOS 上執行。
+
+### 新增
+
+- **`.github/workflows/adopt-tests.yml`：`test-adopt.sh` 首次進 CI，並跨
+  `ubuntu-latest` × `macos-latest` 兩個平台跑。**
+
+  在此之前這 43 項回歸測試**完全不在 CI 裡**，全靠人記得手動執行 ——
+  1.2.2 這兩個 bug 能活到現在正是因為這個缺口。macOS job 刻意用
+  `/bin/bash`（而非 `bash`）呼叫，避免 runner 的 PATH 上有 Homebrew 的
+  bash 5.x 而測不到系統內建的 3.2.57。
+
+  最後一步會比對 `git status --porcelain`，確保測試沒有污染本 repo ——
+  呼應 2026-08-08 那次「破壞性測試跑在 ci-standards 自己身上、還 commit
+  進 main」的事故。
+
+  這支 workflow 是本 repo 自己的工具測試，**不是給 consumer 呼叫的公版**，
+  也刻意不列為 required check（Gate 仍只有兩個）。
 
 ---
 
