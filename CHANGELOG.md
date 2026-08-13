@@ -47,6 +47,16 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - 回歸測試現已在 macOS（bash 3.2 + BSD awk）實際跑過，43 項全過。
   這是 `test-adopt.sh` 第一次在 macOS 上執行。
 
+- **`test-adopt.sh` 會把「環境缺套件」誤報成「測試失敗」。**
+  「所有 workflow YAML 仍可解析」那一項只檢查 `python3` 存在，沒檢查
+  **PyYAML 裝了沒**；`ImportError` 被 `2>/dev/null` 吃掉，於是印出
+  `❌ YAML 解析失敗`。macOS runner 正好有 python3、沒有 PyYAML ——
+  新加的 CI 第一次跑就踩到。
+
+  改成先驗 `python3 -c 'import yaml'`，缺套件時走新的 `skip()`（`⊘`），
+  與 `FAIL` 分開計數、不影響 exit code。CI 那邊則直接把 PyYAML 裝起來，
+  讓這項真的驗到而不是跳過。
+
 ### 新增
 
 - **`.github/workflows/adopt-tests.yml`：`test-adopt.sh` 首次進 CI，並跨

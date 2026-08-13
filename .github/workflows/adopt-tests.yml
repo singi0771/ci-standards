@@ -51,6 +51,14 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "ci"
 
+      # 沒有 PyYAML 的話，「所有 workflow YAML 仍可解析」那一項會被跳過。
+      # macOS runner 預設就沒有，所以明確裝起來 —— 要的是真的驗到，不是跳過。
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: 安裝 PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
       - name: 回歸測試（系統內建 bash）
         run: /bin/bash scripts/test-adopt.sh
 
