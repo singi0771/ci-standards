@@ -572,6 +572,7 @@ ci-standards/
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝）
 │   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
 ├── docs/
+│   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
 │   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
 │   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
@@ -623,6 +624,7 @@ ci-standards/
 
 | 文件 | 給誰看 |
 |---|---|
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | **接手的人（含 AI）先讀這份** —— 現況快照、下一步做什麼、踩過哪些坑 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 一鍵導入 —— Windows / macOS、內網與離線做法、`gh` 是不是必要 |
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含排查步驟 |
 | [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
