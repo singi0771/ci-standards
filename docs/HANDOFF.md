@@ -1,6 +1,6 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-08-12（對應 `main` = `ff1f356`，版本 1.2.1）
+> **最後更新**：2026-08-13（對應 `main` = `e11d205`，已發佈版本 1.2.2）
 >
 > 這是一份**活的**文件。每次做完一段工作就更新「現況快照」與「待辦」，
 > 讓下一個接手的人（或下一個 Claude session）不必重新推導。
@@ -22,7 +22,7 @@
 |---|---|---|
 | 1 | 本檔（`docs/HANDOFF.md`） | 現在卡在哪、下一步做什麼 |
 | 2 | `README.md` | 這個公版是什麼、有哪些 input、版本策略 |
-| 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 三段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這三段是全部的教訓來源 |
+| 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 / 1.2.2 四段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這四段是全部的教訓來源 |
 | 4 | `docs/KNOWN-LIMITATIONS.md` | 哪些問題已知無解，別再花時間 |
 | 5 | `CONTRIBUTING.md` | 改公版的規矩（尤其「什麼情況要開 v2」） |
 | 6 | `docs/ADOPT.md` | 導入腳本的三類檔案策略 |
@@ -63,13 +63,13 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| `main` | `ff1f356e63e31816b9ee2fa0a7181fafea64b517` |
-| CHANGELOG | 已定版到 **1.2.1** |
-| `v1` tag | ✅ 已移到 `ff1f356`（1.2.1 已發佈，各專案下次觸發就會吃到） |
-| `v1.2.1` tag | ✅ 已建立（annotated；`v1.2.1^{}` 解析到 `ff1f356`） |
+| `main` | `e11d205`（= 1.2.2 + 本文件） |
+| CHANGELOG | 已定版到 **1.2.2**；`e11d205` 只多一份文件，未發版 |
+| `v1` tag | ✅ 在 `fc239d2`（1.2.2 已發佈） |
+| 最新版本 tag | ✅ `v1.2.2`（`v1.2.2^{}` → `fc239d2`） |
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
 | AdminAutoTools | ⚠️ **停在 1.2.0 之前，自動修迴圈是壞的**，需要重跑 adopt |
-| adopt.sh | ✅ 43 項回歸測試全過 |
+| adopt.sh | ✅ 43 項回歸測試在 **Linux 與 macOS 都跑過**（1.2.2 起 `adopt-tests.yml` 有雙平台 matrix） |
 | adopt.ps1 | ⚠️ **從未在真的 Windows 上執行過**，只逐段對譯 + 語法檢視 |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
@@ -157,6 +157,22 @@ UTF-8 無 BOM + LF），相對路徑會解到 PowerShell 啟動的目錄。已�
       而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
       只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
+- [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
+      Require status checks to pass，加入這兩個 context）：
+
+      adopt regression (ubuntu-latest)
+      adopt regression (macos-latest)
+
+      現在它們**只會讓 PR 顯示紅燈、不會擋下合併** —— `adopt-tests.yml` 是獨立
+      workflow，job 不在 `ci / CI Gate` 底下，而 ruleset 只列了兩個 Gate。
+      1.2.2 的整個教訓就是「macOS 這條路徑沒被守住」，補了測試卻沒補守門等於只做一半。
+
+      這兩個 job **沒有 `if` 條件、`pull_request` 也沒有 paths 過濾**，每個 PR 必跑，
+      所以設成 required 不會造成「skipped 的 check 永不回報 → PR 卡死」。
+
+      ⚠️ **不要加進 `scripts/setup-branch-protection.sh`** —— 那支是給 consumer 用的，
+      而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
+      這是本 repo 專屬的設定，手動加。
 
 ### ⑤ 長期觀察中
 
@@ -250,6 +266,23 @@ alias cw="cd $CODE_WORK"
 
 ### 關於工具與環境
 
+- **「43 項全過」只證明它在測試那台機器上會過。**
+  1.2.1 的回歸測試是在雲端（Linux + bash 5.x + GNU awk）跑的，全綠；
+  但 `adopt.sh` 在 macOS（bash **3.2.57** + BSD awk）**從第 120 行就直接中止**，
+  也就是 `docs/ADOPT.md` 列在第一順位的平台，腳本根本跑不起來。
+  1.2.2 才修掉，並加了 `adopt-tests.yml` 的 `[ubuntu-latest, macos-latest]` matrix。
+  兩個具體地雷：
+
+  - **bash 3.2 會把全形標點的首位元組吃進變數名。**
+    `"公版：$STD（ref: ...）"` 在 UTF-8 locale 下的 bash 3.2 會解析成變數
+    `STD\xef`，配上 `set -u` 就是 `STD?: unbound variable`。
+    bash 5.x 不會，`LC_ALL=C` 也不會 —— Linux CI 測不到。
+    **`$VAR` 後面接非 ASCII 字元時一律寫成 `${VAR}`。**
+    這個 repo 的訊息全是中文，等於每一行 `info "…$VAR…"` 都是候選地雷。
+
+  - **BSD awk 不接受 `-v` 的值裡有換行**（`awk: newline in string`），GNU awk 才容忍。
+    多行字串要走 `ENVIRON[]` 傳給 awk。
+
 - **`git push --dry-run` 會給假成功。** 這個 repo 的網路路徑上，
   `--dry-run` 只做協商、不做 ref 更新，所以「成功」不代表真的推得上去。
   推 tag 這種事一律真的推，然後用 `git ls-remote --tags origin` 驗。
@@ -298,4 +331,12 @@ alias cw="cd $CODE_WORK"
 | **讀寫使用者機器上的專案**（AdminAutoTools 等） | ❌ 看不到 | ✅ |
 | 跑 `adopt.sh` 對真實專案 | ❌ | ✅ |
 | 跑 `adopt.ps1`（需要 Windows） | ❌ | ✅ |
-| 跑 `scripts/test-adopt.sh` | ✅ | ✅ |
+| 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ✅ 含 macOS |
+
+最後一列是 1.2.2 學到的：雲端跑得過**不代表** macOS 跑得過（bash 3.2 + BSD awk）。
+`adopt-tests.yml` 的雙平台 matrix 補上了這條路徑，不必再靠人工在 Mac 上補跑。
+
+⚠️ 但它目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml` 是獨立 workflow，
+它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate 設成 required
+（見 §3 待辦 ④）。在那兩個 check 進 ruleset 之前，**綠燈不是保證，是提示**。
+而且**改 shell 腳本時本來就該記得那條 `${VAR}` 規則** —— CI 是最後一道防線，不是第一道。
