@@ -1,7 +1,9 @@
 # 交接：現況與待辦
 
 > **最後更新**：2026-08-13　**已發佈版本 1.2.3**（發佈基準 `6fed71b`，`v1` 指向它）
-> **開發機已於同日從 macOS 移轉到 Windows** —— §4 整節改寫過，舊路徑全部作廢。
+> **2026-08-13 起是「兩台機器並存」** —— Windows 成為主要開發機（1.2.3 在那裡發佈），
+> macOS 那台仍在服役（跑 llmstack／geearning／MLX server），同日搬出了 OneDrive。
+> §4 整節改寫過。作廢的**只有 OneDrive 底下的舊 macOS 路徑**，不是 macOS 本身。
 >
 > 這裡刻意寫**發佈基準**而不是「`main` 現在是哪個 commit」——
 > 後者連這份文件自己被合併都會讓它過期（已經發生過好幾次）。
@@ -27,7 +29,7 @@
 |---|---|---|
 | 1 | 本檔（`docs/HANDOFF.md`） | 現在卡在哪、下一步做什麼 |
 | 2 | `README.md` | 這個公版是什麼、有哪些 input、版本策略 |
-| 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 / 1.2.2 四段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這四段是全部的教訓來源 |
+| 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 / 1.2.2 / 1.2.3 五段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這五段是全部的教訓來源 |
 | 4 | `docs/KNOWN-LIMITATIONS.md` | 哪些問題已知無解，別再花時間 |
 | 5 | `CONTRIBUTING.md` | 改公版的規矩（尤其「什麼情況要開 v2」） |
 | 6 | `docs/ADOPT.md` | 導入腳本的三類檔案策略 |
@@ -73,7 +75,7 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | `v1` tag | ✅ 已移到 `6fed71b`（1.2.3 已發佈，各專案下次觸發就會吃到） |
 | 最新版本 tag | ✅ `v1.2.3`（`v1.2.3^{}` → `6fed71b`，已驗證與 `v1` 同一 SHA） |
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
-| 開發機 | ⚠️ **2026-08-13 已從 macOS 移轉到 Windows**（`D:\3_CodingProject`），詳見 §4 |
+| 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 契約**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🔴 **2026-08-13 中午起全面停擺**（所有 job `steps=0`，疑似 Actions 配額／spending limit）。**這是目前最該先解的一條**，詳見 §3 |
 | adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
@@ -533,22 +535,28 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 留著這張表，是為了知道什麼時候該切到本機。
 
-> **2026-08-13 起「本機」= Windows**（先前是 macOS），這張表已據此更新。
+> **2026-08-13 起「本機」有兩台**：Windows（主要）與 macOS（仍在服役，見 §4）。
+> 兩台能做的事不一樣，所以分成兩欄。
 
-| 事情 | 雲端 | 本機（Windows） |
-|---|---|---|
-| 改公版程式碼、開 PR、盯 CI | ✅ | ✅ |
-| push 到 `claude/*` 分支 | ✅ | ✅ |
-| **push tag** | ❌ 403 | ✅ |
-| **讀寫使用者機器上的專案**（AdminAutoTools 等） | ❌ 看不到 | ✅ |
-| 跑 `adopt.sh` 對真實專案 | ❌ | ✅（Git Bash） |
-| 跑 `adopt.ps1`（需要 Windows） | ❌ | ✅ **現在做得到了**（以前要另外找機器） |
-| 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ⚠️ 只有 Git Bash（bash 5.2 + GNU awk） |
-| **測到 macOS 那條路徑**（bash 3.2 + BSD awk） | ❌ | ❌ **兩邊都不行** |
+| 事情 | 雲端 | 本機 Windows | 本機 macOS |
+|---|---|---|---|
+| 改公版程式碼、開 PR、盯 CI | ✅ | ✅ | ✅ |
+| push 到 `claude/*` 分支 | ✅ | ✅ | ✅ |
+| **push tag** | ❌ 403 | ✅ | ✅ |
+| **讀寫使用者機器上的專案**（AdminAutoTools 等） | ❌ 看不到 | ✅ | ✅ |
+| 跑 `adopt.sh` 對真實專案 | ❌ | ✅（Git Bash） | ✅ |
+| **跑 `adopt.ps1`** | ❌ | ✅ **唯一做得到的** | ❌ |
+| 跑 `scripts/test-adopt.sh` | ⚠️ 只有 Linux | ⚠️ 只有 Git Bash（bash 5.2 + GNU awk） | ✅ bash 3.2 + BSD awk |
+| **測到 macOS 那條路徑**（bash 3.2 + BSD awk） | ❌ | ❌ | ✅ |
 
-最後兩列是重點：**移轉到 Windows 之後，本機不再測得到 macOS 那條路徑**
-（以前開發機就是 Mac，等於天然有覆蓋）。現在守住它的只剩
-`adopt-tests.yml` 的 `macos-latest`。**本機 43 項全過，不代表 macOS 會過。**
+重點是**兩台各自補上對方的盲區**：
+
+- `adopt.ps1` 只有 Windows 跑得了（PS 5.1 那個 BOM bug 就是在那裡抓到的）
+- **bash 3.2 + BSD awk 只有 macOS 測得到** —— Windows 的 Git Bash 是
+  bash 5.2 + GNU awk，跟 Linux 一樣，測不到 1.2.2 修的那兩個 bug
+
+所以：**在任何一台上「43 項全過」都只證明那一台會過。** 動 `adopt.sh` 時，
+真正的覆蓋來自 `adopt-tests.yml` 的三平台 matrix，不是本機那一次。
 
 ⚠️ 而且那些 check 目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml`
 是獨立 workflow，它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate
