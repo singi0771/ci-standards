@@ -347,8 +347,9 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 | awk | GNU Awk 5.0.0 —— **不是** BSD awk |
 | python3 | 3.13，有 PyYAML；**locale 是 cp950，不是 UTF-8**（見 §5） |
 
-⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬），
-那條路徑現在只剩 `adopt-tests.yml` 的 `macos-latest` 在守。本機全過**不代表** macOS 會過。
+⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬）。
+守住那條路徑的有兩個地方：**macOS 那台**（仍在服役，見下表）與 `adopt-tests.yml`
+的 `macos-latest`。**在 Windows 上 43 項全過，不代表 macOS 會過。**
 
 ### 移轉當下踩到的（換機器時會再遇到）
 
