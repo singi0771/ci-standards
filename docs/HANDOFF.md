@@ -333,6 +333,25 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 | 跑在這台上的服務 | `llmstack`（LiteLLM + open-webui + postgres）、`geearning`（api/dashboard/db）、MLX server（launchd `com.kimi.llmstack.mlx-primary-namecard`，port 18080） |
 | Cloudflare Tunnel | `cloudflared-shared`，在 `~/docker-services/cloudflared`，**不在專案樹裡**，搬遷完全不影響它 |
 
+**這台上的 launchd 排程**（`~/Library/LaunchAgents/`，2026-08-17 更新）
+
+| Label | 週期 | 做什麼 |
+|---|---|---|
+| `com.singi0771.mini-taiwan-pulse.taroko-tdx-sync` | 600s | 花蓮／太魯閣 TDX 快照 |
+| `com.singi0771.mini-taiwan-pulse.tra-liveboard` | 300s | 台鐵誤點看板（TDX TrainLiveBoard） |
+| `com.singi0771.mini-taiwan-pulse.public-data-sync` | 每日 04:20 | 靜態公開資料 |
+| `com.kimi.llmstack.mlx-primary-namecard` | 常駐 | MLX server |
+
+> 三支資料同步都刻意用 **`StartInterval` 而非 `StartCalendarInterval`** ——
+> 睡眠喚醒後前者會補跑，行事曆式的會整段錯過。入口腳本一律放在
+> `~/Library/Application Support/MiniTaiwanPulse/`（**專案外**），排程才不會
+> 隨專案搬家而失效 —— 這次從 OneDrive 搬出來時就是靠這個設計沒壞掉。
+>
+> ⚠️ **排程週期必須對齊資料本身的新鮮度契約。** 太魯閣同步原本設每小時，
+> 但腳本只採信「10 分鐘內的真實 GPS」—— 等於每小時有 50 分鐘，快照裡的
+> 公車依它自己的規則就已經過期。**公車在圖上消失不是沒有車，是快照太舊。**
+> 這種「兩個時間尺度不一致」的問題從程式碼完全看不出來，只能從資料契約反推。
+
 > 搬出 OneDrive 之後，這三個 compose 專案的 bind mount 已全部指向
 > `/Users/kimi/CodingProject/...`，容器名稱與網路不變（compose 專案名來自資料夾名，
 > 資料夾名沒變）→ Tunnel 的 ingress 指向不受影響。
