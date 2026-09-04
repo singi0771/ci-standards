@@ -96,6 +96,10 @@
   的一行指令與發佈步驟的指引。
 - `docs/HANDOFF.md` 同步 2026-09-05 現況：新增待辦 ⑧（發佈 1.2.4），
   並記下殘留 worktree／分支已清理。
+- `docs/HANDOFF.md`：AdminAutoTools「Actions 全面停擺」經查證**已恢復**
+  （9/4 的 run 每個 job 都有 steps），那條從第一優先改為已解決；
+  現在的問題是 Dependabot PR 上 ruff／pytest、Semgrep、OSV-Scanner 真的失敗，
+  屬 AdminAutoTools 自己的事，記下查法。
 
 ---
 

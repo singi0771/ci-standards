@@ -79,7 +79,7 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 契約**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
-| AdminAutoTools 的 CI | 🔴 **2026-08-13 中午起全面停擺**（所有 job `steps=0`，疑似 Actions 配額／spending limit）。**這是目前最該先解的一條**，詳見 §3 |
+| AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
 | adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
 | adopt.ps1 | ✅ **1.2.3 起首次在真 Windows 上驗過**：PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical。⚠️ 但**沒有任何自動測試在守它**（見 §3 ⑦） |
 
@@ -102,9 +102,10 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > 發佈的操作步驟見本節最後的「發佈流程」，下次公版有實質變更時照那個走。
 >
 > **① ② ③ ⑥ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
-> **現在的第一順位是「AdminAutoTools 的 Actions 停擺」**（本節中段，紅字那條）——
-> 在它解決之前，那個 repo 的 CI 與 Copilot 迴圈都是死的，其他事做了也驗不到。
-> 之後才是 ⑦（給 `adopt.ps1` 加自動守門）、⑧（發佈 1.2.4）與 ④（GitHub 網頁設定）。
+> **Actions 停擺那條已於 2026-09-05 查證恢復**（本節中段），但 AdminAutoTools 的
+> CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
+> 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
+> 本 repo 的順序：⑦（給 `adopt.ps1` 加自動守門）、⑧（發佈 1.2.4）、④（GitHub 網頁設定）。
 > ⑦ 與 ⑧ 建議一起做：⑦ 改的是 `adopt-tests.yml`（不是 reusable），本身不需要發版，
 > 但既然 ⑧ 要移 `v1`，把 ⑦ 併進同一版最省事。
 
@@ -230,9 +231,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 > ⚠️ **合併時 CI 是紅的，但那不是這個 PR 的問題** —— 見下方「Actions 全面停擺」。
 > 變更本身在本機驗過：shellcheck 乾淨、`bash -n`／`sh -n` 通過、六支 workflow YAML 可解析。
 
-### 🔴 AdminAutoTools 的 GitHub Actions 從 2026-08-13 中午起全面停擺
+### ~~🔴 AdminAutoTools 的 GitHub Actions 從 2026-08-13 中午起全面停擺~~ ✅ 已恢復（2026-09-05 查證）
 
-**這是目前最該先解的一條。** 症狀：所有 workflow 的所有 job 都在 3–6 秒內 `failure`，
+> **2026-09-05 查證結果**：9/4 的 run 每個 job 都有實際執行的 steps（CI 五個 job、
+> Security 六個 job），`steps=0` 的症狀已消失，配額／spending limit 那條不用再追。
+> **但現在是真的紅**：三支 Dependabot PR（mako、mcp、cryptography）上
+> `ci / Python lint + test`、`security / SAST (Semgrep)`、
+> `security / Dependency vuln (OSV-Scanner)` 都 `failure`，兩個 Gate 因此擋門。
+> 這是 AdminAutoTools 自己的相依／程式碼問題，去那個 repo 看 job log 處理，
+> 不要回頭改公版。查法：
+>
+> ```bash
+> gh run list --repo cecigehlpj/AdminAutoTools --workflow ci.yml -L 3
+> gh run view <run-id> --repo cecigehlpj/AdminAutoTools --log-failed | head -80
+> ```
+>
+> 下面保留當時的症狀與判讀，因為 **private repo 額度用完時就是長這樣**，
+> 下次再遇到 `steps=0` 可以直接對照。
+
+原始症狀：所有 workflow 的所有 job 都在 3–6 秒內 `failure`，
 而 API 顯示 **`steps: []`（job 從未啟動）**——包括 gitleaks、Semgrep 這種不吃相依的。
 
 ```bash
