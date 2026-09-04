@@ -78,6 +78,25 @@
   新增待辦 ⑥：AdminAutoTools 的三支 copilot 薄殼釘的是 `@main` 而不是 `@v1`，
   等於繞過發佈閘門，要改回來。
 
+### 相依更新
+- `security-reusable.yml`：`github/codeql-action/upload-sarif` 4.37.4 → 4.37.7
+  （Dependabot #27，2026-09-05 合併）。只影響 `upload-sarif: true` 那條路徑，
+  而那條路徑預設關閉、且仍列在已知限制；其餘掃描行為不變。
+
+  ⚠️ 但這是 1.2.3 之後 `main` 上**第一個動到 reusable 的 commit** ——
+  `main` 與 `v1` 不再只差文件，下次發佈要記得移 `v1`（見 `docs/HANDOFF.md` §3 ⑧）。
+
+### 文件
+- 新增 `docs/openspec-dev-standards-report-2026-08-29.md`：跨 16 個專案的開發規範
+  盤點、OpenSpec 世代差異、CLAUDE.md／rules／hooks 分層建議與多 Agent 工作流評估。
+  它是「下一階段（把 ci-standards 接進 label 驅動的自動開發流程）」的規劃依據，
+  不是公版本體的一部分。
+- `README.md` 檔案地圖補上先前漏列的 `adopt-tests.yml`、`scripts/test-adopt.sh`、
+  `.github/ISSUE_TEMPLATE/` 與上述報告；版本策略一節加上「怎麼看 `v1` 落後了什麼」
+  的一行指令與發佈步驟的指引。
+- `docs/HANDOFF.md` 同步 2026-09-05 現況：新增待辦 ⑧（發佈 1.2.4），
+  並記下殘留 worktree／分支已清理。
+
 ---
 
 ## [1.2.3] — 2026-08-13

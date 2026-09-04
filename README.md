@@ -534,6 +534,16 @@ git tag -f v1 && git push -f origin v1                 # 會移動的別名：�
 
 發佈過哪些版本、每版改了什麼，記在 [CHANGELOG.md](CHANGELOG.md)。
 
+發佈的實際操作（tag 釘完整 SHA 而不是 HEAD、用 `git ls-remote` 驗收、tag 只能在本機推）
+寫在 [`docs/HANDOFF.md`](docs/HANDOFF.md) §3「發佈流程」。
+想知道 `v1` 現在落後 `main` 什麼，跑這行就夠：
+
+```bash
+git log --oneline v1..main -- .github/workflows templates scripts
+```
+
+有輸出＝有還沒發佈的實質變更；只有 `docs/` 在動的話可以不發版。
+
 ---
 
 ## 檔案地圖
@@ -560,7 +570,11 @@ ci-standards/
 │   │   ├── security.yml                   ← 自己跑四項安全掃描
 │   │   ├── copilot-autofix-ci-security.yml
 │   │   ├── copilot-autofix-review.yml
-│   │   └── copilot-autoreview-gate.yml
+│   │   ├── copilot-autoreview-gate.yml
+│   │   │
+│   │   │  ── ③ 本 repo 自己的工具測試（不是公版，consumer 不會有這支）──
+│   │   └── adopt-tests.yml                ← 跑 scripts/test-adopt.sh，ubuntu / macOS / Windows 三平台 matrix
+│   ├── ISSUE_TEMPLATE/                ← bug / feature 兩種 Issue 表單
 │   ├── copilot-instructions.md        ← 本 repo 自己的 Copilot 規範
 │   ├── pull_request_template.md       ← 本 repo 自己的 PR 檢查清單
 │   ├── CODEOWNERS
@@ -570,14 +584,17 @@ ci-standards/
 ├── scripts/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝）
-│   └── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
+│   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（43 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
 │   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
 │   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
 │   ├── MIGRATION-TO-ORG.md            ← 把本 repo 搬到組織底下的 checklist
-│   └── DEVSECOPS-NOTES.md             ← 為什麼不用 SonarQube/ZAP、工具取捨與導入順序
+│   ├── DEVSECOPS-NOTES.md             ← 為什麼不用 SonarQube/ZAP、工具取捨與導入順序
+│   └── openspec-dev-standards-report-2026-08-29.md
+│                                      ← 跨專案開發規範盤點與下一階段（OpenSpec／多 Agent）規劃，不是公版本體
 └── templates/consumer-repo/.github/   ← 各專案要複製過去的「呼叫端」範本
     ├── dependabot.yml
     ├── copilot-instructions.md
@@ -630,6 +647,7 @@ ci-standards/
 | [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 管理者 —— 搬到組織底下的 checklist |
 | [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md) | 想知道工具怎麼選的人 |
+| [`docs/openspec-dev-standards-report-2026-08-29.md`](docs/openspec-dev-standards-report-2026-08-29.md) | 想知道「下一階段」怎麼規劃的人 —— 跨專案開發規範盤點、CLAUDE.md／rules／hooks 分層、OpenSpec 與多 Agent 工作流評估 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 要改公版、要提需求的人 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 想知道 `v1` 現在是什麼的人 |
 | [`SECURITY.md`](SECURITY.md) | 要回報弱點的人 |

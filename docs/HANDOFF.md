@@ -1,6 +1,8 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-08-13　**已發佈版本 1.2.3**（發佈基準 `6fed71b`，`v1` 指向它）
+> **最後更新**：2026-09-05　**已發佈版本 1.2.3**（發佈基準 `6fed71b`，`v1` 指向它）
+> **2026-09-05 起 `main` 領先 `v1` 的不再只是文件** —— Dependabot #27（`80c4c7f`）
+> 動了 `security-reusable.yml`（codeql-action 升版），**1.2.4 待發佈**，見 §3 ⑧。
 > **2026-08-13 起是「兩台機器並存」** —— Windows 成為主要開發機（1.2.3 在那裡發佈），
 > macOS 那台仍在服役（跑 llmstack／geearning／MLX server），同日搬出了 OneDrive。
 > §4 整節改寫過。作廢的**只有 OneDrive 底下的舊 macOS 路徑**，不是 macOS 本身。
@@ -70,7 +72,7 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `6fed71b`（1.2.3）。`main` 會領先這個點若干個**純文件** commit，屬正常 —— 要確認請跑 `git log --oneline -1` |
+| 發佈基準 | `6fed71b`（1.2.3）。⚠️ **2026-09-05 起 `main` 領先它的不只是文件**：`80c4c7f`（Dependabot #27）動了 `security-reusable.yml`，要發 1.2.4 才會到 consumer（§3 ⑧）。要確認請跑 `git log --oneline v1..main -- .github/workflows templates scripts` |
 | CHANGELOG | 已定版到 **1.2.3** |
 | `v1` tag | ✅ 已移到 `6fed71b`（1.2.3 已發佈，各專案下次觸發就會吃到） |
 | 最新版本 tag | ✅ `v1.2.3`（`v1.2.3^{}` → `6fed71b`，已驗證與 `v1` 同一 SHA） |
@@ -102,7 +104,9 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > **① ② ③ ⑥ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
 > **現在的第一順位是「AdminAutoTools 的 Actions 停擺」**（本節中段，紅字那條）——
 > 在它解決之前，那個 repo 的 CI 與 Copilot 迴圈都是死的，其他事做了也驗不到。
-> 之後才是 ⑦（給 `adopt.ps1` 加自動守門）與 ④（GitHub 網頁設定）。
+> 之後才是 ⑦（給 `adopt.ps1` 加自動守門）、⑧（發佈 1.2.4）與 ④（GitHub 網頁設定）。
+> ⑦ 與 ⑧ 建議一起做：⑦ 改的是 `adopt-tests.yml`（不是 reusable），本身不需要發版，
+> 但既然 ⑧ 要移 `v1`，把 ⑦ 併進同一版最省事。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
@@ -172,6 +176,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 
 ⚠️ 一定要用 `shell: powershell`（5.1），用 `pwsh`（7）會永遠是綠的 ——
 7 預設就吃 UTF-8，根本不會重現這個問題。**用錯 shell 等於白加。**
+
+### ⑧ 發佈 1.2.4（`main` 已領先 `v1` 一個實質變更）
+
+2026-09-05 合併了 Dependabot #27（`80c4c7f`）：`security-reusable.yml` 的
+`github/codeql-action/upload-sarif` 4.37.4 → 4.37.7。只影響 `upload-sarif: true`
+那條路徑（預設關閉、且仍在已知限制），風險極低 —— 但它是 1.2.3 之後第一個
+動到 reusable 的 commit，**`main` 與 `v1` 不再只差文件**。
+
+照本節最後的「發佈流程」做：CHANGELOG 把 `[未發佈]` 定版成 `[1.2.4]`、
+打 `v1.2.4`、移 `v1`、`git ls-remote` 驗。**tag 只能在本機推**（雲端 session 403）。
+不急 —— 純升版可以等下次有實質變更（例如 ⑦）再一起發，但別忘了：
+`main` 與 `v1` 差得越久，越容易有人以為「合併了就生效」。
+
+驗收：`git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'` 中
+`v1` 與 `v1.2.4^{}` 同一個 SHA。
 
 ### ④ 使用者端設定（GitHub 網頁，非程式）
 
@@ -357,6 +376,11 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 > 資料夾名沒變）→ Tunnel 的 ingress 指向不受影響。
 > launchd plist 與 `~/.local/bin/llmstack-mlx-primary-namecard` 都寫死過舊路徑，
 > **已一併改掉**（各留 `.bak-migrate`）。
+>
+> 2026-09-05：ci-standards 裡兩個仍指向 OneDrive 舊路徑的殘留 worktree
+> （`auto-admin-review-db7ad1`、`copilot-review-mode-default-81e279`）與對應的
+> 已合併分支已清掉。`git worktree list` 現在只該看到主 checkout 與當下 session 的那一個；
+> 若又長出 prunable 的項目，`git worktree prune -v` 即可。
 
 Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
