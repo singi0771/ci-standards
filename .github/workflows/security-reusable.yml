@@ -71,7 +71,7 @@ jobs:
         # 這裡安靜跳過，而不是讓 upload 找不到檔案而讓整個 job 變紅。
         # 下面的 artifact 步驟用 if-no-files-found: ignore 達成同一件事。
         if: ${{ always() && inputs.upload-sarif && hashFiles('semgrep.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: semgrep.sarif
           category: semgrep
