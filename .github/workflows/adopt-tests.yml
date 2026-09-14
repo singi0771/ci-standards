@@ -37,8 +37,10 @@ permissions:
 
 jobs:
   # 便宜的前哨：算出這次到底有沒有動到「會影響 adopt 的檔案」。
-  # 文件（docs/、*.md）、Issue 表單、LICENSE 以外的任何檔案都算會影響 ——
-  # 因為 adopt.sh 會讀 reusable 的 inputs 宣告、範本每個字都會被複製到 consumer。
+  # 只有 docs/、根目錄與 .github/ 底下的 .md、Issue 表單、LICENSE 算「純文件」；
+  # 其他任何檔案都算會影響 —— adopt.sh 會讀 reusable 的 inputs 宣告，
+  # 而 templates/ 底下連 .md（copilot-instructions.md、PR 範本）都會被原樣複製到 consumer，
+  # 所以 templates/ 裡的 .md 不能排除。
   changes:
     name: adopt regression (changes?)
     runs-on: ubuntu-latest
@@ -63,7 +65,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
           CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           echo "變更的檔案："; echo "$CHANGED"
-          RELEVANT="$(echo "$CHANGED" | grep -vE '^docs/|\.md$|^\.github/ISSUE_TEMPLATE/|^LICENSE$' || true)"
+          RELEVANT="$(echo "$CHANGED" | grep -vE '^docs/|^[^/]+\.md$|^\.github/[^/]+\.md$|^\.github/ISSUE_TEMPLATE/|^LICENSE$' || true)"
           if [ -n "$RELEVANT" ]; then
             echo "有動到腳本 / 範本 / workflow → 跑回歸測試"; echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -146,6 +148,25 @@ jobs:
           $bom = [System.IO.File]::ReadAllBytes("$env:GITHUB_WORKSPACE\scripts\adopt.ps1")[0..2]
           if (($bom -join ',') -ne '239,187,191') { Write-Host "::error::adopt.ps1 少了 UTF-8 BOM"; exit 1 }
           Write-Host "UTF-8 BOM 在，5.1 載入正常 ✅"
+
+      # adopt.ps1 跟 adopt.sh 是同一套邏輯的兩個實作，docs/ADOPT.md 承諾兩者產出 byte-identical。
+      # 這裡真的跑一次 5.1 的 adopt.ps1 跟 adopt.sh，對同一個範例專案（含 --uses-repo）比對整個 .github/。
+      # 只 parse 不執行的話，兩支哪天各改各的、行為分岔，CI 不會知道。
+      - name: adopt.sh 與 adopt.ps1 的產出必須 byte-identical
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          P="$(mktemp -d)"
+          for v in sh ps; do
+            mkdir -p "$P/$v"
+            ( cd "$P/$v" && git init -q . && git commit -q --allow-empty -m init \
+              && printf 'FROM python:3.12\n' > Dockerfile && printf 'flask\n' > requirements.txt \
+              && mkdir -p bin && printf '#!/bin/sh\ntrue\n' > bin/x.sh )
+          done
+          ./scripts/adopt.sh --std . --target "$P/sh" --uses-repo ACME/ci-standards >/dev/null
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
+            -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/ps")" -UsesRepo ACME/ci-standards >/dev/null
+          diff -r "$P/sh/.github" "$P/ps/.github"
+          echo "adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
 
       # 呼應 docs/HANDOFF.md §5：測試曾經污染過本 repo 的 .github/，
       # 而「git status 乾淨」不等於沒事 —— 被改的檔案若被 commit 了也會乾淨。

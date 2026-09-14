@@ -8,7 +8,8 @@
 | **Windows（PowerShell）** | `scripts/adopt.ps1` ← 內建就有，不用裝東西 |
 | Windows（Git Bash） | `scripts/adopt.sh` 也可以 |
 
-兩支功能完全相同，產出的檔案 byte-identical（CI 有測）。
+兩支功能完全相同，產出的檔案 byte-identical —— CI 的 Windows job 會真的用 PowerShell 5.1
+跑一次 `adopt.ps1`、用 Git Bash 跑一次 `adopt.sh`，對同一個範例專案（含 `--uses-repo`）`diff -r` 整個 `.github/`。
 
 ---
 
@@ -157,7 +158,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋六個情境共 53 項檢查，改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋六個情境共 57 項檢查，改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -169,11 +170,13 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋、三支薄殼整份換新且設定搬回、補上 `zizmor.yml` |
 | C 重複執行 | 跑第二次沒有任何 diff |
 | D `--dry-run` | 一個檔案都沒動 |
-| E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 |
+| E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |
 | F 巢狀結構 | 目標是外層資料夾時，提示往下一層找 |
 
-CI（`adopt-tests.yml`）會在 ubuntu / macOS / Windows 三個平台跑這份測試，Windows 那台還會用
-**PowerShell 5.1** 載入 `adopt.ps1` 確認 UTF-8 BOM 沒掉。只動文件的 PR 會整個跳過（macOS runner 算 10 倍分鐘）。
+CI（`adopt-tests.yml`）會在 ubuntu / macOS / Windows 三個平台跑這份測試，Windows 那台還會：
+用 **PowerShell 5.1** 載入 `adopt.ps1` 確認 UTF-8 BOM 沒掉，以及真的跑 `adopt.ps1` 與 `adopt.sh`
+比對產出 byte-identical。只動文件的 PR 會整個跳過（macOS runner 算 10 倍分鐘）；
+`templates/` 底下的 `.md` 不算文件，因為它們會被原樣複製到專案裡。
 
 ### ⚠️ 一定要在 macOS 上也跑一次
 

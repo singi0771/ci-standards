@@ -262,14 +262,22 @@ jobs:
           sudo mv zizmor /usr/local/bin/zizmor
           zizmor --version
       - name: Run zizmor
-        continue-on-error: ${{ inputs.fail-on-findings == false }}
         env:
           # 有 token 才能做線上檢查（例如「這個釘死的 SHA 是不是已知有漏洞的版本」）
           GH_TOKEN: ${{ github.token }}
           MIN_SEVERITY: ${{ inputs.zizmor-min-severity }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         run: |
           # 會自動找 repo 底下所有 .github/workflows/*.yml，設定檔讀 .github/zizmor.yml
-          zizmor --no-progress --min-severity "$MIN_SEVERITY" .
+          #
+          # fail-on-findings=false 時不用 continue-on-error（那會把「zizmor 自己當掉、
+          # 參數錯、找不到任何 workflow」也一起吞成綠燈）。改用 --no-exit-codes：
+          # 只把「有找到問題」的 exit code 壓成 0，工具本身出錯照樣紅。
+          if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+            zizmor --no-progress --min-severity "$MIN_SEVERITY" .
+          else
+            zizmor --no-progress --no-exit-codes --min-severity "$MIN_SEVERITY" .
+          fi
 
   # 6) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
   trivy-image:

@@ -470,28 +470,37 @@ for name in $SHELL_FILES; do
 done
 
 # ── PROJECT_OWNED ────────────────────────────────────────────
+# zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，寫死了公版的 owner/repo。
+# 搬到組織（--uses-repo）時要跟著換，否則那條規則對不到、zizmor 會開始抱怨 @v1 沒釘 SHA。
+# 只換那一個字串，使用者自己加的規則原樣保留；既有的檔案、新建的檔案、另存的 .new 都要換 ——
+# 搬家時最常見的情況正是「專案早就導入過、zizmor.yml 已經在那裡」。
+patch_zizmor_owner() {
+  ADOPT_OLD="\"$DEFAULT_USES_REPO/*\"" ADOPT_NEW="\"$USES_REPO/*\"" awk '
+    BEGIN { old=ENVIRON["ADOPT_OLD"]; new=ENVIRON["ADOPT_NEW"] }
+    { i=index($0, old); if (i) $0 = substr($0, 1, i-1) new substr($0, i+length(old)); print }
+  ' "$1" > "$1.tmp"
+  mv "$1.tmp" "$1"
+}
 for rel in $PROJECT_OWNED; do
   src="$TPL/$rel"; dst=".github/$rel"
   [ -f "$src" ] || continue
   mkdir -p "$(dirname "$dst")"
+  migrate_zizmor=false
+  if [ "$rel" = "zizmor.yml" ] && [ "$USES_REPO" != "$DEFAULT_USES_REPO" ]; then migrate_zizmor=true; fi
   if [ -f "$dst" ]; then
-    if cmp -s "$src" "$dst"; then
+    if [ "$migrate_zizmor" = true ]; then patch_zizmor_owner "$dst"; fi
+    cp "$src" "$dst.new"
+    if [ "$migrate_zizmor" = true ]; then patch_zizmor_owner "$dst.new"; fi
+    # 跟範本（換過 owner 之後）一模一樣就不留 .new —— 否則每次重跑都會生一份沒差異的檔案
+    if cmp -s "$dst.new" "$dst"; then
+      rm -f "$dst.new"
       KEPT="$KEPT $rel(相同)"
     else
-      cp "$src" "$dst.new"
       KEPT="$KEPT $rel"
     fi
   else
     cp "$src" "$dst"
-    # zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，
-    # 寫死了公版的 owner/repo。搬到組織（--uses-repo）時要跟著換，否則那條規則對不到。
-    if [ "$rel" = "zizmor.yml" ] && [ "$USES_REPO" != "$DEFAULT_USES_REPO" ]; then
-      ADOPT_OLD="\"$DEFAULT_USES_REPO/*\"" ADOPT_NEW="\"$USES_REPO/*\"" awk '
-        BEGIN { old=ENVIRON["ADOPT_OLD"]; new=ENVIRON["ADOPT_NEW"] }
-        { i=index($0, old); if (i) $0 = substr($0, 1, i-1) new substr($0, i+length(old)); print }
-      ' "$dst" > "$dst.tmp"
-      mv "$dst.tmp" "$dst"
-    fi
+    if [ "$migrate_zizmor" = true ]; then patch_zizmor_owner "$dst"; fi
     CREATED="$CREATED $rel"
   fi
 done

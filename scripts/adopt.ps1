@@ -444,23 +444,35 @@ foreach ($n in $ShellFiles) {
   }
 }
 
+# zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，寫死了公版的 owner/repo。
+# 搬到組織（-UsesRepo）時要跟著換，否則那條規則對不到、zizmor 會開始抱怨 @v1 沒釘 SHA。
+# 只換那一個字串，使用者自己加的規則原樣保留；既有的檔案、新建的檔案、另存的 .new 都要換。
+function Update-ZizmorOwner([string]$Path) {
+  $txt = [System.IO.File]::ReadAllText($Path)
+  $txt = $txt.Replace('"singi0771/ci-standards/*"', ('"{0}/*"' -f $UsesRepo))
+  Write-TextFile $Path $txt
+}
+
 foreach ($r in $ProjectOwned) {
   $src = Join-Path $Tpl $r
   $dst = ".github\$r"
   if (-not (Test-Path -LiteralPath $src)) { continue }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+  $migrateZizmor = ($r -eq 'zizmor.yml' -and $UsesRepo -ne 'singi0771/ci-standards')
   if (Test-Path -LiteralPath $dst) {
-    if ((Get-FileHash $src).Hash -eq (Get-FileHash $dst).Hash) { $Kept += ($r + "(相同)") }
-    else { Copy-Item -LiteralPath $src -Destination ($dst + ".new") -Force; $Kept += $r }
+    if ($migrateZizmor) { Update-ZizmorOwner $dst }
+    Copy-Item -LiteralPath $src -Destination ($dst + '.new') -Force
+    if ($migrateZizmor) { Update-ZizmorOwner ($dst + '.new') }
+    # 跟範本（換過 owner 之後）一模一樣就不留 .new —— 否則每次重跑都會生一份沒差異的檔案
+    if ((Get-FileHash ($dst + '.new')).Hash -eq (Get-FileHash $dst).Hash) {
+      Remove-Item -LiteralPath ($dst + '.new') -Force
+      $Kept += ($r + "(相同)")
+    } else {
+      $Kept += $r
+    }
   } else {
     Copy-Item -LiteralPath $src -Destination $dst -Force
-    # zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，寫死了公版的
-    # owner/repo。搬到組織（-UsesRepo）時要跟著換，否則那條規則對不到。
-    if ($r -eq 'zizmor.yml' -and $UsesRepo -ne 'singi0771/ci-standards') {
-      $txt = [System.IO.File]::ReadAllText($dst)
-      $txt = $txt.Replace('"singi0771/ci-standards/*"', ('"{0}/*"' -f $UsesRepo))
-      Write-TextFile $dst $txt
-    }
+    if ($migrateZizmor) { Update-ZizmorOwner $dst }
     $Created += $r
   }
 }

@@ -22,6 +22,8 @@
   沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact。
   這是 actionlint 管不到的一整類問題。放行規則放專案的 `.github/zizmor.yml`（範本已附一份，
   放行公版刻意用的 `@v1` 與兩支 `workflow_run` 薄殼）；`zizmor-min-severity` 可調門檻。
+  `fail-on-findings: false` 時用 zizmor 的 `--no-exit-codes` 而不是 `continue-on-error`：
+  只把「有找到問題」壓成綠燈，工具本身當掉或找不到任何 workflow 照樣紅（採納 PR #32 的 Copilot 審查意見）。
 - **SBOM**（`generate-sbom`，預設 `false`）：用 Trivy 產出 CycloneDX JSON 存成 artifact `sbom-cyclonedx`。
   掃到弱點時也會照產（`!cancelled()`），那正是最需要它的時候。
 - **`semgrep-rules`** input：Semgrep 規則包可換（預設不變），要加 `p/python`、或拿掉會回傳統計的 `auto` 都在這。
@@ -64,10 +66,12 @@
 - 新專案：`ci.yml` 多寫 `run-hadolint`（有 Dockerfile 才 true），`security.yml` 多寫 `run-zizmor: true`、
   **不再傳 `python-version`**（security-reusable 從來沒有任何步驟用到它；input 保留只為相容舊呼叫端）。
 - 升級：既有專案會補上 `run-hadolint` / `run-zizmor`，你調過的其他值不動。
-- `zizmor.yml` 加入「絕不覆蓋」的專案專屬檔案清單；`--uses-repo` / `-UsesRepo` 會順手把它裡面的放行規則換成新 owner。
-- 回歸測試 43 → **53 項**；`adopt-tests.yml` 的 Windows job 多了「PowerShell 5.1 能 parse `adopt.ps1` 且 BOM 還在」
-  （1.2.3 留下的缺口，HANDOFF §3 ⑦）。
-- `adopt.sh` 與 `adopt.ps1` 的產出再次驗證 byte-identical。
+- `zizmor.yml` 加入「絕不覆蓋」的專案專屬檔案清單；`--uses-repo` / `-UsesRepo` 會把它裡面的放行規則換成新 owner ——
+  新建的、**既有的**（只換那一個字串，使用者自己加的規則原樣保留）、另存的 `.new` 都會換。
+- 回歸測試 43 → **57 項**；`adopt-tests.yml` 的 Windows job 多了兩步：「PowerShell 5.1 能 parse `adopt.ps1` 且 BOM 還在」
+  （1.2.3 留下的缺口，HANDOFF §3 ⑦），以及真的跑 `adopt.ps1` 與 `adopt.sh` 比對產出 byte-identical。
+- `adopt-tests.yml` 的「純文件就跳過」只排除 `docs/`、根目錄與 `.github/` 的 `.md`、Issue 表單、LICENSE；
+  `templates/` 底下的 `.md` 會被原樣複製到專案裡，動到它們一樣要跑測試。
 
 ### 文件
 - **全面改成台灣口語**：閉環→自動流程、去重→防重複、靜默→悄悄、排查→查問題、回滾→退回、冪等→可重複執行、

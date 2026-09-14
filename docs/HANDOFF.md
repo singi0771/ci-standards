@@ -1,7 +1,8 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-09-14　**已發佈版本 1.3.0**（發佈基準＝`v1.3.0` 指到的 commit，
-> 查法：`git rev-list -n1 'v1.3.0^{}'`；`v1` 指向同一個）
+> **最後更新**：2026-09-14　**已發佈版本：以 `git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'` 的輸出為準**
+> —— 1.3.0 的 PR（#32）合併後要**立刻**打 `v1.3.0` 並移 `v1`（§3 發佈流程），打完再把這裡跟 §2 改成「已發佈」。
+> 在那之前 `v1` 還指在 1.2.3（`6fed71b`），各專案吃的還是 1.2.3。
 > **1.3.0 是一次大整理**：多了 zizmor（workflow 安全）、hadolint、SBOM 三個可選檢查，
 > 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支 `workflow_run` 薄殼只理 PR，
 > 文件全面改成台灣口語。細節見 `CHANGELOG.md` 的 1.3.0 段。
@@ -74,16 +75,16 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v1.3.0` 指到的 commit（1.3.0，2026-09-14）。要確認 `main` 有沒有領先它請跑 `git log --oneline v1..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| 發佈基準 | ⏳ **PR #32 合併後打 `v1.3.0`**；打完之後發佈基準＝`v1.3.0` 指到的 commit。要確認 `main` 有沒有領先 `v1` 請跑 `git log --oneline v1..main -- .github/workflows templates scripts`，有輸出就代表還沒發 |
 | CHANGELOG | 已寫到 **1.3.0** |
-| `v1` tag | ✅ 與 `v1.3.0^{}` 同一個 SHA（各專案下次觸發就會吃到 1.3.0） |
-| 最新版本 tag | ✅ `v1.3.0` |
+| `v1` tag | ⏳ 合併 #32 後移到 1.3.0；移之前還在 `6fed71b`（1.2.3），各專案吃的還是 1.2.3 |
+| 最新版本 tag | ⏳ `v1.3.0` 待打（合併後）；目前最新是 `v1.2.3` |
 | 公版自己的 CI | ✅ 全綠（自己吃自己的狗糧，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | 本 repo 的 `COPILOT_TRIGGER_PAT` | ❌ **沒設**（2026-09-14 用 `gh secret list` 查證是空的）。所以本 repo 自己的 PR 上，autofix 會貼留言但 Agent 不會動工。要不要設看你 —— 公版 PR 多半是人自己改，未必需要 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 的接線約定**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 53 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
+| adopt.sh | ✅ 57 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
@@ -101,8 +102,8 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 ## 3. 待辦（依序）
 
-> **1.3.0 已發佈完成**（2026-09-14；`v1` 與 `v1.3.0^{}` 同一個 SHA，已用 `git ls-remote` 驗過）。
-> 發佈的操作步驟見本節最後的「發佈流程」，下次公版有實質變更時照那個走。
+> **1.3.0 待發佈**：PR #32 合併後照本節最後的「發佈流程」打 `v1.3.0`、移 `v1`、用 `git ls-remote` 驗，
+> 然後把本檔的 ⏳ 改成 ✅。
 >
 > **① ② ③ ⑥ ⑦ ⑧ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
 > AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
@@ -182,7 +183,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 ⚠️ 一定要用 `shell: powershell`（5.1），用 `pwsh`（7）會永遠是綠的 ——
 7 預設就吃 UTF-8，根本不會重現這個問題。**用錯 shell 等於白加。**
 
-### ~~⑧ 發佈 1.2.4~~ ✅ 併進 1.3.0 發佈（2026-09-14）
+### ~~⑧ 發佈 1.2.4~~ → 併進 1.3.0（PR #32 合併後一起打 tag）
 
 原本只是 Dependabot #27 那個 codeql-action 升版要發，結果 1.3.0 一次做完（見 CHANGELOG），
 版號直接跳 1.3.0（有新 input、有行為變更）。
@@ -210,6 +211,9 @@ git diff --stat
       違反「先讓免費掃描器擋掉明顯問題、確定值得看了才花 AI credits」的設計順序，
       而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
       只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
+      **2026-09-14 觀察：本 repo 這個還開著** —— PR #32 一開、CI 還沒跑完就被 Copilot 審了
+      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。那次的 7 條意見倒是有 4 條真的該修，
+      所以不急著關；但 Dependabot PR 也會被審這件事還是在燒 credits。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
 - [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
       Require status checks to pass，加入這**一個** context）：
@@ -427,7 +431,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬）。
 守住那條路徑的有兩個地方：**macOS 那台**（仍在服役，見下表）與 `adopt-tests.yml`
-的 `macos-latest`。**在 Windows 上 53 項全過，不代表 macOS 會過。**
+的 `macos-latest`。**在 Windows 上 57 項全過，不代表 macOS 會過。**
 
 - **公司 Windows 上的 curl 會被憑證撤銷檢查擋住**（`CRYPT_E_NO_REVOCATION_CHECK`），
   `gh` 沒事（它用 Go 自己的 TLS）。本機要用 curl 抓 release 檔或查 registry digest 時加

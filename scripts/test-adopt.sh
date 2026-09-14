@@ -291,6 +291,31 @@ has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 ow
 has ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "zizmor.yml 的放行規則也換成 ACME"
 hasnt ".github/zizmor.yml" 'singi0771' "zizmor.yml 不再留著舊的 owner"
 
+# 搬家時最常見的情況：專案早就導入過，zizmor.yml 已經在那裡、而且加過自己的規則。
+# 那一條放行規則一樣要換 owner，使用者自己加的規則不能動（採納 PR #32 的 Copilot 審查意見）。
+new_repo orgmove-existing
+mkdir -p .github
+cat > .github/zizmor.yml <<'OLD'
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "singi0771/ci-standards/*": ref-pin
+        "*": hash-pin
+  template-injection:
+    ignore:
+      - my-own-workflow.yml     # 使用者自己加的
+OLD
+"$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
+has   ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "既有 zizmor.yml 的放行規則也換成 ACME"
+has   ".github/zizmor.yml" 'my-own-workflow.yml'            "既有 zizmor.yml 裡使用者自己加的規則原樣保留"
+hasnt ".github/zizmor.yml" 'singi0771'                      "既有 zizmor.yml 不再留著舊的 owner"
+if [ -f ".github/zizmor.yml.new" ]; then
+  has ".github/zizmor.yml.new" '"ACME/ci-standards/*": ref-pin' "另存的 zizmor.yml.new 也換了 owner"
+else
+  bad "使用者改過的 zizmor.yml 應另存一份 .new 供比對"
+fi
+
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 F：巢狀結構（外層資料夾包著真正的 clone）\n'
 # ═════════════════════════════════════════════════════════════
