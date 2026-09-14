@@ -46,12 +46,18 @@ Settings → General → 最底下 Danger Zone → **Transfer ownership** → �
 搬家當下這些全部要換（`ORG` 換成你的組織名）：
 
 ```bash
-# 範本呼叫端（5 個檔案，共 9 處）
+# 範本呼叫端
 templates/consumer-repo/.github/workflows/ci.yml                      # 註解 + uses:
 templates/consumer-repo/.github/workflows/security.yml                # 註解 + uses:
 templates/consumer-repo/.github/workflows/copilot-autofix-ci-security.yml
 templates/consumer-repo/.github/workflows/copilot-autofix-review.yml
 templates/consumer-repo/.github/workflows/copilot-autoreview-gate.yml
+templates/consumer-repo/.github/zizmor.yml        # unpinned-uses 的放行規則
+.github/zizmor.yml                                # 本 repo 自己的那份
+
+# 導入腳本裡的預設值
+scripts/adopt.sh                                  # STD_REPO_URL、DEFAULT_USES_REPO
+scripts/adopt.ps1                                 # $StdRepoUrl、-UsesRepo 預設值、zizmor.yml 的替換字串
 
 # 文件裡的範例
 README.md                     # 導入步驟與範例中的 uses:
@@ -65,12 +71,13 @@ grep -rl 'singi0771/ci-standards' . --exclude-dir=.git \
   | xargs sed -i 's|singi0771/ci-standards|ORG/ci-standards|g'
 ```
 
-改完**一定要跑 actionlint 驗一次**（本 repo 的 CI 會連 `templates/` 一起檢查）：
+改完**一定要跑 actionlint 與 zizmor 驗一次**（本 repo 的 CI 會連 `templates/` 一起檢查）：
 
 ```bash
-docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
-docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color \
-  'templates/consumer-repo/.github/workflows/*.yml'
+actionlint -color
+actionlint -color 'templates/consumer-repo/.github/workflows/*.yml'
+zizmor .
+bash scripts/test-adopt.sh
 ```
 
 ### 3. 換掉個人帳號的痕跡
@@ -109,7 +116,9 @@ REQUIRED_APPROVALS=1 ./scripts/setup-branch-protection.sh ORG/ci-standards
 +    uses: ORG/ci-standards/.github/workflows/ci-reusable.yml@v1
 ```
 
-（`security.yml` 與三支 `copilot-auto*` 同理。）
+（`security.yml` 與三支 `copilot-auto*` 同理；`.github/zizmor.yml` 裡的放行規則也要換 owner，
+不然 zizmor 會開始抱怨 `@v1` 沒釘 SHA。）
+最省事的做法是用導入腳本一次換完：`adopt.sh --uses-repo ORG/ci-standards`。
 
 > **順序很重要**：先確認新路徑的 `@v1` 真的解析得到（拿一個 repo 試一次），再通知其他人改。
 > 全部改完之前**不要**刪掉或改名舊 repo。

@@ -4,23 +4,106 @@
 一次改動會同時影響所有專案，所以每次發佈都必須記在這裡。
 
 版本規則見 [README — 版本策略](README.md#版本策略)。每次發佈打兩個 tag：
-不可變的 `vX.Y.Z`（回滾點）+ 會移動的 `vX`（大家指向的別名）。
+不可變的 `vX.Y.Z`（退回點）+ 會移動的 `vX`（大家指向的別名）。
 
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
 
 ---
 
-## [未發佈]
+## [1.3.0] — 2026-09-14
+
+**一次大整理：多三個可選的安全檢查、下載的工具全部釘校驗碼、CI 少開 job、文件改成台灣口語。**
+對既有呼叫端**完全相容**：新 input 都有預設值、`ci / CI Gate` 與 `security / Security Gate` 名稱不變。
+但有幾個行為變更（見「相容性」），而且薄殼與新參數要**重跑一次 `adopt.sh`** 才會進到你的專案。
+
+### 新增 —— 安全檢查（security-reusable）
+- **zizmor**（`run-zizmor`，預設 `false`，範本與 adopt 預設打開）：檢查 `.github/workflows` 本身的安全 ——
+  把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、
+  沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact。
+  這是 actionlint 管不到的一整類問題。放行規則放專案的 `.github/zizmor.yml`（範本已附一份，
+  放行公版刻意用的 `@v1` 與兩支 `workflow_run` 薄殼）；`zizmor-min-severity` 可調門檻。
+- **SBOM**（`generate-sbom`，預設 `false`）：用 Trivy 產出 CycloneDX JSON 存成 artifact `sbom-cyclonedx`。
+  掃到弱點時也會照產（`!cancelled()`），那正是最需要它的時候。
+- **`semgrep-rules`** input：Semgrep 規則包可換（預設不變），要加 `p/python`、或拿掉會回傳統計的 `auto` 都在這。
+- **`trivy-scanners`** input：Trivy 檔案系統掃描要開哪些（`vuln` / `misconfig` / `secret` / `license`）。
+
+### 新增 —— CI（ci-reusable）
+- **hadolint**（`run-hadolint`，預設 `false`，adopt 偵測到 Dockerfile 就打開）：build 之前先檢查 Dockerfile 寫法。
+  放在 Docker build 那個 job 裡當一個步驟，**不多付一分鐘**；warning 以上才算失敗，`.hadolint.yaml` 可忽略規則。
+
+### 變更 —— 供應鏈
+- 直接下載的執行檔（OSV-Scanner、actionlint、zizmor、hadolint）全部**釘版本 + sha256**，
+  `curl --fail` → `sha256sum -c` → `--version` 三關都過才用。
+- Semgrep 與 gitleaks 的 container image 改釘 **tag + digest**（`@sha256:…`）。只釘 tag 的話上游重推同一個 tag 你不會知道。
+- 所有 `actions/checkout` 加 `persist-credentials: false`（沒有任何 job 需要 push；zizmor `artipacked`）。
+- 呼叫端（本 repo 的與範本的）都加 workflow 層 `permissions: contents: read`（zizmor `excessive-permissions`）。
+- 範本的 `copilot-setup-steps.yml` 從 checkout v4 / setup-python v5 升到 v7.0.1 / v7.0.0。
+- 這些人工釘死的版本 Dependabot 不會動，升版步驟寫在 `CONTRIBUTING.md` §6。
+
+### 變更 —— 省 Actions 分鐘（每個 job 不滿一分鐘也算一分鐘）
+- **actionlint 與 shellcheck 合成一個 job**「Workflow + shell lint (actionlint, shellcheck)」。
+  兩個加起來不到 30 秒，拆兩個 job 白付一分鐘。CI Gate 的判定跟著改（兩個 input 任一為 true 就必須 success）。
+  這兩個 job 名稱**不是** required check，改名不影響任何 ruleset。
+- **actionlint 改抓執行檔**（2 MB），不再拉 docker image（每次省 20–40 秒）；shellcheck 用 runner 內建的。
+- Python job 不再 `pip install --upgrade pip`。
+- **兩支 `workflow_run` 薄殼（autofix-ci-security、autoreview-gate）只理「PR 觸發」的 run**
+  （`github.event.workflow_run.event == 'pull_request'`）。以前推到 main 或每週排程完成也會起 job，
+  進去發現沒 PR 再跳過 —— 每次合併白付 2 分鐘。**這是薄殼 `if:` 的變更，要重跑 `adopt.sh` 才會換上。**
+- **草稿 PR 整個跳過**（範本呼叫端）：`pull_request.types` 多列 `ready_for_review`，job 加
+  `if: !github.event.pull_request.draft`。草稿本來就不能 merge，沒有安全上的損失。
+  升級模式不動 `on:`，既有專案要的話照範本手動改。
+- **Trivy 預設不再掃 secret**（`trivy-scanners` 預設 `vuln,misconfig`）：gitleaks 已連 git 歷史一起掃過，
+  再掃一次工作區是重複的。要的話自己加回 `secret`。
+- **Dependabot 範本**：docker 與 github-actions 改**每月**，pip 維持每週（小版本併一個 PR）。
+  每個 Dependabot PR 都會跑整套 CI + Security，少開 PR 就少跑。本 repo 自己的也改每月。
+- 各 job 的 `timeout-minutes` 收緊（gate 3、小工具 5、Semgrep / Trivy 10），跑不完就砍，不會吊著燒分鐘。
+- **本 repo 的 adopt 三平台測試**多了一個便宜的前哨 job：只動文件的 PR 整個跳過 matrix
+  （macOS runner 算 10 倍分鐘），並新增 `adopt regression gate` 當唯一該設成 required 的 check。
+
+### 變更 —— 導入腳本（adopt.sh / adopt.ps1 / test-adopt.sh）
+- 新專案：`ci.yml` 多寫 `run-hadolint`（有 Dockerfile 才 true），`security.yml` 多寫 `run-zizmor: true`、
+  **不再傳 `python-version`**（security-reusable 從來沒有任何步驟用到它；input 保留只為相容舊呼叫端）。
+- 升級：既有專案會補上 `run-hadolint` / `run-zizmor`，你調過的其他值不動。
+- `zizmor.yml` 加入「絕不覆蓋」的專案專屬檔案清單；`--uses-repo` / `-UsesRepo` 會順手把它裡面的放行規則換成新 owner。
+- 回歸測試 43 → **53 項**；`adopt-tests.yml` 的 Windows job 多了「PowerShell 5.1 能 parse `adopt.ps1` 且 BOM 還在」
+  （1.2.3 留下的缺口，HANDOFF §3 ⑦）。
+- `adopt.sh` 與 `adopt.ps1` 的產出再次驗證 byte-identical。
+
+### 文件
+- **全面改成台灣口語**：閉環→自動流程、去重→防重複、靜默→悄悄、排查→查問題、回滾→退回、冪等→可重複執行、
+  契約→接線約定、旋鈕→設定、收斂→停下來、升級人工→轉交人工、坑→雷…，以及 dogfooding、canary、marker
+  這類直接用英文的地方補上白話。
+- README 重寫：開頭加「白話版三句話」、每個掃描器「抓什麼 / 抓不到什麼」的表、新的
+  「省 Actions 分鐘」一節、疑難排解補上 zizmor 常見紅燈與校驗碼對不上的處理。
+- `docs/DEVSECOPS-NOTES.md` 重寫成「工具怎麼選」：公版裡每一套為什麼是它、以及 Bandit / pip-audit /
+  Checkov / TruffleHog / CodeQL / SonarQube / ZAP / Scorecard / Syft / Dockle / cosign 逐一說明為什麼沒放。
+- 修正一個說了很久但不準的說法：有 `if` 條件的 job 被跳過時，GitHub **不一定**是「永遠 pending」，
+  也可能被當成通過（等於沒檢查）。兩種都不是你要的，結論不變：只把 Gate 設成 required。
+- `docs/HANDOFF.md` 同步：1.3.0 已發佈、⑦ ⑧ 完成、④ 改成加 `adopt regression gate`、新增 ⑨（AdminAutoTools 重跑 adopt）、
+  記下「本 repo 沒設 `COPILOT_TRIGGER_PAT`」與「公司 Windows 的 curl 要 `--ssl-no-revoke`」。
+
+### 相容性 —— 既有專案要注意的
+- 對既有呼叫端**完全相容**：新 input 都有預設值，job id 與兩個 Gate 名稱不變，reusable 新版移了 `v1` 就生效。
+- 行為變更（移 `v1` 就吃到）：Trivy 預設不掃 secret；CI 的兩個 lint job 合併成一個（Summary 表少一列）。
+- 要吃到的話得重跑 `adopt.sh`：薄殼只理 PR 觸發的 run、`zizmor.yml`、`run-hadolint` / `run-zizmor`。
+- 要手動改 `on:` 才有：草稿 PR 跳過、Dependabot 每月。
+- 已知仍存在的人工關卡不變：Copilot 推的 commit 觸發的 run 要人按一次「Approve and run workflows」。
+
+### 相依更新（自 1.2.3 以來）
+- `security-reusable.yml`：`github/codeql-action/upload-sarif` 4.37.4 → 4.37.7（Dependabot #27，2026-09-05 合併）。
+  只影響 `upload-sarif: true` 那條路徑，預設關閉且仍列在已知限制。
+
+### 1.2.3 之後、1.3.0 之前累積的文件變更（原「未發佈」段）
 
 ### 新增
 - `docs/HANDOFF.md` —— 交接文件：現況快照、待辦（依序，含驗收標準）、
-  踩過的坑、以及「雲端 session 做得到／做不到」對照表。
+  踩過的雷、以及「雲端 session 做得到／做不到」對照表。
   換人或換機器接手時先讀這份，不必從 CHANGELOG 重新推導。
   這是一份**活的**文件，做完一段工作就更新。
 
 ### 變更
 - `docs/HANDOFF.md` 同步 1.2.2：更新現況快照（`main`、`v1`、adopt.sh 的驗證狀態），
-  並把「43 項全過只證明它在測試那台機器上會過」寫進「踩過的坑」——
+  並把「43 項全過只證明它在測試那台機器上會過」寫進「踩過的雷」——
   含 bash 3.2 會把**全形標點的首位元組併進變數名**（`$STD（` → 變數 `STD\xef`）、
   BSD awk 不接受 `-v` 帶換行這兩個具體地雷。
   §6 的對照表也更正：雲端只跑得到 Linux 那條。
@@ -65,26 +148,18 @@
 
 - `docs/HANDOFF.md`：開發機 2026-08-13 從 macOS 移轉到 Windows，§4「環境與路徑」
   整節改寫（舊的 `/Users/kimi/...` 與 `$CODE_WORK` 全部作廢），§6 對照表更新為
-  「本機 = Windows」。同時記下移轉本身踩到的兩個坑：`core.filemode` 要設 `false`
+  「本機 = Windows」。同時記下移轉本身踩到的兩個雷：`core.filemode` 要設 `false`
   （否則在 Windows commit 會剝掉 `.sh` 的執行權限），以及用 robocopy 搬
   使用中的 git repo 會搬出「工作區混著多個 commit」的拼裝品。
 
   ⚠️ 連帶影響：**本機不再測得到 macOS 那條路徑**（以前開發機就是 Mac，
-  等於天然有覆蓋），現在只剩 CI 的 `macos-latest` 在守。
+  等於天然有涵蓋），現在只剩 CI 的 `macos-latest` 在守。
 
 - `docs/HANDOFF.md` §2／§3：待辦 ①②（AdminAutoTools 重跑 adopt、設
   `COPILOT_TRIGGER_PAT`）經查證**其實都已完成**，改標為完成並附驗證指令；
   ③（驗 `adopt.ps1`）因為開發機變成 Windows 而**從封鎖變成可執行**，升為現在的重點。
   新增待辦 ⑥：AdminAutoTools 的三支 copilot 薄殼釘的是 `@main` 而不是 `@v1`，
   等於繞過發佈閘門，要改回來。
-
-### 相依更新
-- `security-reusable.yml`：`github/codeql-action/upload-sarif` 4.37.4 → 4.37.7
-  （Dependabot #27，2026-09-05 合併）。只影響 `upload-sarif: true` 那條路徑，
-  而那條路徑預設關閉、且仍列在已知限制；其餘掃描行為不變。
-
-  ⚠️ 但這是 1.2.3 之後 `main` 上**第一個動到 reusable 的 commit** ——
-  `main` 與 `v1` 不再只差文件，下次發佈要記得移 `v1`（見 `docs/HANDOFF.md` §3 ⑧）。
 
 ### 文件
 - 新增 `docs/openspec-dev-standards-report-2026-08-29.md`：跨 16 個專案的開發規範
@@ -215,7 +290,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 `adopt.sh` 才會真正拿到 1.2.0 的自動修迴圈**（1.2.0 那版的升級路徑補不進去）。
 
 ### 修正
-- **`scripts/adopt.sh` / `adopt.ps1`：升級模式漏掉 1.2.0 的契約變更。**
+- **`scripts/adopt.sh` / `adopt.ps1`：升級模式漏掉 1.2.0 的接線約定變更。**
   原本五支呼叫端一律走「就地合併」，而就地合併只碰 `with:` 區塊。
   1.2.0 真正改的是三支 `copilot-*` 薄殼的 `if:` 條件與 `secrets:` 區塊
   （多收 Copilot 的 `COMMENTED` review、把 `COPILOT_TRIGGER_PAT` 傳進公版），
@@ -225,14 +300,14 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
   改成**檔案分三類**：
   - `ci.yml` / `security.yml`（真的帶專案設定）→ 維持就地合併
-  - 三支 `copilot-*` 薄殼（`if:`/`with:` 接線/`secrets:` 都是公版契約）→ **整份換成新範本**，
-    只把使用者自己打開過的旋鈕（`max-attempts`、`max-review-requests`）搬回來，
-    舊檔留成 `.bak`；內容沒變就不留，維持冪等
+  - 三支 `copilot-*` 薄殼（`if:`/`with:` 接線/`secrets:` 都是公版的接線約定）→ **整份換成新範本**，
+    只把使用者自己打開過的設定（`max-attempts`、`max-review-requests`）搬回來，
+    舊檔留成 `.bak`；內容沒變就不留，維持可重複執行
   - 專案專屬的四個檔 → 維持絕不覆蓋
 
-  「哪些旋鈕該搬」不寫死：判準是「舊檔有設、而新範本沒設」，且公版 reusable
-  仍認得該 input（不認得的照樣移除並回報）。原本的契約檢查改成收尾用的
-  post-condition —— 會叫就代表 `--std` 指到的公版比 1.2.0 舊。
+  「哪些設定該搬」不寫死：判準是「舊檔有設、而新範本沒設」，且公版 reusable
+  仍認得該 input（不認得的照樣移除並回報）。原本的接線檢查改成收尾用的
+  最後再驗一次的檢查 —— 會叫就代表 `--std` 指到的公版比 1.2.0 舊。
 
   回歸測試新增 15 項（`scripts/test-adopt.sh` 情境 B），模擬停在 1.2.0 之前、
   且調過 `max-attempts` 的 consumer（AdminAutoTools 就是這個狀態）。
@@ -243,7 +318,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
   **PowerShell 當初啟動的目錄**。用 `-Target` 指向別的專案時，`.github\...`
   會落在錯的地方。補上 `[System.IO.Directory]::SetCurrentDirectory()`。
 
-- `docs/KNOWN-LIMITATIONS.md` 的 `action_required` 一節有**兩份重複的排查步驟**，
+- `docs/KNOWN-LIMITATIONS.md` 的 `action_required` 一節有**兩份重複的查問題的步驟**，
   而且都指向 fork PR 的核准設定 —— 那條路已知無效（Copilot 推的是同 repo 分支不是 fork；
   `POST /actions/runs/{id}/approve` 對這些 run 回 403，而該 API 只服務 fork PR）。
   改寫成「這是 GitHub 對 coding agent 的安全設計，沒有開關可調」，並保留那兩個佐證，
@@ -275,26 +350,26 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 2. **mention 無效**：`@copilot` 留言由 `github-actions[bot]`（`GITHUB_TOKEN`）發出，
    coding agent 會忽略 bot 的 mention（GitHub 防 bot 迴圈機制）→ 就算觸發了也叫不動 Agent。
 
-### 新增 —— Copilot 迴圈開通（ci-standards PR #12）
+### 新增 —— Copilot 迴圈打通（ci-standards PR #12）
 
 - `copilot-autofix-review-reusable.yml`：
   - 新增 `review-id` / `review-state` 輸入：COMMENTED review 先確認**真的有 inline 意見**
     才動作（Copilot「審完沒問題」也是送 COMMENTED，0 則意見即跳過，不吃 attempt 次數）；
-    `review-state=commented` 但缺 `review-id` 時 fail-closed 直接跳過。
+    `review-state=commented` 但缺 `review-id` 時 直接跳過（寧可擋下也不放行）。
   - 新增 `copilot-trigger-pat` secret：`@copilot` mention 改由**有 Copilot 授權的使用者 PAT**
-    發出；未設定時退回 bot token 並發 `::warning::`（留言照貼保留記帳，但 Agent 不會動工）。
+    發出；未設定時退回 bot token 並發 `::warning::`（留言照貼保留計數，但 Agent 不會動工）。
 - `copilot-autofix-reusable.yml`（CI/Security 失敗那條）：同樣新增 `copilot-trigger-pat`
   secret 與未設定警告 —— 這條的 mention 過去同樣是 bot 發的、同樣無效。
-- `copilot-autoreview-reusable.yml`：步驟 5 移除無效的 `@copilot` mention，改為純去重
+- `copilot-autoreview-reusable.yml`：步驟 5 移除無效的 `@copilot` mention，改為純防重複
   標記＋狀態說明（「請審」走 API 本來就有效；「修」的職責交給 autofix-review 那條路）。
 - consumer 範本 `copilot-autofix-review.yml` / `copilot-autofix-ci-security.yml`：
   觸發條件與 `secrets:` 傳遞同步更新（見下方相容性）。
 - **觸發條件資安強化**（採納 PR #14 的 Copilot 審查意見）：真人 `changes_requested`
   限定信任身分（OWNER/MEMBER/COLLABORATOR）——公開 repo 上陌生帳號的 review
   不得驅動 agent 執行其指示；Copilot login 改精確比對（`contains` 可被相似帳號名繞過）。
-- 本 repo **自用薄殼**同步至新契約（dogfooding：1.2.0 起 ci-standards 自己的 PR
+- 本 repo **自用薄殼**同步至新約定（自己吃自己的狗糧：1.2.0 起 ci-standards 自己的 PR
   也走完整迴圈；需在本 repo secrets 設 `COPILOT_TRIGGER_PAT`）。
-- `adopt` 契約檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
+- `adopt` 接線檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
   仍會被警告，避免「半升級」被誤判為相容。
 - README 新增 **`COPILOT_TRIGGER_PAT` 設定步驟**（fine-grained PAT，
   Issues:write + Pull requests:write，範圍限單一 repo）。
@@ -329,7 +404,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
   `copilot-instructions.md` / `copilot-setup-steps.yml` / `pull_request_template.md` /
   `dependabot.yml` 含專案專屬內容，**已存在時絕不覆蓋**，只另存一份 `.new` 供比對。
-- `scripts/test-adopt.sh` —— 回歸測試，涵蓋全新導入、升級舊版、冪等、
+- `scripts/test-adopt.sh` —— 回歸測試，涵蓋全新導入、升級舊版、可重複執行、
   `--dry-run`、`--uses-repo` 五個情境共 26 項檢查。
 - `adopt.sh` / `adopt.ps1` 新增 `--uses-repo` / `-UsesRepo` —— 搬到組織時
   一併換掉 `uses:` 的 `owner/repo`，不用另外 sed。
@@ -354,7 +429,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - **要啟用迴圈，既有專案必須做兩件事**：
   1. 在 repo secrets 加 `COPILOT_TRIGGER_PAT`（設定步驟見 README）。
   2. **重新複製** `copilot-autofix-review.yml` 與 `copilot-autofix-ci-security.yml`
-     兩支薄殼 —— 這是罕見的**薄殼契約變更**（`if:` 觸發條件 + `secrets:` 區塊），
+     兩支薄殼 —— 這是罕見的**薄殼接線變更**（`if:` 觸發條件 + `secrets:` 區塊），
      `adopt` 的升級模式只同步 `uses:` 與 `with:`，**不會**更新這兩個部分
      （腳本偵測到缺 `secrets:` 時會提醒）。
 - 已知仍存在的人工關卡（GitHub 硬規定）：Copilot 推的 commit 觸發的 workflow run
@@ -366,7 +441,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 ## [1.1.0] — 2026-08-06
 
 **這一版把 `v1` 從 2026-07-25 的初版一路推到現在**，中間累積了三種會讓 PR 永久卡死的死鎖、
-一個會讓相依弱點掃描靜默失效的漏洞，以及 Copilot 自動化迴圈的收斂機制。
+一個會讓相依弱點掃描悄悄失效的漏洞，以及 Copilot 自動化迴圈的停止條件。
 `v1` 長期停在 1.0.0 期間，任何照文件導入的專案拿到的都是含上述問題的舊版。
 
 ### 新增 —— 公版能力
@@ -374,7 +449,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - `ci-reusable.yml` 新增 `run-python`、`run-actionlint`、`actionlint-paths`、
   `run-shellcheck`、`shellcheck-paths`。**非 Python 專案現在可以直接用公版**
   （`run-python: false`），不必自己另寫一支 CI，也就不會失去 `ci / CI Gate` 這個統一的 check 名稱。
-- 本 repo 自己套用公版（dogfooding）：`.github/workflows/` 下的 `ci.yml`、`security.yml`
+- 本 repo 自己套用公版（自己吃自己的狗糧）：`.github/workflows/` 下的 `ci.yml`、`security.yml`
   與三支 `copilot-auto*` 薄殼，全部用 `./` 呼叫自己的 reusable ——
   改壞公版時當場就會紅，不會等到別人的專案才爆。
 - `.github/copilot-instructions.md`、`.github/dependabot.yml`。
@@ -398,11 +473,11 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
   呼叫端 `pull_request` 的 `paths-ignore` 會擋掉純文件 PR、required approvals 設 1 但沒人能 approve。
 - **掃描失敗不再被當成通過**：OSV-Scanner 下載改用 `curl --fail` 並先驗 `--version`；
   非 0/1/128 的 exit code 一律視為掃描失敗而擋下（舊版把 127 當良性 warning 放行，
-  等於**相依弱點掃描靜默失效卻依然綠燈**）。
+  等於**相依弱點掃描悄悄失效卻依然綠燈**）。
 - **掃描器釘死版本**：`semgrep/semgrep:1.171.0`、`ghcr.io/gitleaks/gitleaks:v8.30.1`、
   `rhysd/actionlint:1.7.12`。不釘的話上游新增規則會讓沒改碼的 repo 突然變紅，也是供應鏈風險。
-- **Copilot 自動化迴圈收斂**：autoreview 加上次數上限與同 SHA 去重、autofix 加上 15 分鐘 cooldown
-  與「升級後閉嘴」marker、補上貼 label 缺少的 `issues: write`（少了會靜默 403）。
+- **Copilot 自動化迴圈有了停止條件**：autoreview 加上次數上限與同一個 SHA 不重複、autofix 加上 15 分鐘 cooldown
+  與「轉交人工後就不再留言」marker、補上貼 label 缺少的 `issues: write`（少了會悄悄 403）。
 - 所有 action 改為釘 commit SHA；`copilot-autofix-review-reusable.yml` 的
   `${{ github.repository }}` 改走 `env:`，不再直接插進 `run:` 字串。
 - Dependabot `cooldown` 只保留 `default-days`（`semver-major-days` 會讓 github-actions
@@ -419,9 +494,9 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 ### 文件
 
 - `docs/KNOWN-LIMITATIONS.md` —— **導入前必看**。實測過但還不能用的功能，
-  每條附「怎麼測的 + 結果 + 逐步排查」。這些結論原本只存在於已關閉 PR 的留言裡。
+  每條附「怎麼測的 + 結果 + 逐步查問題」。這些結論原本只存在於已關閉 PR 的留言裡。
 
-  實測摘要：Gate 擋門、cooldown 去重、autoreview 去重全部正常；Copilot Code Review 正常；
+  實測摘要：Gate 擋門、cooldown 防重複、autoreview 防重複全部正常；Copilot Code Review 正常；
   **Copilot Coding Agent 指派 Issue 可用**（會立刻開 PR），但
   ① Actions 貼的 `@copilot` 喚不醒它（GitHub 對 bot 觸發 bot 的防迴圈限制）、
   ② **Copilot 開的 PR，其 CI/Security run 全部卡在 `action_required`**
@@ -432,8 +507,8 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - README 參數表補上遺漏的 5 個 `ci-reusable` input —— 這些 input 早就存在，
   但文件沒寫，等於功能沒人知道。
 - README「專案不是 Python」改寫；運作原理圖補上 actionlint / shellcheck；
-  檔案地圖補上 dogfooding workflow；版本策略改為雙 tag。
-- `docs/DEVSECOPS-NOTES.md` 的釘版本說明與實作對齊（實際用 commit SHA 與直接下載 binary）。
+  檔案地圖補上 自己用的 workflow；版本策略改為雙 tag。
+- `docs/DEVSECOPS-NOTES.md` 的釘版本說明與實作對應（實際用 commit SHA 與直接下載 binary）。
 
 ### consumer 範本
 
@@ -456,6 +531,6 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
 初版。`v1` tag 長期停在這裡。
 
-⚠️ **不要使用這一版**：含 1.1.0 修掉的三種死鎖與掃描靜默失效問題，
+⚠️ **不要使用這一版**：含 1.1.0 修掉的三種死鎖與掃描悄悄失效問題，
 且 `ci-reusable.yml` 只有 3 個 input，寫 `run-python: false` 會直接 invalid input 啟動失敗。
-留著只作為回滾點。
+留著只作為退回點。

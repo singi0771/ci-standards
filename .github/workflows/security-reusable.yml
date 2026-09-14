@@ -1,74 +1,100 @@
-# ┌─────────────────────────────────────────────────────────────────┐
-# │  中央「公版」安全掃描 Reusable Workflow（DevSecOps / Shift-left）    │
-# │  各專案用一行 uses: 呼叫。全部免費開源工具。                          │
-# │  預設「job 成敗當守門員 + artifact」，私有 repo 無需 GHAS 也能跑；     │
-# │  若該 repo 有 GHAS 或為 public，可用 upload-sarif=true 把結果寫進     │
-# │  Security 分頁（code scanning）。                                    │
-# └─────────────────────────────────────────────────────────────────┘
+# ┌────────────────────────────────────────────────────────────────────┐
+# │  中央公版：安全掃描 Reusable Workflow                                  │
+# │  各專案用一行 uses: 呼叫。全部是免費的開源工具。                         │
+# │  預設「掃到問題就讓 job 失敗 + 報告存成 artifact」，                     │
+# │  私有 repo 不需要 GitHub Advanced Security（GHAS）也能跑；               │
+# │  public repo 或有 GHAS 的 repo 可用 upload-sarif=true 把結果寫進         │
+# │  Security 分頁（code scanning）。                                      │
+# └────────────────────────────────────────────────────────────────────┘
 name: Reusable Security Scan
 
 on:
   workflow_call:
     inputs:
       python-version:
-        description: "掃描環境用的 Python 版本"
+        description: "目前沒有任何掃描步驟用到。保留只是為了讓還在傳這個參數的舊呼叫端不會因 invalid input 起不來"
         type: string
         default: "3.12"
       severity:
-        description: "要擋下的嚴重度（Trivy / 影像掃描）"
+        description: "Trivy（檔案系統 / image）要擋下的嚴重度，逗號隔開"
         type: string
         default: "CRITICAL,HIGH"
       fail-on-findings:
-        description: "掃到問題時是否讓 CI 失敗（true=守門員 / false=只回報）"
+        description: "掃到問題時是否讓 CI 失敗（true=擋下 / false=只回報，導入初期過渡用）"
         type: boolean
         default: true
       scan-docker-image:
-        description: "若專案有 Dockerfile，是否 build 出 image 再掃描其弱點"
+        description: "專案有 Dockerfile 時，是否 build 出 image 再掃它的弱點（會多花 2–3 分鐘）"
         type: boolean
         default: false
       upload-sarif:
-        description: "是否把結果上傳到 Security 分頁（僅 public repo 或有 GHAS 的 private repo 適用）"
+        description: "是否把 Semgrep 結果上傳到 Security 分頁（只有 public repo 或有 GHAS 的 private repo 能用）"
         type: boolean
         default: false
+      semgrep-rules:
+        description: "Semgrep 要載入的規則包，用空白隔開。auto 會依專案語言自動挑規則（需要連 Semgrep 規則庫，且會回傳匿名使用統計；不想要就把 auto 拿掉）"
+        type: string
+        default: "p/owasp-top-ten p/security-audit p/secrets auto"
+      trivy-scanners:
+        description: "Trivy 檔案系統掃描要開的掃描器，逗號隔開，可選 vuln / misconfig / secret / license。預設不含 secret，因為 gitleaks 已經連 git 歷史一起掃過了"
+        type: string
+        default: "vuln,misconfig"
+      generate-sbom:
+        description: "是否用 Trivy 產出 SBOM（CycloneDX JSON）存成 artifact，供應鏈查核或客戶要求時用"
+        type: boolean
+        default: false
+      run-zizmor:
+        description: "是否用 zizmor 檢查 .github/workflows 本身的安全問題（腳本注入、權限過大、沒釘版本的 action、危險的觸發器…）"
+        type: boolean
+        default: false
+      zizmor-min-severity:
+        description: "zizmor 只回報這個等級以上的問題：low / medium / high"
+        type: string
+        default: "low"
 
 permissions:
   contents: read
   # 預設「不」要求 security-events: write，這樣 upload-sarif=false（預設）在任何 repo
-  # （含 token 為唯讀的 private repo）都能正常啟動。
-  # 若要 upload-sarif=true（public 或有 GHAS 的 repo），呼叫端的 job 需自行加上：
+  # （含 token 只有唯讀的 private repo）都能正常啟動。
+  # 要用 upload-sarif=true（public 或有 GHAS 的 repo）時，呼叫端的 job 要自己加上：
   #   permissions:
   #     contents: read
   #     security-events: write
-  # 且該 repo 的 Actions workflow 權限要允許寫入 security-events。
+  # 而且該 repo 的 Actions workflow 權限要允許寫 security-events。
 
 jobs:
-  # 1) SAST 靜態程式碼弱點（免費取代私有 repo 的 CodeQL）
+  # 1) SAST：靜態掃程式碼裡的弱點（私有 repo 用不了 CodeQL 時的免費替代）
   semgrep:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     container:
-      # 釘版本：不釘（＝latest）等於每次跑都可能吃到新規則，讓沒改碼的 repo 突然變紅，
-      # 也是供應鏈風險。要升級規則就在這裡改一版、統一生效。
-      image: semgrep/semgrep:1.171.0
+      # 版本 + digest 都釘死。不釘（= latest）等於每次跑都可能吃到新規則，
+      # 讓沒改程式的 repo 突然變紅，也是供應鏈風險。要升級就在這裡改一版、所有專案一起生效。
+      # digest 查法：docker buildx imagetools inspect semgrep/semgrep:<版本> | head -3
+      image: semgrep/semgrep:1.171.0@sha256:bdf7013b2c3634a487671158da77c554f531742326b543a9464d2adf6c433ac8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Semgrep scan (OWASP Top 10 + security-audit + auto)
+        with:
+          # 這個 job 不需要推東西回 repo，不要把 token 留在磁碟上（zizmor: artipacked）
+          persist-credentials: false
+      - name: Semgrep scan
         continue-on-error: ${{ inputs.fail-on-findings == false }}
+        env:
+          SEMGREP_RULES: ${{ inputs.semgrep-rules }}
         run: |
-          semgrep scan \
-            --config p/owasp-top-ten \
-            --config p/security-audit \
-            --config p/secrets \
-            --config auto \
-            --error --sarif --output=semgrep.sarif
+          # 把「空白隔開的規則包」組成多個 --config 參數；input 先過 env 再進 shell
+          set --
+          for r in $SEMGREP_RULES; do set -- "$@" --config "$r"; done
+          echo "規則包：$SEMGREP_RULES"
+          semgrep scan "$@" --error --sarif --output=semgrep.sarif
       - name: Upload SARIF to Security tab
         # always() 是刻意的：semgrep 用 --error，掃到問題時「這一步就是 failed」。
         # 拿掉它的話後續步驟會被 GitHub 跳過 —— 變成「只有什麼都沒掃到才上傳報告」，
         # 最需要報告的時候反而不傳。（2026-08-09 PR #15 一度改錯成這樣。）
         #
-        # hashFiles 才是原本 review 想解的問題：semgrep 若在寫出 SARIF 前就崩潰，
-        # 這裡安靜跳過，而不是讓 upload 找不到檔案而讓整個 job 變紅。
+        # hashFiles 才是原本 review 想解的問題：semgrep 若在寫出 SARIF 前就當掉，
+        # 這裡安靜跳過，而不是讓 upload 找不到檔案害整個 job 變紅。
         # 下面的 artifact 步驟用 if-no-files-found: ignore 達成同一件事。
         if: ${{ always() && inputs.upload-sarif && hashFiles('semgrep.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
@@ -83,20 +109,27 @@ jobs:
           path: semgrep.sarif
           if-no-files-found: ignore
 
-  # 2) 相依套件弱點（比對 OSV 弱點資料庫）
+  # 2) 相依套件的已知弱點（比對 OSV 弱點資料庫）
   osv-scanner:
     name: Dependency vuln (OSV-Scanner)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install OSV-Scanner
         run: |
           # --fail 很重要：沒有它，GitHub 回 404/5xx 時 curl 會把錯誤頁面存成「執行檔」，
-          # 後面執行失敗又被當成良性 warning 放行 → 相依弱點掃描靜默失效、Gate 照樣綠燈。
-          curl --fail -sSL -o /usr/local/bin/osv-scanner \
-            "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64"
-          chmod +x /usr/local/bin/osv-scanner
+          # 後面執行失敗又被當成無害的 warning 放行 → 相依弱點掃描其實沒跑、Gate 卻照樣綠燈。
+          # sha256 也要對：release 的 tag 可以被移動，校驗碼才是真正「釘死」的那一道。
+          # 升版時一起換：https://github.com/google/osv-scanner/releases/download/<版本>/osv-scanner_SHA256SUMS
+          VERSION="2.3.8"
+          SHA256="bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
+          curl --fail -sSL -o osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v${VERSION}/osv-scanner_linux_amd64"
+          echo "${SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner && sudo mv osv-scanner /usr/local/bin/osv-scanner
           # 再驗一次真的是可執行的 osv-scanner，才往下跑
           osv-scanner --version
       - name: Run OSV-Scanner
@@ -108,17 +141,16 @@ jobs:
           EXIT=$?
           set -e
           echo "$OUT"
-          # deps.dev 端故障（rpc Internal）時，manifest 的間接依賴解析會失敗，
+          # deps.dev 那邊故障（rpc Internal）時，manifest 的間接相依解析會失敗，
           # osv-scanner 即使實際弱點為 0 也以非零收場 —— 2026-08-08 起連續兩天
           # 讓所有 PR 全紅過。這種情況退回 --no-resolve 重掃一次：
-          # 直接依賴照掃、間接依賴本次略過，並以 warning 明示涵蓋率降級，
-          # 不是靜默放行（若 --no-resolve 那輪掃到弱點，仍照常擋下）。
-          # 只在「第一輪弱點數為 0、純粹是解析錯誤」時才 fallback。
-          # 第一輪若已掃出弱點，不得讓視野較窄（略過間接依賴）的第二輪蓋過
-          # 結果變綠 —— 那正是 review 指出的 masking 風險。
+          # 直接相依照掃、間接相依這輪略過，並用 warning 明講「這輪涵蓋範圍縮小了」，
+          # 不是悄悄放行（--no-resolve 那輪掃到弱點，仍照常擋下）。
+          # 只在「第一輪弱點數為 0、純粹是解析錯誤」時才退回。
+          # 第一輪若已掃出弱點，不能讓視野較窄（略過間接相依）的第二輪把結果蓋成綠燈。
           if [ "$EXIT" -ne 0 ] && echo "$OUT" | grep -q "failed resolution.*rpc error" \
              && ! echo "$OUT" | grep -qE "Total [1-9][0-9]* packages? affected"; then
-            echo "::warning::deps.dev 依賴解析服務故障（第一輪弱點數 0），改以 --no-resolve 重掃（本輪不含 manifest 間接依賴弱點）"
+            echo "::warning::deps.dev 相依解析服務故障（第一輪弱點數 0），改以 --no-resolve 重掃（本輪不含 manifest 間接相依的弱點）"
             set +e
             osv-scanner --recursive --no-resolve ./
             EXIT=$?
@@ -130,55 +162,116 @@ jobs:
             echo "❌ Vulnerabilities found!"
             if [ "$FAIL_ON_FINDINGS" = "true" ]; then exit 1; fi
           elif [ "$EXIT" -eq 128 ]; then
-            # 128 = osv-scanner 找不到任何可掃的 lockfile/manifest，不是弱點
+            # 128 = osv-scanner 找不到任何可掃的 lockfile / manifest，不是弱點
             echo "⚠️  No supported lockfile found — nothing to scan."
           else
             # 其餘（含 127）一律視為「掃描沒跑成功」而擋下。
             #
-            # 行為變更說明：舊版把 127 當良性 warning 放行（見 commit 22b1317）。但 127 是
-            # command-not-found，最可能的成因其實是上一步下載失敗——那正是「掃描靜默失效
-            # 卻依然綠燈」的漏洞。現在安裝步驟已用 --fail + --version 驗過執行檔，走到這裡
-            # 代表 scanner 真的出錯、這次沒掃成，不能當作通過。
-            # 若確認是 osv-scanner 自己對某種 transitive dep 的已知問題，請針對該情況加白名單，
+            # 行為變更說明：舊版把 127 當無害的 warning 放行（見 commit 22b1317）。但 127 是
+            # command-not-found，最可能的成因其實是上一步下載失敗 —— 那正是「掃描沒跑
+            # 卻依然綠燈」的洞。現在安裝步驟已用 --fail + sha256 + --version 驗過執行檔，
+            # 走到這裡代表 scanner 真的出錯、這次沒掃成，不能當作通過。
+            # 若確認是 osv-scanner 自己對某種間接相依的已知問題，請針對那個情況加白名單，
             # 不要把整個 else 改回放行。
             echo "❌ OSV-Scanner 異常結束（exit $EXIT）— 視為掃描失敗。"
             if [ "$FAIL_ON_FINDINGS" = "true" ]; then exit 1; fi
           fi
 
-  # 3) 檔案系統 + Dockerfile + IaC 設定弱點 + 內嵌密鑰
+  # 3) 檔案系統：相依弱點 + Dockerfile / Kubernetes / Terraform 等設定檔的錯誤設定
+  #    （可選再加 secret / license，見 trivy-scanners）
   trivy:
     name: FS / IaC / Docker (Trivy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Trivy scan
-        continue-on-error: ${{ inputs.fail-on-findings == false }}
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: fs
-          scanners: vuln,misconfig,secret
-          format: table
-          severity: ${{ inputs.severity }}
-          exit-code: "1"
-
-  # 4) 密鑰外洩掃描（用 docker 執行檔，避開 gitleaks-action 對組織帳號的 license 要求）
-  gitleaks:
-    name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Trivy scan
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: ${{ inputs.trivy-scanners }}
+          format: table
+          severity: ${{ inputs.severity }}
+          exit-code: "1"
+      # SBOM：把「這個 commit 到底用了哪些套件、什麼版本」寫成標準格式（CycloneDX）。
+      # 不是檢查、不會讓 job 失敗；出事時（例如又一個 log4j）拿它秒查有沒有中。
+      # 用 !cancelled() 而不是預設：上面掃到弱點時這一步也要跑，那正是最需要 SBOM 的時候。
+      - name: Generate SBOM (CycloneDX)
+        if: ${{ !cancelled() && inputs.generate-sbom }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: "0"
+      - name: Upload SBOM as artifact
+        if: ${{ !cancelled() && inputs.generate-sbom }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+  # 4) 密鑰外洩：連 git 歷史一起掃（所以要 fetch-depth: 0）
+  #    用 docker 直接跑執行檔，避開 gitleaks-action 對組織帳號的授權要求
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Run gitleaks (free, no license)
         continue-on-error: ${{ inputs.fail-on-findings == false }}
         run: |
-          # 釘版本，理由同 semgrep：latest 升版會新增規則，沒改碼也可能突然變紅。
-          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
+          # 版本 + digest 都釘死，理由同 semgrep：latest 升版會新增規則，沒改程式也可能突然變紅。
+          # digest 查法：docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本> | head -3
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --source=. --redact --no-banner --exit-code=1
 
-  # 5) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
+  # 5) （可選）workflow 本身的安全檢查：zizmor
+  #    actionlint 只管語法；zizmor 管的是「這支 workflow 會不會被人拿來做壞事」——
+  #    把 PR 標題直接塞進 run: 的腳本注入、pull_request_target / workflow_run 這種危險觸發器、
+  #    沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact 等。
+  #    專案要調整規則（例如放行公版刻意用的 @v1）放在自己的 .github/zizmor.yml，範本已附一份。
+  zizmor:
+    name: Workflow security (zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ inputs.run-zizmor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install zizmor
+        run: |
+          # 版本 + sha256 一起釘，升版時到 release 頁面對 .tar.gz 重算：
+          # https://github.com/zizmorcore/zizmor/releases
+          VERSION="1.30.1"
+          SHA256="e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a"
+          curl --fail -sSL -o zizmor.tar.gz \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${SHA256}  zizmor.tar.gz" | sha256sum -c -
+          tar -xzf zizmor.tar.gz zizmor
+          sudo mv zizmor /usr/local/bin/zizmor
+          zizmor --version
+      - name: Run zizmor
+        continue-on-error: ${{ inputs.fail-on-findings == false }}
+        env:
+          # 有 token 才能做線上檢查（例如「這個釘死的 SHA 是不是已知有漏洞的版本」）
+          GH_TOKEN: ${{ github.token }}
+          MIN_SEVERITY: ${{ inputs.zizmor-min-severity }}
+        run: |
+          # 會自動找 repo 底下所有 .github/workflows/*.yml，設定檔讀 .github/zizmor.yml
+          zizmor --no-progress --min-severity "$MIN_SEVERITY" .
+
+  # 6) （可選）Docker image 弱點掃描：有 Dockerfile 且 scan-docker-image=true 才跑
   trivy-image:
     name: Docker image (Trivy)
     runs-on: ubuntu-latest
@@ -186,6 +279,8 @@ jobs:
     if: ${{ inputs.scan-docker-image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build image (不推送，只為掃描)
         env:
           SHA: ${{ github.sha }}
@@ -204,19 +299,19 @@ jobs:
           image-ref: scan-target:${{ github.sha }}
           format: table
           severity: ${{ inputs.severity }}
-          # 只擋「上游已有修補版本」的 CVE。base image（Debian/Alpine）長期帶著十幾個
+          # 只擋「上游已經有修補版本」的 CVE。base image（Debian/Alpine）長期帶著十幾個
           # 上游還沒修的 HIGH，擋了你也改不掉，只會逼大家把 fail-on-findings 關掉、
-          # 整套守門一起廢掉。要看完整清單就把 ignore-unfixed 設成 false。
+          # 整套檢查一起廢掉。要看完整清單就把 ignore-unfixed 設成 false。
           ignore-unfixed: true
           exit-code: "1"
 
-  # 6) 彙總守門員：needs 所有掃描，讓分支保護「只需要求這一個」status check。
+  # 7) 總結：needs 所有掃描，讓分支保護「只需要要求這一個」status check。
   #    任何一項掃描失敗，這個 gate 就失敗 → PR 無法 merge。
   security-gate:
     name: Security Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [semgrep, osv-scanner, trivy, gitleaks, trivy-image]
+    timeout-minutes: 3
+    needs: [semgrep, osv-scanner, trivy, gitleaks, zizmor, trivy-image]
     if: ${{ always() }}
     steps:
       - name: Evaluate all scan results
@@ -225,26 +320,29 @@ jobs:
           OSV: ${{ needs.osv-scanner.result }}
           TRIVY: ${{ needs.trivy.result }}
           GITLEAKS: ${{ needs.gitleaks.result }}
+          ZIZMOR: ${{ needs.zizmor.result }}
           IMAGE: ${{ needs.trivy-image.result }}
+          RUN_ZIZMOR: ${{ inputs.run-zizmor }}
           SCAN_IMAGE: ${{ inputs.scan-docker-image }}
         run: |
           {
             echo "## 🛡️ Security Gate 結果"
             echo ""
-            echo "| 掃描 | 結果 |"
-            echo "| --- | --- |"
-            echo "| SAST (Semgrep) | $SEMGREP |"
-            echo "| Dependency (OSV) | $OSV |"
-            echo "| FS/IaC (Trivy) | $TRIVY |"
-            echo "| Secret (gitleaks) | $GITLEAKS |"
-            echo "| Docker image (Trivy) | $IMAGE（啟用：$SCAN_IMAGE） |"
+            echo "| 掃描 | 啟用 | 結果 |"
+            echo "| --- | --- | --- |"
+            echo "| SAST (Semgrep) | 一定跑 | $SEMGREP |"
+            echo "| Dependency (OSV) | 一定跑 | $OSV |"
+            echo "| FS/IaC (Trivy) | 一定跑 | $TRIVY |"
+            echo "| Secret (gitleaks) | 一定跑 | $GITLEAKS |"
+            echo "| Workflow security (zizmor) | $RUN_ZIZMOR | $ZIZMOR |"
+            echo "| Docker image (Trivy) | $SCAN_IMAGE | $IMAGE |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
           FAIL=0
 
           # 這四項沒有 if 條件，一定會跑 —— 所以「不是 success 就擋」。
-          # 這個白名單寫法是對的：不只擋 failure，連 cancelled、skipped、
+          # 白名單寫法是刻意的：不只擋 failure，連 cancelled、skipped、
           # 以及 runner 沒排到而拿不到結果的情況，全部都擋。
           for r in "$SEMGREP" "$OSV" "$TRIVY" "$GITLEAKS"; do
             if [ "$r" != "success" ]; then
@@ -253,23 +351,27 @@ jobs:
             fi
           done
 
-          # Docker image 掃描是可選的，判定原則跟 CI Gate 一致：
-          # **啟用了就必須 success**，沒啟用才允許 skipped。
-          # 舊寫法只擋 failure —— 那樣的話 scan-docker-image=true 但 job 被取消時，
-          # 掃描沒跑成 Gate 卻放行，等於「沒跑到」被當成「通過」。
-          if [ "$SCAN_IMAGE" = "true" ]; then
-            if [ "$IMAGE" != "success" ]; then
-              echo "❌ Docker image 掃描已啟用，但結果是 \`${IMAGE:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
-              FAIL=1
-            fi
-          else
-            case "$IMAGE" in
-              failure|cancelled)
-                echo "❌ Docker image 掃描未啟用，結果卻是 \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+          # 可選的項目判定原則跟 CI Gate 一致：**開了就必須 success**，沒開才允許 skipped。
+          # 舊寫法只擋 failure —— 那樣的話開了但 job 被取消時，掃描沒跑成 Gate 卻放行，
+          # 等於「沒跑到」被當成「通過」。
+          assert_optional() {
+            local name="$1" enabled="$2" result="$3"
+            if [ "$enabled" = "true" ]; then
+              if [ "$result" != "success" ]; then
+                echo "❌ **$name** 已啟用，但結果是 \`${result:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
                 FAIL=1
-                ;;
-            esac
-          fi
+              fi
+            else
+              case "$result" in
+                failure|cancelled)
+                  echo "❌ **$name** 未啟用，結果卻是 \`$result\`" >> "$GITHUB_STEP_SUMMARY"
+                  FAIL=1
+                  ;;
+              esac
+            fi
+          }
+          assert_optional "Workflow security (zizmor)" "$RUN_ZIZMOR" "$ZIZMOR"
+          assert_optional "Docker image (Trivy)"        "$SCAN_IMAGE" "$IMAGE"
 
           if [ "$FAIL" = "1" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"

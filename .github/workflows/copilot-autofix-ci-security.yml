@@ -19,7 +19,11 @@ permissions:
 
 jobs:
   autofix:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    # 只處理「PR 觸發」的失敗。推到 main 或每週排程的失敗沒有 PR 可修，
+    # 以前也會起一個 job 跑進去才發現沒 PR 而跳過 —— 白付一分鐘。
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request'
     uses: ./.github/workflows/copilot-autofix-reusable.yml
     with:
       head-branch:   ${{ github.event.workflow_run.head_branch }}

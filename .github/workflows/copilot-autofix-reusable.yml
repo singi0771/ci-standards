@@ -1,6 +1,6 @@
 # 中央「公版」Reusable：CI/Security 失敗時請 Copilot Coding Agent 自動修。
 # consumer 端只放一支 workflow_run 觸發的薄殼，用一行 uses: 呼叫本檔並傳入事件參數。
-# 邏輯集中在這裡；改動只要移動 tag，各專案下次觸發即反應式同步。
+# 邏輯集中在這裡；改動只要移動 tag，各專案下次觸發即自動跟著更新。
 name: Reusable — Copilot Autofix (CI/Security)
 
 on:
@@ -80,7 +80,7 @@ jobs:
           MAX: ${{ inputs.max-attempts }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # 計算已發出的 auto-fix 請求數（用隱藏 HTML marker 標記）
+          # 計算已發出的 auto-fix 請求數（用隱藏 HTML 標記）
           # 一次抓完留言，後面全部就地過濾（省 API 呼叫，也避免三次查詢之間有新留言插進來）
           COMMENTS=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments")
 
@@ -95,7 +95,7 @@ jobs:
                 | select(.body | contains("<!-- auto-fix-attempt -->"))
                 | select(.created_at >= $cutoff)] | length')
 
-          # 已經升級過就不要再貼一次。升級留言本身不含 auto-fix-attempt marker，
+          # 已經轉交人工過就不要再貼一次。轉交人工的留言本身不含 auto-fix-attempt 標記，
           # 所以上面的 cooldown 擋不住它 —— 沒有這道檢查的話，達上限後「每一次」
           # CI 失敗都會再貼一則 🚨 並重新 @ 人，PR 會被洗版。
           ESCALATED=$(echo "$COMMENTS" \
@@ -178,7 +178,7 @@ jobs:
           RUN_URL: ${{ inputs.run-url }}
           MAX: ${{ inputs.max-attempts }}
         run: |
-          BODY=$(printf '<!-- auto-fix-escalated -->\n🚨 **自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試自動修正 %s 次，但 **%s** 仍然失敗，自動循環已停止。\n\n最後失敗的 run：%s\n\n請人工排查並修正，或重新評估此 PR 的修正方向。\n\n> 本 PR 之後的 CI 失敗不會再自動留言。處理完想重啟自動修正，請刪掉這則留言。' \
+          BODY=$(printf '<!-- auto-fix-escalated -->\n🚨 **自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試自動修正 %s 次，但 **%s** 仍然失敗，自動流程已停止。\n\n最後失敗的 run：%s\n\n請人工查問題並修正，或重新評估此 PR 的修正方向。\n\n> 本 PR 之後的 CI 失敗不會再自動留言。處理完想重啟自動修正，請刪掉這則留言。' \
             "$MAX" "$PR_AUTHOR" "$MAX" "$WORKFLOW_NAME" "$RUN_URL")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \

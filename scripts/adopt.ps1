@@ -35,8 +35,8 @@
                 移除公版已廢除的 input、補上公版新增的 input
 
   專案專屬的檔案（copilot-instructions.md、pull_request_template.md、
-  dependabot.yml、copilot-setup-steps.yml）**絕不覆蓋** —— 已存在就只放一份
-  .new 供比對。
+  dependabot.yml、copilot-setup-steps.yml、zizmor.yml）**絕不覆蓋** ——
+  已存在就只放一份 .new 供比對。
 
   相依：只需要 git 與 Windows 內建的 PowerShell 5.1。
   不用 gh / jq / yq / python / curl —— 受管制的公司環境上那些都不保證存在。
@@ -106,7 +106,7 @@ $TargetRoot = (Get-Location).Path
 [System.IO.Directory]::SetCurrentDirectory($TargetRoot)
 
 # 安全閥：不准把公版導入公版自己。
-# 公版的呼叫端刻意用 `uses: ./...` 做 dogfooding；改成 owner/repo@ref 之後，
+# 公版的呼叫端刻意用 `uses: ./...` 自己吃自己的狗糧；改成 owner/repo@ref 之後，
 # PR 上跑的就不再是「這個 PR 的版本」，綠燈會變成假的。
 if (Test-Path -LiteralPath (Join-Path $TargetRoot 'templates\consumer-repo\.github')) {
   Die "目標看起來就是 ci-standards 公版本身（有 templates\consumer-repo\）。公版不需要導入自己。要測試這支腳本請用 scripts/test-adopt.sh。"
@@ -200,7 +200,7 @@ $ReusableFor = @{
 }
 
 # 就地更新 uses: 的 owner/repo 與 ref。
-# 刻意跳過 `uses: ./...` —— 公版自己 dogfooding 用相對路徑呼叫自己的 reusable。
+# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（自己吃自己的狗糧）。
 function Update-UsesLines([string[]]$Lines) {
   $out = @()
   foreach ($line in $Lines) {
@@ -263,7 +263,7 @@ function Get-WithKeys([string[]]$Lines) {
   return $keys
 }
 
-# 薄殼換新版時，把使用者「自己打開的旋鈕」從舊檔搬到新檔。
+# 薄殼換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
 # 判準只有一條：舊檔有設、而新範本沒設。
 #   - 新範本自己就有的 key（head-branch / review-id 這種接線）→ 範本版本才是對的
 #   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
@@ -336,25 +336,29 @@ $CiAdditions = @(
   ('python-version: "{0}"' -f $PyVer),
   ('run-python: {0}'       -f (B $HasPy)),
   ('run-docker-build: {0}' -f (B $HasDockerfile)),
+  ('run-hadolint: {0}'     -f (B $HasDockerfile)),
   'run-actionlint: true',
   ('run-shellcheck: {0}'   -f (B $HasSh))
 )
+# security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
+# run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
 $SecAdditions = @(
-  ('python-version: "{0}"'    -f $PyVer),
-  ('scan-docker-image: {0}'   -f (B $HasDockerfile))
+  ('scan-docker-image: {0}'   -f (B $HasDockerfile)),
+  'run-zizmor: true'
 )
 
 # ── 三類檔案，三種策略（與 adopt.sh 一致）────────────────────
 # Configured：真的帶專案設定（severity / python-version / 自訂 cron…）→ 就地合併。
 $Configured = @('ci.yml','security.yml')
-# ShellFiles：純薄殼。if: / with: 的接線與 secrets: 都屬於公版契約 →
-#   整份換成新範本，再把使用者打開過的旋鈕搬回來。
+# ShellFiles：純薄殼。if: / with: 的接線與 secrets: 都屬於公版的接線約定 →
+#   整份換成新範本，再把使用者打開過的設定搬回來。
 #   1.2.0 改的是 if: 條件與 secrets: 區塊，就地合併只碰 with: —— 舊 consumer 升級後
 #   會拿到新的 uses: 卻留著舊的 if:，變成「版本號變了、自動修迴圈還是壞的」。
 $ShellFiles = @('copilot-autofix-ci-security.yml','copilot-autofix-review.yml',
                 'copilot-autoreview-gate.yml')
+# zizmor.yml 也算專案專屬：使用者會在裡面放自己的放行規則。
 $ProjectOwned = @('workflows\copilot-setup-steps.yml','copilot-instructions.md',
-                  'pull_request_template.md','dependabot.yml')
+                  'pull_request_template.md','dependabot.yml','zizmor.yml')
 
 Write-Host "計畫:"
 foreach ($n in $Configured) {
@@ -362,7 +366,7 @@ foreach ($n in $Configured) {
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($n in $ShellFiles) {
-  if (Test-Path ".github\workflows\$n") { Write-Host "  o 換新  .github\workflows\$n（薄殼以範本為準；只搬回你調過的旋鈕，舊檔留 .bak）" }
+  if (Test-Path ".github\workflows\$n") { Write-Host "  o 換新  .github\workflows\$n（薄殼以範本為準；只搬回你調過的設定，舊檔留 .bak）" }
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($r in $ProjectOwned) {
@@ -405,7 +409,7 @@ foreach ($n in $Configured) {
   }
 }
 
-# ── ShellFiles：整份換新，只搬回使用者的旋鈕 ─────────────────
+# ── ShellFiles：整份換新，只搬回使用者的設定 ─────────────────
 foreach ($n in $ShellFiles) {
   $dst = ".github\workflows\$n"
   $src = Join-Path $Tpl "workflows\$n"
@@ -430,7 +434,7 @@ foreach ($n in $ShellFiles) {
   foreach ($c in $carried) { $CarriedReport += ("    {0} -> 保留你調過的: {1}" -f $n, $c.Trim()) }
   foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
 
-  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（冪等性）
+  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（可重複執行）
   if ($newText -eq $oldRaw) {
     $ShellSame += $n
   } else {
@@ -450,13 +454,20 @@ foreach ($r in $ProjectOwned) {
     else { Copy-Item -LiteralPath $src -Destination ($dst + ".new") -Force; $Kept += $r }
   } else {
     Copy-Item -LiteralPath $src -Destination $dst -Force
+    # zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，寫死了公版的
+    # owner/repo。搬到組織（-UsesRepo）時要跟著換，否則那條規則對不到。
+    if ($r -eq 'zizmor.yml' -and $UsesRepo -ne 'singi0771/ci-standards') {
+      $txt = [System.IO.File]::ReadAllText($dst)
+      $txt = $txt.Replace('"singi0771/ci-standards/*"', ('"{0}/*"' -f $UsesRepo))
+      Write-TextFile $dst $txt
+    }
     $Created += $r
   }
 }
 
 Remove-TmpClone
 
-# 1.2.0 契約的收尾檢查。薄殼現在是整份換新的，正常情況不會叫；
+# 1.2.0 的接線約定的收尾檢查。薄殼現在是整份換新的，正常情況不會叫；
 # 會叫就代表 -Std 指到的公版比 1.2.0 舊（或範本被改壞）。
 $PatWarn = @()
 foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.yml')) {
@@ -495,7 +506,7 @@ if ($DroppedReport.Count) {
 }
 if ($PatWarn.Count) {
   Write-Host ""
-  Warn "薄殼缺 1.2.0 的契約內容 -- 代表 -Std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次:"
+  Warn "薄殼缺 1.2.0 的接線約定內容 -- 代表 -Std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次:"
   $PatWarn | ForEach-Object { Write-Host $_ }
 }
 Write-Host "-----------------------------------------------------------"
@@ -509,8 +520,8 @@ Write-Host "-----------------------------------------------------------"
  2. 若有 *.new 檔案: 那是新版範本，跟現有的比對後自行取捨，處理完把 .new 刪掉。
     (copilot-instructions.md 這類是專案專屬內容，腳本刻意不覆蓋。)
 
-    若有 *.bak 檔案: 那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版契約，
-    升級時一律以範本為準，只把你調過的旋鈕搬回來。確認過沒有你自己加的東西
+    若有 *.bak 檔案: 那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版的接線約定，
+    升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
     （額外的 job、改過的 permissions）就把 .bak 刪掉。
 
  3. [必改] 全新導入務必改 .github\copilot-instructions.md ——
@@ -526,6 +537,10 @@ Write-Host "-----------------------------------------------------------"
       git push -u origin chore/adopt-ci-standards
 
  5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+
+ 6. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
+    workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
+    確定是誤判才放進 .github\zizmor.yml，寫法見公版 README。
 
  [i] job id (ci / security) 刻意不動 —— 分支保護的 check 名稱綁著它。
 '@ | Write-Host

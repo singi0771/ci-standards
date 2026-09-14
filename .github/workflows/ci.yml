@@ -1,4 +1,4 @@
-# 本 repo 自己的 CI —— 公版對自己也要適用（dogfooding）。
+# 本 repo 自己的 CI —— 公版對自己也要適用（自己吃自己的狗糧）。
 # 用 ./ 呼叫本 repo 的 reusable：PR 會用「這個 PR 的版本」跑，
 # 不是 @v1。改壞公版時當場就會紅，不會等到別人的專案才爆。
 name: CI
@@ -7,8 +7,14 @@ on:
   push:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]
-  # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明
+  # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
+  # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# 呼叫端也要宣告最小權限；沒寫的話 reusable 拿到的是 repo 預設 token 權限（zizmor: excessive-permissions）
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,6 +22,8 @@ concurrency:
 
 jobs:
   ci:
+    # 草稿 PR 先不跑，反正草稿本來就不能 merge；標成 ready for review 會再觸發一次
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     uses: ./.github/workflows/ci-reusable.yml
     with:
       # 本 repo 沒有 Python、沒有 Dockerfile，真正要檢查的是 workflow 與 shell script

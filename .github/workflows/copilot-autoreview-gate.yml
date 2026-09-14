@@ -14,7 +14,11 @@ permissions:
 
 jobs:
   autoreview:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # 只處理「PR 觸發」的成功。推到 main 或每週排程成功了也沒有 PR 可審，
+    # 以前也會起一個 job 進去才發現沒 PR 而跳過 —— 每次合併白付兩分鐘。
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     uses: ./.github/workflows/copilot-autoreview-reusable.yml
     with:
       head-sha:     ${{ github.event.workflow_run.head_sha }}

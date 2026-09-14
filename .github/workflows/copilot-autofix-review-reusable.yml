@@ -10,7 +10,7 @@
 #    github-actions[bot]（github.token）發的 mention 會被 Copilot 忽略（防自動化迴圈）。
 #    所以 consumer 必須傳入 copilot-trigger-pat（該使用者的 fine-grained PAT，
 #    需要 Issues:write + Pull requests:write）。沒傳的話本 workflow 會退回 github.token
-#    並發出 warning —— 留言照貼（保留次數記帳），但 agent 不會動工。
+#    並發出 warning —— 留言照貼（保留次數計數），但 agent 不會動工。
 name: Reusable — Copilot Autofix (Review)
 
 on:
@@ -25,7 +25,7 @@ on:
         type: string
         required: true
       pr-author:
-        description: "PR 作者帳號，升級人工時 @ 通知"
+        description: "PR 作者帳號，轉交人工時 @ 通知"
         type: string
         required: true
       review-body:
@@ -105,7 +105,7 @@ jobs:
           ATTEMPTS=$(echo "$COMMENTS" \
             | jq -s 'add | [.[] | select(.body | contains("<!-- review-fix-attempt -->"))] | length')
 
-          # 已升級過就閉嘴。沒有這道檢查的話，達上限後每一次 changes_requested
+          # 已轉交人工就不再出聲。沒有這道檢查的話，達上限後每一次 changes_requested
           # 都會再貼一則 🚨 —— 這條路徑原本連 cooldown 都沒有，洗版更嚴重。
           ESCALATED=$(echo "$COMMENTS" \
             | jq -s 'add | [.[] | select(.body | contains("<!-- review-fix-escalated -->"))] | length')
@@ -158,7 +158,7 @@ jobs:
           REVIEW_URL: ${{ inputs.review-url }}
           MAX: ${{ inputs.max-attempts }}
         run: |
-          BODY=$(printf '<!-- review-fix-escalated -->\n🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動循環已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。\n\n> 本 PR 之後的 changes_requested 不會再自動留言。想重啟自動修正，請刪掉這則留言。' \
+          BODY=$(printf '<!-- review-fix-escalated -->\n🚨 **Review 自動修正已達 %s 次上限，需要人工介入**\n\n@%s Copilot Agent 已嘗試根據 **%s** 的 review 意見自動修正 %s 次，但仍無法通過，自動流程已停止。\n\n最後 review：%s\n\n請人工評估 review 意見並手動修正，或與 reviewer 溝通修正方向。\n\n> 本 PR 之後的 changes_requested 不會再自動留言。想重啟自動修正，請刪掉這則留言。' \
             "$MAX" "$PR_AUTHOR" "$REVIEWER" "$MAX" "$REVIEW_URL")
           gh pr comment "$PR_NUMBER" \
             --repo "$GH_REPO" \

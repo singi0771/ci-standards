@@ -78,7 +78,7 @@ TARGET_ROOT="$(git rev-parse --show-toplevel)"
 cd "$TARGET_ROOT"
 
 # 安全閥：不准把公版導入公版自己。
-# 公版的呼叫端刻意用 `uses: ./...` 做 dogfooding；被這支腳本改成
+# 公版的呼叫端刻意用 `uses: ./...` 自己吃自己的狗糧；被這支腳本改成
 # `owner/repo@ref` 之後，PR 上跑的就不再是「這個 PR 的版本」，
 # 綠燈會變成假的。（這正是 2026-08-08 真的發生過的事故。）
 if [ -d "$TARGET_ROOT/templates/consumer-repo/.github" ]; then
@@ -178,7 +178,7 @@ reusable_for() {
 }
 
 # 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）。
-# 刻意跳過 `uses: ./...` —— 公版自己 dogfooding 時用相對路徑呼叫自己的 reusable，
+# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（自己吃自己的狗糧），
 # 把它改成 owner/repo@ref 會讓 PR 上跑的不再是「這個 PR 的版本」。
 patch_uses() {
   awk -v repo="$USES_REPO" -v ref="$REF" '
@@ -274,13 +274,13 @@ with_keys() {
   ' "$1"
 }
 
-# 薄殼換新版時，把使用者「自己打開的旋鈕」從舊檔搬到新檔。
+# 薄殼換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
 #
 # 判準只有一條：舊檔有設、而新範本沒設。
 #   - 新範本自己就有的 key（head-branch / review-id 這種接線）→ 範本版本才是對的，
-#     使用者那份是舊契約，搬過去等於把 bug 一起搬過去
+#     使用者那份是舊約定，搬過去等於把 bug 一起搬過去
 #   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
-#   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的旋鈕）才是使用者的設定
+#   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的設定）才是使用者的設定
 carry_knobs() {
   _old="$1"; _new="$2"; _known="$3"; _carried="$4"; _dropped="$5"
   : > "$_carried"; : > "$_dropped"
@@ -340,9 +340,9 @@ REFRESHED=""; SHELL_SAME=""; CARRIED_REPORT=""
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
 CONFIGURED="ci.yml security.yml"
-# SHELL_FILES：純薄殼。if: / with: 的接線與 secrets: 都屬於公版契約，
-#   使用者能調的只有註解裡標出來的那幾個旋鈕。
-#   → 整份換成新範本，再把使用者打開過的旋鈕搬回來。
+# SHELL_FILES：純薄殼。if: / with: 的接線與 secrets: 都屬於公版的接線約定，
+#   使用者能調的只有註解裡標出來的那幾個設定。
+#   → 整份換成新範本，再把使用者打開過的設定搬回來。
 #
 #   為什麼不能跟 CONFIGURED 一樣就地合併：1.2.0 改的是 if: 條件與 secrets: 區塊
 #   （Copilot 的 COMMENTED review 要能進迴圈、@copilot 必須由真人 PAT 發出），
@@ -350,16 +350,20 @@ CONFIGURED="ci.yml security.yml"
 #   結果是「版本號變了、自動修迴圈還是壞的」。
 SHELL_FILES="copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
-PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml"
+#   zizmor.yml 也算：使用者會在裡面放自己的放行規則。
+PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml zizmor.yml"
 
 CI_ADDITIONS="python-version: \"$PYVER\"
 run-python: $HAS_PY
 run-docker-build: $HAS_DOCKERFILE
+run-hadolint: $HAS_DOCKERFILE
 run-actionlint: true
 run-shellcheck: $HAS_SH"
 
-SEC_ADDITIONS="python-version: \"$PYVER\"
-scan-docker-image: $HAS_DOCKERFILE"
+# security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
+# run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
+SEC_ADDITIONS="scan-docker-image: $HAS_DOCKERFILE
+run-zizmor: true"
 
 plan_line() { info "  $1"; }
 
@@ -369,7 +373,7 @@ for name in $CONFIGURED; do
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for name in $SHELL_FILES; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（薄殼以範本為準；只搬回你調過的旋鈕，舊檔留 .bak）"
+  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（薄殼以範本為準；只搬回你調過的設定，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -418,7 +422,7 @@ for name in $CONFIGURED; do
   fi
 done
 
-# ── SHELL_FILES：整份換新，只搬回使用者的旋鈕 ────────────────
+# ── SHELL_FILES：整份換新，只搬回使用者的設定 ────────────────
 for name in $SHELL_FILES; do
   dst=".github/workflows/$name"
   src="$TPL/workflows/$name"
@@ -455,7 +459,7 @@ for name in $SHELL_FILES; do
   fi
   rm -f "$dst.carried" "$dst.dropped"
 
-  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（冪等性）
+  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（可重複執行）
   if cmp -s "$dst.prev" "$dst"; then
     rm -f "$dst.prev"
     SHELL_SAME="$SHELL_SAME $name"
@@ -479,11 +483,20 @@ for rel in $PROJECT_OWNED; do
     fi
   else
     cp "$src" "$dst"
+    # zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，
+    # 寫死了公版的 owner/repo。搬到組織（--uses-repo）時要跟著換，否則那條規則對不到。
+    if [ "$rel" = "zizmor.yml" ] && [ "$USES_REPO" != "$DEFAULT_USES_REPO" ]; then
+      ADOPT_OLD="\"$DEFAULT_USES_REPO/*\"" ADOPT_NEW="\"$USES_REPO/*\"" awk '
+        BEGIN { old=ENVIRON["ADOPT_OLD"]; new=ENVIRON["ADOPT_NEW"] }
+        { i=index($0, old); if (i) $0 = substr($0, 1, i-1) new substr($0, i+length(old)); print }
+      ' "$dst" > "$dst.tmp"
+      mv "$dst.tmp" "$dst"
+    fi
     CREATED="$CREATED $rel"
   fi
 done
 
-# ── 1.2.0 契約的收尾檢查 ─────────────────────────────────────
+# ── 1.2.0 的接線約定的收尾檢查 ─────────────────────────────────────
 # 薄殼現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
 # 比 1.2.0 舊（或範本被改壞）—— 那就是「導完自動修迴圈還是不會動」，
 # 寧可吵也不要靜靜地過。
@@ -524,7 +537,7 @@ if [ -n "$DROPPED_REPORT" ]; then
 fi
 if [ -n "$PAT_WARN" ]; then
   info ""
-  warn "薄殼缺 1.2.0 的契約內容 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
+  warn "薄殼缺 1.2.0 的接線約定內容 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
 fi
 info "───────────────────────────────────────────────────────────"
 
@@ -538,8 +551,8 @@ cat <<'NEXT'
     處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
-    若有 *.bak 檔案：那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版契約，
-    升級時一律以範本為準，只把你調過的旋鈕搬回來。確認過沒有你自己加的東西
+    若有 *.bak 檔案：那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版的接線約定，
+    升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
     （額外的 job、改過的 permissions）就把 .bak 刪掉。
 
  3. ⚠️ 全新導入務必改 .github/copilot-instructions.md ——
@@ -556,6 +569,10 @@ cat <<'NEXT'
       git push -u origin chore/adopt-ci-standards
 
  5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+
+ 6. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
+    workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
+    確定是誤判才放進 .github/zizmor.yml，寫法見公版 README。
 
  ⓘ job id（ci / security）刻意不動 —— 分支保護的 check 名稱綁著它，
    改了既有 ruleset 就會對不上。

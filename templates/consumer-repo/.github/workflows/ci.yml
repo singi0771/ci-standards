@@ -1,4 +1,4 @@
-# 各專案的「呼叫端」CI workflow — 邏輯全在中央公版。
+# 各專案的「呼叫端」CI workflow —— 邏輯全在中央公版。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
 name: CI
 
@@ -9,8 +9,14 @@ on:
   # ⚠️ pull_request 這裡「不要」加 paths-ignore。
   # 分支保護把 `ci / CI Gate` 設成 required check 後，被 path filter 擋掉的 PR
   # 根本不會啟動 workflow → required check 永遠 pending → 純文件 PR 永遠 merge 不了
-  # （連 admin 都不行，ruleset 沒 bypass）。省那幾分鐘不值得換一個死鎖。
+  # （連 admin 都不行，ruleset 沒有例外名單）。省那幾分鐘不值得換一個卡死。
+  # 多列 ready_for_review 是為了讓「草稿 PR 不跑、改成正式 PR 那一刻才跑」能運作（見 jobs 的 if）。
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# 呼叫端也要宣告最小權限，不然 reusable 拿到的是 repo 預設 token 權限
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,7 +24,10 @@ concurrency:
 
 jobs:
   ci:
+    # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
     with:
       python-version: "3.12"
       run-docker-build: true
+      run-hadolint: true         # 有 Dockerfile 才有作用：build 之前先檢查 Dockerfile 寫法

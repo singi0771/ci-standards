@@ -1,10 +1,10 @@
 # 已知限制（導入前先看）
 
 這份文件記的是**實測過、但目前還不能用**的東西。
-每一條都寫清楚：怎麼測的、結果是什麼、影響哪一段流程、以及排查步驟。
+每一條都寫清楚：怎麼測的、結果是什麼、影響哪一段流程、以及查問題的步驟。
 
 > 為什麼要有這份文件：這些結論原本只存在於某個已關閉 PR 的留言裡，
-> 後來導入的人看不到，只會重踩一次同樣的坑。
+> 後來導入的人看不到，只會重踩一次同樣的雷。
 
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
@@ -15,15 +15,15 @@
 
 ---
 
-## 實測基準：canary PR（2026-07-26）
+## 實測基準：故意植入錯誤的測試 PR（2026-07-26）
 
-排查前先知道「哪些是確定好的」，才不會亂改。
+查問題前先知道「哪些是確定好的」，才不會亂改。
 
 做法：開一個 PR 故意植入三個錯誤 —— shellcheck 的 `SC2086`（未引用的 `rm -rf $TARGET`）、
 `SC2045`（用 `ls` 輸出當迴圈來源）、以及把 `actions/checkout` 從釘死的 SHA 改回可變 tag（Semgrep 會抓）。
-CI 與 Security 會在數秒內相繼失敗，正好用來驗證去重機制。
+CI 與 Security 會在數秒內相繼失敗，正好用來驗證防重複機制。
 
-**確認可用的（不用再花時間排查）：**
+**確認可用的（不用再花時間查問題）：**
 
 | 觀察項 | 結果 |
 |---|---|
@@ -45,10 +45,10 @@ CI 與 Security 會在數秒內相繼失敗，正好用來驗證去重機制。
 解法（2026-08-09，ci-standards PR #12）：`copilot-autofix-review-reusable.yml` 與
 `copilot-autofix-reusable.yml` 新增 optional secret `copilot-trigger-pat`，
 發 `@copilot` 留言時改用它；consumer 薄殼把 repo secret `COPILOT_TRIGGER_PAT` 傳入。
-PAT 身分＝真人身分，不受 bot 防迴圈限制。設定步驟見 README「自動修復閉環」。
+PAT 身分＝真人身分，不受 bot 防迴圈限制。設定步驟見 README「自動修復流程」。
 未設定 secret 時退回 bot token 並發 `::warning::`（行為等同舊版：留言照貼、Agent 不理）。
 
-以下為歷史紀錄（定位過程），保留供排查參考：
+以下為歷史紀錄（找原因的過程），保留供查問題參考：
 
 `copilot-autofix-*` 三支的核心動作，是用 `GITHUB_TOKEN` 在 PR 貼一則 `@copilot ...` 留言。
 留言作者是 `github-actions[bot]`。實測結果：
@@ -64,7 +64,7 @@ PAT 身分＝真人身分，不受 bot 防迴圈限制。設定步驟見 README�
 2026-08-01 的測試證明 **Coding Agent 在這個帳號、這個 repo 上完全可用** ——
 方案有到、policy 有開、`copilot-setup-steps.yml` 沒問題。
 
-所以問題收斂成單一一點：**GitHub 對「bot 觸發 bot」的防迴圈限制**，
+所以問題縮小成單一一點：**GitHub 對「bot 觸發 bot」的防迴圈限制**，
 讓 `github-actions[bot]` 貼的 `@copilot` 不會喚醒 Agent。
 
 ### ⚠️ 7/26 的第二個測試是無效的，別拿它當證據
@@ -78,7 +78,7 @@ Coding Agent 官方只認兩種入口：
 「直接指派也沒反應」證明不了「bot mention 被擋」，只證明了「那個入口不存在」。
 當時因為這個無效測試，一度以為是方案或 policy 的問題 —— 其實不是。
 
-### 排查步驟
+### 查問題的步驟
 
 **第 1 關 —— Coding Agent 到底有沒有開？** ✅ 本 repo 已於 2026-08-01 通過
 
@@ -116,8 +116,8 @@ bot 防迴圈限制。解法是換掉貼留言用的 token：
 「貼 `@copilot` 留言」改成「**開一個 Issue 並指派 Copilot**」——
 這條路已經證實可行（Issue #5 → PR #6）。
 
-要注意的是換成開 Issue 之後，收斂機制要跟著改：目前的次數上限與去重是靠
-PR 留言裡的隱藏 marker 計數，改開 Issue 就要改成用 label 或 Issue 標題 marker，
+要注意的是換成開 Issue 之後，停止條件要跟著改：目前的次數上限與防重複是靠
+PR 留言裡的隱藏標記計數，改開 Issue 就要改成用 label 或 Issue 標題裡的標記，
 否則每次 CI 失敗都會開一個新 Issue。
 
 ### 在這件事解決之前，怎麼導入
@@ -214,7 +214,7 @@ Settings → Actions → General → **Fork pull request workflows from outside 
 
 也就是說 README 上「呼叫端 job 自行加 `permissions:`」這個說法**還沒有被實測證實**。
 
-**排查步驟：**
+**查問題的步驟：**
 
 1. 在本 repo（public，不需要 GHAS）開一個測試 PR，把 `.github/workflows/security.yml` 的
    `upload-sarif` 改成 `true`，並在該 job 加上 `permissions: { contents: read, security-events: write }`
@@ -234,7 +234,8 @@ Settings → Actions → General → **Fork pull request workflows from outside 
 `ci-reusable.yml` 內建的是 ruff + pytest。其餘語言目前沒有對應的 job。
 
 非 Python 專案**仍然照用公版**，把 Python 關掉即可（`run-python: false`），
-`actionlint` / `shellcheck` / `docker build` 三項都是語言無關的。
+`actionlint` / `shellcheck` / `docker build` / `hadolint` 都是語言無關的，
+安全掃描那邊（Semgrep / OSV / Trivy / gitleaks / zizmor）本來就自己認語言。
 要語言原生的 lint/test，見 [README — 專案不是 Python](../README.md#專案不是-python)。
 
 > 推廣到更多專案之前，先盤點一次組織內的語言分布。
@@ -245,5 +246,5 @@ Settings → Actions → General → **Fork pull request workflows from outside 
 ## 這份文件怎麼維護
 
 - 每解決一條，把它**從這裡刪掉**，並在 [CHANGELOG](../CHANGELOG.md) 記一筆
-- 新發現的限制，一律附上「怎麼測的 + 結果 + 排查步驟」，不要只寫「XX 好像不能用」
-- 排查步驟要能讓沒有前後文的人照著跑
+- 新發現的限制，一律附上「怎麼測的 + 結果 + 查問題的步驟」，不要只寫「XX 好像不能用」
+- 查問題的步驟要能讓沒有前後文的人照著跑

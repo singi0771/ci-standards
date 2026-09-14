@@ -59,7 +59,7 @@ jobs:
           echo "Triggered by: $TRIGGERED_BY — checking: $CHECK_WORKFLOW for SHA $HEAD_SHA"
 
           # --branch + --limit 很重要：gh run list 預設只回傳最近 20 筆，repo 一忙
-          # 目標 SHA 的 run 就會掉出視窗 → 靜默 skip，看起來像「gate 沒反應」。
+          # 目標 SHA 的 run 就會掉出視窗 → 悄悄 skip，看起來像「gate 沒反應」。
           OTHER_OK=$(gh run list \
             --repo "$GH_REPO" \
             --workflow "$CHECK_WORKFLOW" \
@@ -109,7 +109,7 @@ jobs:
           fi
           echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
 
-      # 3) 次數上限 + 同 SHA 去重
+      # 3) 次數上限 + 同一個 SHA 不重複
       - name: Guard — dedupe by SHA and cap total review requests
         id: guard
         if: ${{ steps.pr.outputs.number != '' }}
@@ -157,7 +157,7 @@ jobs:
             && echo "Copilot review requested." \
             || echo "Warning: Copilot review API call failed. Check repo Copilot settings."
 
-      # 5) 貼去重標記留言（<!-- auto-review-request:SHA --> 是步驟 3 guard 的記帳依據）
+      # 5) 貼防重複標記留言（<!-- auto-review-request:SHA --> 是步驟 3 guard 的計數依據）
       #
       # 這裡「不」@copilot：github-actions[bot] 發的 mention 會被 Copilot coding agent
       # 忽略（防自動化迴圈），實測從未喚醒過 agent —— 別再假裝有用。

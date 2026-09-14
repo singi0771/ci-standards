@@ -4,13 +4,14 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
-      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被動過手腳的新版。
+      # 只用 default-days —— semver-major-days 這類細分選項不是每個 ecosystem 都支援
       # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
     directory: "/"
     schedule:
-      interval: "weekly"
+      # 每月一次：每個 Dependabot PR 都會跑整套 CI + Security，action 的更新很少急到要每週看
+      interval: "monthly"
     groups:
       actions-all:
-        patterns: ["*"]     # 全部併成一個 PR，避免每週開一堆 PR 塞爆通知
+        patterns: ["*"]     # 全部併成一個 PR，避免開一堆 PR 塞爆通知

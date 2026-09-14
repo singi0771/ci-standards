@@ -85,7 +85,7 @@
 | 1 | **規則副本漂移**：AdminAutoTools 的 `AGENTS.md` 說帳密走 CLI 參數，`CLAUDE.md` 說改走環境變數並「嚴禁 CLI」；Codex 與 Claude 讀到的是相反的規則 | 不同 agent 寫出互相衝突的程式 |
 | 2 | **OpenSpec 世代不一致**：8 個 pre-1.0、1 個 mixed、1 個 1.x；template 釘 1.5.0，最新是 1.11.0 | 指令名（`/openspec:*` vs `/opsx:*`）、目錄結構、validate 行為都不同，無法共用一套 CLAUDE.md |
 | 3 | **只有 3 個專案有 hook**；沒有任何專案有「沒有 active change 就不准改 code」的 spec-gate | 「一定要先寫 OpenSpec」目前只是請求，不是強制 |
-| 4 | **同一條規則寫了六次**（規格先行、`.env`、Conventional Commits…），每份措辭都不同 | 維護成本高、模型對齊度下降 |
+| 4 | **同一條規則寫了六次**（規格先行、`.env`、Conventional Commits…），每份措辭都不同 | 維護成本高、模型遵守程度下降 |
 | 5 | copilot-instructions 896 行、GEEarning CLAUDE.md 216 行 | 超過官方建議 200 行；研究顯示越長越容易被忽略 |
 | 6 | `.claude/worktrees/` 內殘留整份 repo 副本（AdminAutoTools、GEEarning、ci-standards、HumanizerTw） | 汙染搜尋結果、可能被誤讀為規則 |
 | 7 | 全域 `~/.claude/CLAUDE.md` 被 mini-taiwan-pulse 引用（含 Karpathy 四原則），但本次無法存取全域目錄 | 全域層內容需另行確認後再重寫 |
@@ -137,7 +137,7 @@
 ### 2.4 各語言反覆出現的規則（可直接進 `.claude/rules/`）
 
 - **Python**：`uv` 管套件、`ruff check --fix` + `ruff format`、型別註記必填（`X | None`、`list[str]`）、`pytest -x` + 覆蓋率、Pydantic v2 做邊界驗證、`pathlib`、`logging` 不用 `print`、FastAPI 用 lifespan 不用 `on_event`
-- **TypeScript**：`strict: true`、禁 `any`（用 `unknown` 再收斂）、`interface` 給可擴充物件／`type` 給 union、字串字面量取代 `enum`、Vitest + Testing Library + Playwright、`pnpm lint && pnpm test` 才能 commit、ES modules
+- **TypeScript**：`strict: true`、禁 `any`（用 `unknown` 再縮小型別）、`interface` 給可擴充物件／`type` 給 union、字串字面量取代 `enum`、Vitest + Testing Library + Playwright、`pnpm lint && pnpm test` 才能 commit、ES modules
 - **C#／.NET**：`<Nullable>enable</Nullable>` + `TreatWarningsAsErrors`、`dotnet format --verify-no-changes` 進 CI、DTO 用 `record`、只用 async/await（禁 `.Result`／`.Wait()`／`async void`）、公開 async API 傳 `CancellationToken`、xUnit + FluentAssertions + Testcontainers、測試命名 `Method_Result_WhenCondition`
 - **Java**：明寫 Maven／Gradle 與 Java 版本、建構子注入（禁欄位 `@Autowired`）、DTO 不用 Entity 出邊界、`@Transactional` 放 service、JUnit 5 + AssertJ + Mockito + Testcontainers、`FetchType.LAZY` 防 N+1、Lombok 在 JPA entity 禁 `@Data`
 
@@ -153,7 +153,7 @@
 |---|---|---|
 | 「一定要先 OpenSpec 才能寫 code」 | **Hook**（PreToolUse 擋 Edit/Write）+ CLAUDE.md 一句話 | 只有 hook 是確定性的 |
 | 語言別規範（Python／TS／C#／Java） | `~/.claude/rules/<lang>.md` + 專案 `.claude/rules/` 用 `paths:` 限定 | 路徑觸發、不佔每次 context |
-| 專案事實（指令、port、目錄、坑） | 專案 `CLAUDE.md` ≤ 100 行 | 每次都要在 |
+| 專案事實（指令、port、目錄、地雷） | 專案 `CLAUDE.md` ≤ 100 行 | 每次都要在 |
 | OpenSpec 操作流程 | **官方 skills**（`openspec init` 產生）+ 你的 1～2 個補充 skill（如 `/wrap-up`） | 不重造輪子，`openspec update` 可升級 |
 | 台灣用語、寫作風格 | 全域 `~/.claude/rules/zh-tw-writing.md` | 跨專案、與程式無關 |
 | 分享到 16 個專案 | **打包成一個私有 plugin**（`kimi-dev-standards`） | 一處改、各專案 `/plugin update` |
@@ -168,7 +168,7 @@ flowchart TB
         G3["skills/wrap-up · skills/spec-gate-explain"]
     end
     subgraph P["專案層 ./（只寫這個 repo 特有的事）"]
-        P1["CLAUDE.md ≤ 100 行<br/>指令、port、目錄、坑、@AGENTS.md"]
+        P1["CLAUDE.md ≤ 100 行<br/>指令、port、目錄、地雷、@AGENTS.md"]
         P2[".claude/rules/*.md（paths: 限定）"]
         P3[".claude/settings.json → hooks<br/>spec-gate · secret-guard · destructive-guard · stop-uncommitted"]
         P4["openspec/ config.yaml · specs/ · changes/ · archive/"]
@@ -231,7 +231,7 @@ sequenceDiagram
 
 ### 4.1 直接回答
 
-> **「5 個角色 Agent 各管一段 SDLC」在社群框架裡很流行（BMAD、MetaGPT 系），但不是工具廠商建議的做法，2026 年的證據也不支持它。** 主流已收斂成：**「一個 agent 負責寫、其他 agent 只負責看」**——一個持有完整脈絡的實作 agent，加上規格審核關卡、一定會跑的驗證（測試／hook），以及一個**新鮮 context 的審查 agent**；平行 agent 只用在研究、審查、或檔案互不重疊的工作，上限 3～5 個。
+> **「5 個角色 Agent 各管一段 SDLC」在社群框架裡很流行（BMAD、MetaGPT 系），但不是工具廠商建議的做法，2026 年的證據也不支持它。** 主流已停下來成：**「一個 agent 負責寫、其他 agent 只負責看」**——一個持有完整脈絡的實作 agent，加上規格審核關卡、一定會跑的驗證（測試／hook），以及一個**新鮮 context 的審查 agent**；平行 agent 只用在研究、審查、或檔案互不重疊的工作，上限 3～5 個。
 
 ### 4.2 證據摘要
 
@@ -245,7 +245,7 @@ sequenceDiagram
 | ChatDev 2.0（2026-01） | 官方**放棄**「軟體公司角色扮演」架構 |
 | BMAD 實測 | 同一題 BMAD 5.5 小時 vs OpenSpec 12 分鐘 |
 
-### 4.3 建議的角色配置（不是 5 個「人」，是 1 個實作 agent + 3 道關卡）
+### 4.3 建議的角色設定（不是 5 個「人」，是 1 個實作 agent + 3 道關卡）
 
 ```mermaid
 flowchart LR
@@ -266,7 +266,7 @@ flowchart LR
 
 ### 4.4 需求提出 → 自動進入開發的流程藍圖
 
-**分三期落地，每期都可獨立產生價值：**
+**分三期實際做起來，每期都可獨立產生價值：**
 
 | 期別 | 內容 | 觸發方式 | 需要什麼 |
 |---|---|---|---|

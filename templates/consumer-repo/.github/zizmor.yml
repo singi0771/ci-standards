@@ -1,0 +1,20 @@
+# zizmor（workflow 安全檢查）的設定 —— 公版 security-reusable 的 run-zizmor 開著時會讀這份。
+# 這是你專案自己的檔案，公版的一鍵導入不會覆蓋它；要放行某條規則就加在這裡。
+# 寫法：https://docs.zizmor.sh/configuration/
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # 公版刻意用「會移動的 v1」讓所有專案自動跟版（見公版 README「版本策略」），
+        # 所以指向公版的 uses: 只要求有釘 tag（ref-pin），不要求釘 SHA。
+        # 搬到組織之後把 owner 改掉（adopt.sh --uses-repo 會順手改）。
+        "singi0771/ci-standards/*": ref-pin
+        # 其他所有第三方 action 一律要釘 commit SHA
+        "*": hash-pin
+  dangerous-triggers:
+    # 這兩支薄殼用 workflow_run 觸發。它們不 checkout、不執行任何 PR 的程式碼，
+    # 只把事件的 metadata 傳給公版處理，所以這裡放行。你自己寫的 workflow 若也用
+    # workflow_run 或 pull_request_target，不要照抄這段 —— 先確定真的沒有跑到 PR 的內容。
+    ignore:
+      - copilot-autofix-ci-security.yml
+      - copilot-autoreview-gate.yml
