@@ -1,11 +1,17 @@
-# Dependabot（原生免費）— 已對準 Python + Docker 專案
+# Dependabot（GitHub 內建、免費）—— 已對準 Python + Docker 專案
+#
+# 每個 Dependabot PR 都會跑一整套 CI + Security（十幾分鐘），所以頻率要看著用：
+#   - pip：每週，但小版本併成一個 PR（等於每週最多 1–2 個 PR）
+#   - docker / github-actions：每月一次就夠，它們很少有急著要吃的更新
+# 真正緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），
+# 不受這裡的排程限制。
 version: 2
 
 updates:
   - package-ecosystem: "pip"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
-      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
+      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被動過手腳的新版。
+      # 只用 default-days —— semver-major-days 這類細分選項不是每個 ecosystem 都支援
       # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
     directory: "/"
@@ -18,25 +24,19 @@ updates:
 
   - package-ecosystem: "docker"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
-      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
-      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
 
   - package-ecosystem: "github-actions"
     cooldown:
-      # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被投毒的新版。
-      # 只用 default-days —— semver-major-days 等細分選項不是每個 ecosystem 都支援
-      # （github-actions 就會被 Dependabot 判為 invalid config），統一用最低共通分母。
       default-days: 7
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       actions-all:
-        patterns: ["*"]
+        patterns: ["*"]     # 全部併成一個 PR
 
 # 若之後加了前端（Node），再補一段 npm 的區塊即可。

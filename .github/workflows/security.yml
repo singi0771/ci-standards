@@ -1,4 +1,4 @@
-# 本 repo 自己的安全掃描 —— 公版對自己也要適用（dogfooding）。
+# 本 repo 自己的安全掃描 —— 公版對自己也要適用（自己吃自己的狗糧）。
 name: Security Scan
 
 on:
@@ -6,10 +6,15 @@ on:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]
   # pull_request 不加 paths-ignore —— Security Gate 是 required check，
-  # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死
+  # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死。
+  # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑。
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
-    - cron: "0 3 * * 1"        # 每週一完整重掃
+    - cron: "0 3 * * 1"        # 每週一完整重掃，抓「程式沒動但新公布的 CVE」
+
+permissions:
+  contents: read
 
 concurrency:
   group: security-${{ github.ref }}
@@ -17,13 +22,16 @@ concurrency:
 
 jobs:
   security:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     uses: ./.github/workflows/security-reusable.yml
     with:
       scan-docker-image: false   # 本 repo 沒有 Dockerfile
       fail-on-findings: true
+      # 本 repo 的內容就是 workflow，zizmor 當然要開；範本目錄會一起被掃到（規則在 .github/zizmor.yml）
+      run-zizmor: true
       # 本 repo 是 public，理論上可以設 true 把結果寫進 Security 分頁（不需要 GHAS），
       # 但 security-reusable 的 workflow 層 permissions 是 contents: read，
       # 而被呼叫的 reusable 只能「縮減」呼叫端授予的權限、不能擴張 ——
-      # 亦即呼叫端就算給了 security-events: write 也可能被縮掉、upload 403。
+      # 也就是呼叫端就算給了 security-events: write 也可能被縮掉、upload 403。
       # 這條路徑還沒實測過，先維持 false，另外開一次驗證再打開。
       upload-sarif: false

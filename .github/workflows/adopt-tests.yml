@@ -1,20 +1,22 @@
-# adopt.sh 的回歸測試 —— 這是本 repo 自己的工具測試，不是給 consumer 呼叫的公版。
+# adopt.sh / adopt.ps1 的回歸測試 —— 這是本 repo 自己的工具測試，不是給 consumer 呼叫的公版。
 #
 # ⚠️ 為什麼一定要有 macOS：1.2.2 修的兩個 bug（bash 3.2 把全形標點的首位元組
 #    吃進變數名、BSD awk 不接受 -v 的值裡有換行）在 Linux 上完全不重現，
-#    而 1.2.1 宣稱的「43 項全過」正是只在 Linux 跑出來的 —— 等於 macOS
+#    而 1.2.1 宣稱的「全部通過」正是只在 Linux 跑出來的 —— 等於 macOS
 #    這條路徑從來沒被測到，而 docs/ADOPT.md 把它列在第一順位平台。
 #
-#    只跑 Linux 的話，有人把多行值改回 `-v`、或把 ${VAR} 改回 $VAR，
-#    CI 照樣會綠。
-#
-# ⚠️ 為什麼要有 Windows：使用者在 Windows 上是用 Git Bash 跑 adopt.sh 的，
-#    而這條路徑同樣從來沒被測過。2026-08-13 就抓到一個只在 Windows 現形的
-#    測試 bug（Python 預設用 locale 編碼讀 UTF-8 檔）。
+# ⚠️ 為什麼要有 Windows：使用者在 Windows 上是用 Git Bash 跑 adopt.sh、用 PowerShell 5.1
+#    跑 adopt.ps1 的。2026-08-13 抓到一個只在 Windows 現形的測試 bug（Python 預設用
+#    locale 編碼讀 UTF-8 檔），同一天還抓到 adopt.ps1 少了 BOM 在 5.1 上連 parse 都過不了。
 #
 #    但要說清楚範圍：runner 的 locale 是 UTF-8，**抓不到 cp950 那個 bug**。
 #    真正防住它的是 test-adopt.sh 裡明寫的 encoding='utf-8'，這條 matrix
-#    守的是「Git Bash 這個 shell 環境」本身。
+#    守的是「Git Bash 這個 shell 環境」與「PowerShell 5.1 能不能載入」。
+#
+# 省分鐘：macOS runner 算 10 倍分鐘、Windows 算 2 倍。所以先用一個很便宜的 job 看這次
+# 有沒有動到腳本 / 範本 / workflow，純文件變更就整個 matrix 跳過。
+# 分支保護要設成 required 的是最後那個「adopt regression gate」，不是 matrix 裡的三個 ——
+# gate 一定會回報（沒動到就算過），matrix 被跳過時不會。
 #
 # 刻意用 /bin/bash 而不是 `bash`：macOS runner 的 PATH 上可能有 Homebrew 的
 # bash 5.x，那樣就測不到系統內建的 3.2.57 —— 也就是使用者實際會用到的那個。
@@ -23,7 +25,7 @@ name: Adopt Script Tests
 on:
   push:
     branches: [main]
-  # pull_request 不加 paths-ignore —— 與本 repo 的 ci.yml 同理
+  # pull_request 不加 paths-ignore —— 與本 repo 的 ci.yml 同理（要跑不跑由下面的 changes job 決定）
   pull_request:
 
 concurrency:
@@ -34,9 +36,48 @@ permissions:
   contents: read
 
 jobs:
+  # 便宜的前哨：算出這次到底有沒有動到「會影響 adopt 的檔案」。
+  # 只有 docs/、根目錄與 .github/ 底下的 .md、Issue 表單、LICENSE 算「純文件」；
+  # 其他任何檔案都算會影響 —— adopt.sh 會讀 reusable 的 inputs 宣告，
+  # 而 templates/ 底下連 .md（copilot-instructions.md、PR 範本）都會被原樣複製到 consumer，
+  # 所以 templates/ 裡的 .md 不能排除。
+  changes:
+    name: adopt regression (changes?)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 看這次動了哪些檔案
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # 找不到 base（新分支的第一次 push、或 SHA 是全 0）就保守地全跑
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "沒有 base 可比對，保守起見全部跑"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
+          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "變更的檔案："; echo "$CHANGED"
+          RELEVANT="$(echo "$CHANGED" | grep -vE '^docs/|^[^/]+\.md$|^\.github/[^/]+\.md$|^\.github/ISSUE_TEMPLATE/|^LICENSE$' || true)"
+          if [ -n "$RELEVANT" ]; then
+            echo "有動到腳本 / 範本 / workflow → 跑回歸測試"; echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "只動到文件 → 跳過三平台 matrix"; echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test-adopt:
     name: adopt regression (${{ matrix.os }})
+    needs: changes
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       # 一邊失敗時另一邊仍要跑完 —— 重點就是分辨「全部都壞」還是「只有某個平台壞」
       fail-fast: false
@@ -50,6 +91,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # 出事時第一個要看的就是這兩個版本
       - name: 印出 shell 與 awk 版本
@@ -74,7 +117,7 @@ jobs:
       - name: 安裝 PyYAML
         run: python -m pip install --quiet pyyaml
 
-      # test-adopt.sh 內部呼叫的是 python3，找不到就會安靜地 skip 掉 YAML 檢查 ——
+      # test-adopt.sh 內部呼叫的是 python3，找不到就會安靜地跳過 YAML 檢查 ——
       # 而那一項正是 2026-08-13 抓到 Windows bug 的那一項。先斷言它真的可用，
       # 否則「跳過」會被當成「通過」，又是一次假綠燈。
       - name: 確認 python3 + PyYAML 真的可用
@@ -88,6 +131,43 @@ jobs:
       - name: 回歸測試（系統內建 bash）
         run: /bin/bash scripts/test-adopt.sh
 
+      # adopt.ps1 一定要能被 Windows PowerShell 5.1 載入。
+      # 1.2.3 修過：檔案沒有 UTF-8 BOM 時，5.1 會用 ANSI codepage 解讀，中文全變亂碼、
+      # 連 parse 都過不了（19 個 parser error）。BOM 是看不見的，編輯器「另存新檔」一次
+      # 就可能弄掉，所以要在 CI 守著。
+      # ⚠️ 一定要用 shell: powershell（5.1）。pwsh（7）預設吃 UTF-8，永遠是綠的，等於白加。
+      - name: adopt.ps1 必須能被 PowerShell 5.1 parse
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: |
+          $e = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$env:GITHUB_WORKSPACE\scripts\adopt.ps1", [ref]$null, [ref]$e) | Out-Null
+          Write-Host ("PowerShell " + $PSVersionTable.PSVersion + "，parse errors: " + $e.Count)
+          if ($e.Count) { $e | ForEach-Object { Write-Host $_.Message }; exit 1 }
+          $bom = [System.IO.File]::ReadAllBytes("$env:GITHUB_WORKSPACE\scripts\adopt.ps1")[0..2]
+          if (($bom -join ',') -ne '239,187,191') { Write-Host "::error::adopt.ps1 少了 UTF-8 BOM"; exit 1 }
+          Write-Host "UTF-8 BOM 在，5.1 載入正常 ✅"
+
+      # adopt.ps1 跟 adopt.sh 是同一套邏輯的兩個實作，docs/ADOPT.md 承諾兩者產出 byte-identical。
+      # 這裡真的跑一次 5.1 的 adopt.ps1 跟 adopt.sh，對同一個範例專案（含 --uses-repo）比對整個 .github/。
+      # 只 parse 不執行的話，兩支哪天各改各的、行為分岔，CI 不會知道。
+      - name: adopt.sh 與 adopt.ps1 的產出必須 byte-identical
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          P="$(mktemp -d)"
+          for v in sh ps; do
+            mkdir -p "$P/$v"
+            ( cd "$P/$v" && git init -q . && git commit -q --allow-empty -m init \
+              && printf 'FROM python:3.12\n' > Dockerfile && printf 'flask\n' > requirements.txt \
+              && mkdir -p bin && printf '#!/bin/sh\ntrue\n' > bin/x.sh )
+          done
+          ./scripts/adopt.sh --std . --target "$P/sh" --uses-repo ACME/ci-standards >/dev/null
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
+            -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/ps")" -UsesRepo ACME/ci-standards >/dev/null
+          diff -r "$P/sh/.github" "$P/ps/.github"
+          echo "adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
+
       # 呼應 docs/HANDOFF.md §5：測試曾經污染過本 repo 的 .github/，
       # 而「git status 乾淨」不等於沒事 —— 被改的檔案若被 commit 了也會乾淨。
       # 這裡在 CI 上比對工作區，測試跑完不該留下任何差異。
@@ -99,3 +179,31 @@ jobs:
             exit 1
           fi
           echo "工作區乾淨 ✅"
+
+  # 分支保護要求的是這一個。判定跟 CI Gate 同一套：該跑的就必須 success；
+  # 沒動到相關檔案而整個跳過，才算過。
+  adopt-gate:
+    name: adopt regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: [changes, test-adopt]
+    if: ${{ always() }}
+    steps:
+      - name: Evaluate
+        env:
+          SHOULD_RUN: ${{ needs.changes.outputs.run }}
+          CHANGES: ${{ needs.changes.result }}
+          TESTS: ${{ needs.test-adopt.result }}
+        run: |
+          echo "changes job: $CHANGES / 需要跑: ${SHOULD_RUN:-<空值>} / matrix: $TESTS"
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::前哨 job 沒跑成（$CHANGES），無法判斷要不要測，視為失敗"; exit 1
+          fi
+          if [ "$SHOULD_RUN" = "true" ]; then
+            if [ "$TESTS" != "success" ]; then
+              echo "::error::三平台回歸測試結果是 $TESTS（需要 success）"; exit 1
+            fi
+            echo "三平台回歸測試全過 ✅"
+          else
+            echo "這次只動到文件，回歸測試不必跑 ✅"
+          fi

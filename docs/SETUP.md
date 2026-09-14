@@ -42,7 +42,7 @@ git tag v1 && git push origin v1
 
 ⚠️ **一定要移動 tag，否則所有專案完全不會有感覺**（大家都指向 `@v1`）。
 
-每次發佈打**兩個** tag：不可變的版本號（回滾點）+ 會移動的別名（大家指向的）。
+每次發佈打**兩個** tag：不可變的版本號（退回點）+ 會移動的別名（大家指向的）。
 
 ```bash
 git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變
@@ -64,12 +64,14 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 
 - [ ] 有沒有改到 input 名稱或 job 名稱？（會打壞既有 repo 的 ruleset → 該開 v2）
 - [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋門，形同虛設）
-- [ ] 新 action 有沒有釘版本？（不要用 `@master` / `@main`，供應鏈風險）
-- [ ] 新 **container image** 有沒有釘版本？（`semgrep/semgrep`、`ghcr.io/gitleaks/gitleaks` 都用 `:latest`
-      的話，沒改碼的 repo 會隨上游新規則突然變紅，也是供應鏈風險）
-- [ ] 有 `if` 條件的新 job **不要**設成 required check（skipped 的 check 永遠不回報 → PR 卡死），
-      只把它加進 gate 的 `needs`，由 gate 判斷 skipped 算過
-- [ ] 掃描工具「執行失敗」有沒有被當成「通過」？（下載用 `curl --fail` + 跑前先驗 `--version`）
+- [ ] 新 action 有沒有釘 commit SHA？（不要用 `@master` / `@main`，供應鏈風險）
+- [ ] 新 **container image** 有沒有釘 tag + digest？（`:latest` 的話沒改程式的 repo 會隨上游新規則突然變紅，
+      只釘 tag 的話上游重推同一個 tag 你不會知道）
+- [ ] 新下載的**執行檔**有沒有釘版本 + sha256？（升版時校驗碼要跟著換，見 CONTRIBUTING.md §6）
+- [ ] 有 `if` 條件的新 job **不要**設成 required check（被跳過時 GitHub 要嘛當通過、要嘛一直 pending），
+      只把它加進 gate 的 `needs`，由 gate 判斷「開了就必須 success」
+- [ ] 掃描工具「執行失敗」有沒有被當成「通過」？（下載用 `curl --fail` + `sha256sum -c` + 跑前先驗 `--version`）
+- [ ] 跑不到 30 秒的新檢查有沒有併進既有 job？（每個 job 不滿一分鐘也算一分鐘）
 - [ ] 先在一個專案用 `@main` 試跑過，再移動 `v1`
 
 ---
@@ -133,7 +135,7 @@ Copilot 會來審 PR 有**兩個**可能的來源，同時開著會互相打架�
 「發現真問題」和「發現假問題」的能力 —— 而假問題的成本是回一則留言，
 真問題的成本是公版帶著一個洞被所有專案吃下去。
 
-**該優化的是觸發頻率（上一節），不是把關卡拿掉。**
+**該調整的是觸發頻率（上一節），不是把關卡拿掉。**
 關掉原生自動 review 之後，需要 resolve 的 thread 自然大幅減少：
 Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 PR，
 本來就值得人看一眼。
@@ -163,7 +165,7 @@ Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 P
 > （或人推空 commit 繞過），見
 > [KNOWN-LIMITATIONS](KNOWN-LIMITATIONS.md#copilot-觸發的-workflow-run-會卡在-action_required)。
 
-以下為 1.1.0 時代的歷史紀錄（定位過程），保留供排查參考：
+以下為 1.1.0 時代的歷史紀錄（找原因的過程），保留供查問題參考：
 
 ### 🟡 歷史：Agent 可用，但 Actions 貼的 `@copilot` 喚不醒它（1.2.0 已修復）
 
@@ -172,14 +174,14 @@ Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 P
 
 | 觀察項 | 結果 |
 |---|---|
-| Gate 擋門、cooldown 去重、autoreview 去重 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
+| Gate 擋門、cooldown 防重複、autoreview 防重複 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
 | Copilot **Code Review**（自動審） | ✅ 會動 |
 | Copilot **Coding Agent** — 指派 Issue（官方入口） | ✅ 會動，立刻開出 PR |
 | Copilot **Coding Agent** — Actions 貼的 `@copilot` 留言 | ❌ 等 12 分鐘無反應 |
 
 也就是說：**引擎是好的，卡住的是自動觸發那條線**（GitHub 對「bot 觸發 bot」的防迴圈限制）。
 
-**完整結果、排查三關、以及解法，見
+**完整結果、查問題的三關、以及解法，見
 [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#copilot-coding-agent-對-actions-貼的-copilot-沒有反應)。**
 
 > **導入新專案時，第 1 關要重測一次。** 方案是帳號層級的，但 Copilot policy 與
@@ -244,13 +246,21 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 | Actions 分鐘（private repo） | 每月 3,000 分鐘（Team） | **public repo 不計費**，所以 ci-standards 自己不吃額度 |
 | AI Credits | 1,900 / 人 / 月 | Coding Agent 與 Code Review 都會扣 |
 
-### 省額度的旋鈕
+### 省額度的做法
 
-- `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘
-- schedule 從每週改每月（改呼叫端 `security.yml` 的 cron）
-- caller 的 **`push: main`** 有 `paths-ignore: ["**/*.md", "docs/**"]`，直接推文件到 main 不會觸發掃描
+計費規則只有一條要記：**每個 job 不滿一分鐘也算一分鐘**，macOS runner 算 10 倍、Windows 算 2 倍。
+
+- `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘；沒 Dockerfile 一定關
+- schedule 從每週改每月（改呼叫端 `security.yml` 的 cron，例如 `"0 3 1 * *"`）
+- 呼叫端的 **`push: main`** 有 `paths-ignore: ["**/*.md", "docs/**"]`，直接推文件到 main 不會觸發掃描
   （**`pull_request` 刻意不加** —— 加了會讓純文件 PR 的 required check 永遠 pending、PR 卡死）
-- caller 已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
+- 呼叫端已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
+- 還在寫的 PR 開成**草稿**：1.3.0 的範本呼叫端遇到草稿整個跳過，按 Ready for review 才跑
+- Dependabot 的 docker / github-actions 改每月（1.3.0 範本預設）；每個 Dependabot PR 都會跑整套
+- 1.3.0 公版自己已經把 actionlint + shellcheck 合成一個 job、hadolint 併進 Docker build、
+  兩支 `workflow_run` 薄殼只理 PR 觸發的 run —— 這些不用你設定，移了 `v1` 就生效
+
+完整清單見 [README — 省 Actions 分鐘](../README.md#省-actions-分鐘這套怎麼省你還能怎麼省)。
 
 ---
 
@@ -261,15 +271,17 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 - [ ] 各 repo Actions run 是否有長期紅著沒人理的（尤其每週排程的 Security Scan —— 它會抓「程式碼沒動但新公布的 CVE」）
 - [ ] Dependabot PR 有沒有積著沒 merge
 - [ ] Org → Billing：AI Credits 與 Actions 分鐘用量
-- [ ] 各專案 `.gitleaksignore` / `.semgrepignore` / `.trivyignore` 有沒有被濫用來蓋掉真弱點
-- [ ] 公版的 action 版本是否該升（Dependabot 也會幫本 repo 開 PR）
+- [ ] 各專案 `.gitleaksignore` / `.semgrepignore` / `.trivyignore` / `.github/zizmor.yml` 有沒有被濫用來蓋掉真弱點
+- [ ] 公版的 action 版本是否該升（Dependabot 每月會幫本 repo 開 PR）
+- [ ] 人工釘死的掃描器版本是否該升（OSV-Scanner、zizmor、actionlint、hadolint、Semgrep / gitleaks 的 image
+      —— Dependabot 不會動這些，步驟見 CONTRIBUTING.md §6）
 
 ---
 
 ## 延伸閱讀
 
 - [README](../README.md) —— 導入流程、參數、日常使用、疑難排解
-- [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) —— 實測過但還不能用的功能，含排查步驟
+- [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md) —— 實測過但還不能用的功能，含查問題的步驟
 - [MIGRATION-TO-ORG.md](MIGRATION-TO-ORG.md) —— 把公版搬到組織底下的 checklist
 - [CONTRIBUTING.md](../CONTRIBUTING.md) —— 改公版的流程、送 PR 前的自我檢查
 - [CHANGELOG.md](../CHANGELOG.md) —— 發佈過哪些版本

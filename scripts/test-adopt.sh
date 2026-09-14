@@ -8,7 +8,7 @@
 #   A. 全新導入 —— 什麼都沒有的 repo
 #   B. 升級     —— 已經有舊版呼叫端的 repo（AdminAutoTools 就是這種）
 #
-# 升級這條特別重要：沖掉使用者調過的參數、或留下公版已廢除的 input，
+# 升級這條特別重要：洗掉使用者調過的參數、或留下公版已廢除的 input，
 # 都會讓對方的 CI 直接壞掉，而且是安靜地壞掉。
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -68,9 +68,13 @@ CI=".github/workflows/ci.yml"; SEC=".github/workflows/security.yml"
 has "$CI"  'run-python: true'          "run-python 依偵測設為 true"
 has "$CI"  'run-docker-build: true'    "run-docker-build 依 Dockerfile 設為 true"
 has "$CI"  'run-shellcheck: true'      "run-shellcheck 依 .sh 設為 true"
+has "$CI"  'run-hadolint: true'        "run-hadolint 依 Dockerfile 設為 true"
 has "$CI"  'python-version: "3.11"'    "python-version 讀到 .python-version"
 has "$SEC" 'scan-docker-image: true'   "scan-docker-image 依 Dockerfile 設為 true"
+has "$SEC" 'run-zizmor: true'          "run-zizmor 預設打開"
+hasnt "$SEC" 'python-version'          "security.yml 不再傳沒有任何步驟用到的 python-version"
 has ".github/copilot-instructions.md" 'Copilot 專案指引' "copilot-instructions.md 有建立"
+has ".github/zizmor.yml" 'singi0771/ci-standards/*' "zizmor.yml 有建立，且放行規則指向公版"
 if [ ! -e ".github/copilot-instructions.md.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
 
 # ═════════════════════════════════════════════════════════════
@@ -116,8 +120,8 @@ OLD
 
 # 1.2.0 之前的薄殼：只認 changes_requested、沒有 review-id/review-state、
 # 沒有 secrets: 區塊。AdminAutoTools 就是停在這個版本。
-# 這幾支的 if:/with:/secrets: 是公版契約，不是專案設定 —— 升級時必須整份換掉，
-# 只保留使用者調過的旋鈕（max-attempts / max-review-requests）。
+# 這幾支的 if:/with:/secrets: 是公版的接線約定，不是專案設定 —— 升級時必須整份換掉，
+# 只保留使用者調過的設定（max-attempts / max-review-requests）。
 cat > .github/workflows/copilot-autofix-review.yml <<'OLD'
 name: Copilot Autofix — Review
 
@@ -166,7 +170,7 @@ jobs:
       max-review-requests: "7"
 OLD
 
-printf '# 我們自己寫的 Copilot 指引\n專案專屬內容，絕不能被沖掉。\n' > .github/copilot-instructions.md
+printf '# 我們自己寫的 Copilot 指引\n專案專屬內容，絕不能被洗掉。\n' > .github/copilot-instructions.md
 
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
 
@@ -184,6 +188,10 @@ hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
 # ── 公版新增的 input 要補上 ──
 has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"
 has "$CI" 'run-python:'       "補上新版才有的 run-python"
+has "$CI" 'run-hadolint:'     "補上新版才有的 run-hadolint"
+has "$SEC" 'run-zizmor:'      "補上新版才有的 run-zizmor"
+has "$SEC" 'python-version: "3.9"' "舊呼叫端已經在傳的 python-version 照樣保留（公版仍認得它）"
+if [ -f ".github/zizmor.yml" ]; then ok "升級時補上原本沒有的 zizmor.yml"; else bad "升級時應補上 zizmor.yml"; fi
 
 # ── uses: 要更新 ref ──
 has "$CI"  'ci-reusable.yml@v1.1.0'        "ci.yml 的 uses: ref 已更新"
@@ -194,10 +202,10 @@ has "$CI"  '  ci:'        "job id 'ci' 未被更動"
 has "$SEC" '  security:'  "job id 'security' 未被更動"
 
 # ── 專案專屬檔案絕不覆蓋 ──
-has ".github/copilot-instructions.md" '專案專屬內容，絕不能被沖掉' "既有 copilot-instructions.md 未被覆蓋"
+has ".github/copilot-instructions.md" '專案專屬內容，絕不能被洗掉' "既有 copilot-instructions.md 未被覆蓋"
 if [ -f ".github/copilot-instructions.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
 
-# ── 薄殼：1.2.0 的契約必須真的補進去 ──
+# ── 薄殼：1.2.0 的接線約定必須真的補進去 ──
 # 這一段是整個升級路徑最會出事的地方：只合併 with: 的話，舊 consumer 會拿到
 # 新的 uses: 卻留著舊的 if: 與缺席的 secrets: —— 版本號變了、自動修迴圈還是壞的。
 REV=".github/workflows/copilot-autofix-review.yml"
@@ -211,11 +219,11 @@ has "$REV" 'copilot-trigger-pat'    "review 薄殼補上 secrets: copilot-trigge
 has ".github/workflows/copilot-autofix-ci-security.yml" 'copilot-trigger-pat' \
     "CI/Security 薄殼補上 secrets: copilot-trigger-pat"
 
-# ── 換新時，使用者調過的旋鈕要搬回來；廢除的要丟掉 ──
+# ── 換新時，使用者調過的設定要搬回來；廢除的要丟掉 ──
 has   "$REV"  'max-attempts: "5"'        "薄殼換新後仍保留使用者調過的 max-attempts"
 hasnt "$REV"  'legacy-knob'              "薄殼換新時丟掉公版已不認得的 legacy-knob"
 has   "$GATE" 'max-review-requests: "7"' "薄殼換新後仍保留使用者調過的 max-review-requests"
-hasnt "$GATE" '# max-review-requests'    "被搬回來的旋鈕取代掉範本的註解提示（不會兩份並存）"
+hasnt "$GATE" '# max-review-requests'    "被搬回來的設定取代掉範本的註解提示（不會兩份並存）"
 has   "$REV"  'copilot-autofix-review-reusable.yml@v1.1.0' "薄殼的 uses: ref 也有更新"
 
 # ── 舊檔要留下來供比對 ──
@@ -256,7 +264,7 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════
-printf '\n▸ 情境 C：冪等性（同樣的指令跑兩次，第二次不應再改動）\n'
+printf '\n▸ 情境 C：重複執行（同樣的指令跑兩次，第二次不應再改動）\n'
 # ═════════════════════════════════════════════════════════════
 # 使用者處理完 .new / .bak 之後的正常狀態
 rm -f .github/copilot-instructions.md.new .github/workflows/*.bak
@@ -280,6 +288,33 @@ printf '\n▸ 情境 E：--uses-repo（搬到組織時換掉 owner/repo）\n'
 new_repo orgmove
 "$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
 has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 owner/repo 已換成 ACME"
+has ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "zizmor.yml 的放行規則也換成 ACME"
+hasnt ".github/zizmor.yml" 'singi0771' "zizmor.yml 不再留著舊的 owner"
+
+# 搬家時最常見的情況：專案早就導入過，zizmor.yml 已經在那裡、而且加過自己的規則。
+# 那一條放行規則一樣要換 owner，使用者自己加的規則不能動（採納 PR #32 的 Copilot 審查意見）。
+new_repo orgmove-existing
+mkdir -p .github
+cat > .github/zizmor.yml <<'OLD'
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "singi0771/ci-standards/*": ref-pin
+        "*": hash-pin
+  template-injection:
+    ignore:
+      - my-own-workflow.yml     # 使用者自己加的
+OLD
+"$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
+has   ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "既有 zizmor.yml 的放行規則也換成 ACME"
+has   ".github/zizmor.yml" 'my-own-workflow.yml'            "既有 zizmor.yml 裡使用者自己加的規則原樣保留"
+hasnt ".github/zizmor.yml" 'singi0771'                      "既有 zizmor.yml 不再留著舊的 owner"
+if [ -f ".github/zizmor.yml.new" ]; then
+  has ".github/zizmor.yml.new" '"ACME/ci-standards/*": ref-pin' "另存的 zizmor.yml.new 也換了 owner"
+else
+  bad "使用者改過的 zizmor.yml 應另存一份 .new 供比對"
+fi
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 F：巢狀結構（外層資料夾包著真正的 clone）\n'

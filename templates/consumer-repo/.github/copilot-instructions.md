@@ -26,9 +26,9 @@
 - 規格檢查：`openspec`（若有 strict 檢查，修改後要跑過）
 
 ## 程式碼慣例
-- 遵循 ruff 的 lint/format 規則
+- 遵循 ruff 的 lint / format 規則
 - 目錄：服務放 `services/`、資料模型放 `models.py` / `auth_models.py`、測試放 `tests/`
-- 提交訊息用 Conventional Commits（feat/fix/chore/...）
+- 提交訊息用 Conventional Commits（feat / fix / chore / ...）
 
 ## 安全要求（修復與審查都要遵守）
 Application / 程式碼
@@ -39,16 +39,20 @@ Application / 程式碼
 - 檔案上傳需檢查副檔名、MIME type、大小與儲存路徑。
 
 Dependency
-- 新增套件需在 PR 說明原因；避免無維護、低星或近期有重大 CVE 的套件。
-- 修弱點時優先採用維護中版本，避免引入新的高風險相依。
+- 新增套件需在 PR 說明原因；避免無人維護、低星或近期有重大 CVE 的套件。
+- 修弱點時優先採用維護中的版本，避免引入新的高風險相依。
 
 Docker / IaC
 - Dockerfile 不得用 `latest` tag；container 不得以 root 執行。
 - Kubernetes 不得用 privileged mode；Terraform 不得對高風險 port 開放 `0.0.0.0/0`。
 
+GitHub Actions workflow
+- 第三方 action 一律釘 commit SHA；不要把 `${{ }}` 直接塞進 `run:` 字串（先過 `env:`）。
+- `permissions` 用最小權限；`pull_request_target` / `workflow_run` 這類觸發器不得執行 PR 的程式碼。
+
 - 涉及認證、授權、加密的變更，在 PR 描述明確標註並說明理由。
 
 ## PR 要求
 - 每個 PR 聚焦單一目的，附「為什麼」與「怎麼驗證」。
-- 必須通過本 repo 的 CI 與 Security Scan（Semgrep / Trivy / OSV / gitleaks）。
+- 必須通過本 repo 的 CI 與 Security Scan（Semgrep / Trivy / OSV / gitleaks / zizmor）。
 - 不要停用或跳過既有安全檢查來讓 PR 變綠。

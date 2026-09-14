@@ -1,5 +1,10 @@
-# 中央「公版」CI Reusable Workflow（Python + Docker）
+# 中央公版：CI Reusable Workflow（Python + Docker + workflow / shell lint）
 # 各專案用一行 uses: 呼叫；統一 lint + test + Docker build 檢查。
+#
+# 省 Actions 分鐘的設計（GitHub 每個 job 都是「不滿一分鐘也算一分鐘」）：
+#   - actionlint 與 shellcheck 合成一個 job（兩個加起來不到 30 秒，拆兩個 job 白付一分鐘）
+#   - hadolint 放在 Docker build 那個 job 裡當一個步驟，不另開 job
+#   - actionlint 改抓 2 MB 的執行檔，不再拉 docker image（省 20–40 秒）
 name: Reusable CI
 
 on:
@@ -16,8 +21,12 @@ on:
         description: "是否驗證 Docker image 能建置"
         type: boolean
         default: true
+      run-hadolint:
+        description: "build 之前是否先用 hadolint 檢查 Dockerfile 寫法（要 run-docker-build 開著、且專案有 Dockerfile 才有作用）"
+        type: boolean
+        default: false
       run-actionlint:
-        description: "是否檢查 GitHub Actions workflow 語法（含 run: 區塊的 shellcheck）"
+        description: "是否檢查 GitHub Actions workflow 語法（會連 run: 區塊裡的 bash 一起用 shellcheck 檢查）"
         type: boolean
         default: false
       run-shellcheck:
@@ -33,7 +42,7 @@ on:
         type: string
         default: ""
       ruff-version:
-        description: "釘死的 ruff 版本，避免 lint 隨新版 ruff 漂移（要升級在此改）"
+        description: "釘死的 ruff 版本，避免 lint 結果隨新版 ruff 漂移（要升級在這裡改）"
         type: string
         default: "0.16.0"
 
@@ -48,6 +57,9 @@ jobs:
     if: ${{ inputs.run-python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 這個 job 不會推東西回 repo，不要把 token 留在磁碟上（zizmor: artipacked）
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ inputs.python-version }}
@@ -56,8 +68,8 @@ jobs:
         env:
           RUFF_VERSION: ${{ inputs.ruff-version }}
         run: |
-          python -m pip install --upgrade pip
-          # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改碼的 repo 突然變紅
+          # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改程式的 repo 突然變紅
+          # （runner 的 pip 已經夠新，不必再花 10 秒 upgrade pip）
           pip install "ruff==$RUFF_VERSION" pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f pyproject.toml ]; then pip install -e . || true; fi
@@ -85,9 +97,28 @@ jobs:
     if: ${{ inputs.run-docker-build }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # hadolint：檢查 Dockerfile 的寫法（沒釘版本的 apt 套件、用 latest tag、
+      # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
+      # hadolint 抓得更廣。放在 build 前面：Dockerfile 寫壞了不必等 build 跑完才知道。
+      - name: Dockerfile lint (hadolint)
+        if: ${{ inputs.run-hadolint && hashFiles('Dockerfile') != '' }}
+        run: |
+          # 版本 + sha256 一起釘，升版時到 release 的 checksums.sha256 重抓：
+          # https://github.com/hadolint/hadolint/releases
+          VERSION="2.15.1"
+          SHA256="c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
+          curl --fail -sSL -o hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/v${VERSION}/hadolint-linux-x86_64"
+          echo "${SHA256}  hadolint" | sha256sum -c -
+          chmod +x hadolint && sudo mv hadolint /usr/local/bin/hadolint
+          hadolint --version
+          # warning 以上才算失敗；info / style 只印出來。要忽略某條規則放 .hadolint.yaml 在專案根目錄。
+          hadolint --failure-threshold warning Dockerfile
       - name: Build image (不推送，只驗證能 build)
         env:
-          # 一律先過 env 再進 shell，不要把 ${{ }} 直接插進 run: 字串（shell injection）
+          # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
           SHA: ${{ github.sha }}
         run: |
           if [ -f Dockerfile ]; then
@@ -96,43 +127,48 @@ jobs:
             echo "沒有 Dockerfile，略過"
           fi
 
-  # workflow 語法檢查。對「邏輯大多寫在 workflow 的 run: 區塊裡」的 repo 特別有用——
-  # actionlint 的 docker image 內建 shellcheck，會連 run: 裡的 bash 一起檢查。
-  actionlint:
-    name: Workflow lint (actionlint)
+  # workflow 語法 + shell script 檢查，合在一個 job（見檔頭「省分鐘」說明）。
+  # actionlint 會自動呼叫 PATH 上的 shellcheck 去檢查 run: 區塊，ubuntu runner 內建 shellcheck，
+  # 所以不必再拉 docker image。
+  lint:
+    name: Workflow + shell lint (actionlint, shellcheck)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: ${{ inputs.run-actionlint }}
+    timeout-minutes: 5
+    if: ${{ inputs.run-actionlint || inputs.run-shellcheck }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run actionlint
+        if: ${{ inputs.run-actionlint }}
         env:
           EXTRA_PATHS: ${{ inputs.actionlint-paths }}
         run: |
-          # 釘版本，理由同其他掃描器：latest 升版會新增規則，沒改碼也可能突然變紅。
-          IMAGE=rhysd/actionlint:1.7.12
+          # 版本 + sha256 一起釘，理由同其他工具：latest 升版會新增規則，沒改程式也可能突然變紅。
+          # 升版時到 release 的 actionlint_<版本>_checksums.txt 重抓：https://github.com/rhysd/actionlint/releases
+          VERSION="1.7.12"
+          SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          curl --fail -sSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo mv actionlint /usr/local/bin/actionlint
+          actionlint -version
+          shellcheck --version | head -2
 
           # 不帶檔案參數時 actionlint 會自動掃 .github/workflows；
           # 一旦給了檔案參數就「只」檢查那些檔案，所以額外路徑必須分開跑一次。
-          docker run --rm -v "$PWD:/repo" -w /repo "$IMAGE" -color
+          actionlint -color
 
           if [ -n "$EXTRA_PATHS" ]; then
             # shellcheck disable=SC2086  # 要讓 glob / 多路徑展開成多個參數
-            docker run --rm -v "$PWD:/repo" -w /repo "$IMAGE" -color $EXTRA_PATHS
+            actionlint -color $EXTRA_PATHS
           fi
-
-  shellcheck:
-    name: Shell lint (shellcheck)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: ${{ inputs.run-shellcheck }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run shellcheck
+        if: ${{ inputs.run-shellcheck }}
         env:
           PATHS: ${{ inputs.shellcheck-paths }}
         run: |
-          # ubuntu-latest runner 內建 shellcheck，不必另外安裝
           if [ -n "$PATHS" ]; then
             # shellcheck disable=SC2086
             shellcheck $PATHS
@@ -145,28 +181,27 @@ jobs:
             shellcheck "${FILES[@]}"
           fi
 
-  # 彙總守門員：分支保護「只需要求 ci / CI Gate 這一個」status check。
-  # 不要把 docker-build 直接設成 required —— 它有 if 條件，run-docker-build=false 時
-  # 會變 skipped、required check 永遠不回報 → PR 永久卡住。
-  # 未來 ci-reusable 新增 job 時，記得加進下面的 needs（否則該 job 形同虛設）。
+  # 總結：分支保護「只需要要求 ci / CI Gate 這一個」status check。
+  # 不要把 docker-build 之類的直接設成 required —— 它們有 if 條件，關掉時會 skipped，
+  # 而 skipped 的 required check 要嘛被 GitHub 當通過（等於沒檢查）、要嘛永遠 pending，
+  # 兩種都不是你要的。
+  # 未來 ci-reusable 新增 job 時，記得加進下面的 needs（否則那個 job 形同虛設）。
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [python, docker-build, actionlint, shellcheck]
+    timeout-minutes: 3
+    needs: [python, docker-build, lint]
     if: ${{ always() }}
     steps:
       - name: Evaluate all CI results
         env:
           PYTHON: ${{ needs.python.result }}
           DOCKER: ${{ needs.docker-build.result }}
-          ACTIONLINT: ${{ needs.actionlint.result }}
-          SHELLCHECK: ${{ needs.shellcheck.result }}
+          LINT: ${{ needs.lint.result }}
           # 每個檢查「是否應該要跑」——判斷通過與否的關鍵，見下方說明
           RUN_PYTHON: ${{ inputs.run-python }}
           RUN_DOCKER: ${{ inputs.run-docker-build }}
-          RUN_ACTIONLINT: ${{ inputs.run-actionlint }}
-          RUN_SHELLCHECK: ${{ inputs.run-shellcheck }}
+          RUN_LINT: ${{ inputs.run-actionlint || inputs.run-shellcheck }}
         run: |
           {
             echo "## 🧪 CI Gate 結果"
@@ -174,17 +209,16 @@ jobs:
             echo "| 檢查 | 啟用 | 結果 |"
             echo "| --- | --- | --- |"
             echo "| Python lint + test | $RUN_PYTHON | $PYTHON |"
-            echo "| Docker build check | $RUN_DOCKER | $DOCKER |"
-            echo "| Workflow lint (actionlint) | $RUN_ACTIONLINT | $ACTIONLINT |"
-            echo "| Shell lint (shellcheck) | $RUN_SHELLCHECK | $SHELLCHECK |"
+            echo "| Docker build check（含 hadolint） | $RUN_DOCKER | $DOCKER |"
+            echo "| Workflow + shell lint (actionlint, shellcheck) | $RUN_LINT | $LINT |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
           FAIL=0
 
-          # 判定原則：**啟用了就必須是 success**；只有沒啟用時才允許非 success。
+          # 判定原則：**開了就必須是 success**；只有沒開時才允許非 success。
           #
-          # 為什麼不能只擋 failure / cancelled（2026-08-06 實測踩到）：
+          # 為什麼不能只擋 failure / cancelled（2026-08-06 實測遇到）：
           # runner 排隊過久被 GitHub 取消時，那些 job 的 conclusion 是 cancelled，
           # 但傳進 needs.<job>.result 的值並不是 cancelled ——
           # 舊寫法（只擋 failure|cancelled）因此判定通過，Gate 回報 success，
@@ -209,10 +243,9 @@ jobs:
             fi
           }
 
-          assert_job "Python lint + test"         "$RUN_PYTHON"     "$PYTHON"
-          assert_job "Docker build check"         "$RUN_DOCKER"     "$DOCKER"
-          assert_job "Workflow lint (actionlint)" "$RUN_ACTIONLINT" "$ACTIONLINT"
-          assert_job "Shell lint (shellcheck)"    "$RUN_SHELLCHECK" "$SHELLCHECK"
+          assert_job "Python lint + test"     "$RUN_PYTHON" "$PYTHON"
+          assert_job "Docker build check"     "$RUN_DOCKER" "$DOCKER"
+          assert_job "Workflow + shell lint"  "$RUN_LINT"   "$LINT"
 
           if [ "$FAIL" = "1" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"

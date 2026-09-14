@@ -8,7 +8,7 @@
 #      只送 COMMENTED；只認 changes_requested 的話，Copilot 的審查意見永遠
 #      進不了自動修正迴圈。「審完沒問題」的空 COMMENTED review 由公版判斷
 #      （0 則 inline 意見即跳過），不會誤觸發、也不會吃掉 attempt 次數。
-#      迴圈收斂靠 max-attempts 上限，不再靠「不接 commented」。
+#      迴圈要停下來靠 max-attempts 上限，不再靠「不接 commented」。
 #
 # ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`：有 Copilot 授權之使用者的
 #    fine-grained PAT（權限：Issues:write + Pull requests:write，範圍限本 repo）。
@@ -23,7 +23,7 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會靜默 403）
+  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會悄悄 403）
 
 jobs:
   autofix-review:

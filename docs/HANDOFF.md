@@ -1,8 +1,11 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-09-05　**已發佈版本 1.2.3**（發佈基準 `6fed71b`，`v1` 指向它）
-> **2026-09-05 起 `main` 領先 `v1` 的不再只是文件** —— Dependabot #27（`80c4c7f`）
-> 動了 `security-reusable.yml`（codeql-action 升版），**1.2.4 待發佈**，見 §3 ⑧。
+> **最後更新**：2026-09-14　**已發佈版本：以 `git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'` 的輸出為準**
+> —— 1.3.0 的 PR（#32）合併後要**立刻**打 `v1.3.0` 並移 `v1`（§3 發佈流程），打完再把這裡跟 §2 改成「已發佈」。
+> 在那之前 `v1` 還指在 1.2.3（`6fed71b`），各專案吃的還是 1.2.3。
+> **1.3.0 是一次大整理**：多了 zizmor（workflow 安全）、hadolint、SBOM 三個可選檢查，
+> 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支 `workflow_run` 薄殼只理 PR，
+> 文件全面改成台灣口語。細節見 `CHANGELOG.md` 的 1.3.0 段。
 > **2026-08-13 起是「兩台機器並存」** —— Windows 成為主要開發機（1.2.3 在那裡發佈），
 > macOS 那台仍在服役（跑 llmstack／geearning／MLX server），同日搬出了 OneDrive。
 > §4 整節改寫過。作廢的**只有 OneDrive 底下的舊 macOS 路徑**，不是 macOS 本身。
@@ -39,7 +42,7 @@
 再跑一次 `git log --oneline -20` 與 `gh pr list --state merged --limit 10`
 （或用瀏覽器看 PR #8～#18），commit message 與 PR 內文寫得很細，是主要的決策紀錄。
 
-**不要只讀本檔就開始改公版。** 這個 repo 踩過的坑幾乎都不直觀
+**不要只讀本檔就開始改公版。** 這個 repo 踩過的雷幾乎都不直觀
 （見 §5），沒讀過 CHANGELOG 很容易重蹈覆轍。
 
 ---
@@ -56,8 +59,8 @@
 
 三條主線：
 
-1. **CI**（`ci-reusable.yml`）：Python lint/test、Docker build、actionlint、shellcheck
-2. **Security**（`security-reusable.yml`）：Semgrep、Trivy、OSV-Scanner、gitleaks
+1. **CI**（`ci-reusable.yml`）：Python lint/test、Docker build（可加 hadolint）、actionlint + shellcheck（同一個 job）
+2. **Security**（`security-reusable.yml`）：Semgrep、Trivy（可加 SBOM / license）、OSV-Scanner、gitleaks、zizmor（可選）
 3. **Copilot 自動迴圈**：CI/Security 失敗 → 請 Copilot 修；兩條都過 → 請 Copilot 審；
    審有意見 → 再請 Copilot 修
 
@@ -72,16 +75,17 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `6fed71b`（1.2.3）。⚠️ **2026-09-05 起 `main` 領先它的不只是文件**：`80c4c7f`（Dependabot #27）動了 `security-reusable.yml`，要發 1.2.4 才會到 consumer（§3 ⑧）。要確認請跑 `git log --oneline v1..main -- .github/workflows templates scripts` |
-| CHANGELOG | 已定版到 **1.2.3** |
-| `v1` tag | ✅ 已移到 `6fed71b`（1.2.3 已發佈，各專案下次觸發就會吃到） |
-| 最新版本 tag | ✅ `v1.2.3`（`v1.2.3^{}` → `6fed71b`，已驗證與 `v1` 同一 SHA） |
-| 公版自己的 CI | ✅ 全綠（dogfooding，用 `uses: ./` 跑自己的 reusable） |
+| 發佈基準 | ⏳ **PR #32 合併後打 `v1.3.0`**；打完之後發佈基準＝`v1.3.0` 指到的 commit。要確認 `main` 有沒有領先 `v1` 請跑 `git log --oneline v1..main -- .github/workflows templates scripts`，有輸出就代表還沒發 |
+| CHANGELOG | 已寫到 **1.3.0** |
+| `v1` tag | ⏳ 合併 #32 後移到 1.3.0；移之前還在 `6fed71b`（1.2.3），各專案吃的還是 1.2.3 |
+| 最新版本 tag | ⏳ `v1.3.0` 待打（合併後）；目前最新是 `v1.2.3` |
+| 公版自己的 CI | ✅ 全綠（自己吃自己的狗糧，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
+| 本 repo 的 `COPILOT_TRIGGER_PAT` | ❌ **沒設**（2026-09-14 用 `gh secret list` 查證是空的）。所以本 repo 自己的 PR 上，autofix 會貼留言但 Agent 不會動工。要不要設看你 —— 公版 PR 多半是人自己改，未必需要 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
-| AdminAutoTools | ✅ **已升到 1.2.1 契約**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
+| AdminAutoTools | ✅ **已升到 1.2.1 的接線約定**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 43 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過** |
-| adopt.ps1 | ✅ **1.2.3 起首次在真 Windows 上驗過**：PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical。⚠️ 但**沒有任何自動測試在守它**（見 §3 ⑦） |
+| adopt.sh | ✅ 57 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
+| adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
 
@@ -98,23 +102,21 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 ## 3. 待辦（依序）
 
-> **1.2.3 已發佈完成**（`v1` 與 `v1.2.3^{}` 都在 `6fed71b`，已用 `git ls-remote` 驗過）。
-> 發佈的操作步驟見本節最後的「發佈流程」，下次公版有實質變更時照那個走。
+> **1.3.0 待發佈**：PR #32 合併後照本節最後的「發佈流程」打 `v1.3.0`、移 `v1`、用 `git ls-remote` 驗，
+> 然後把本檔的 ⏳ 改成 ✅。
 >
-> **① ② ③ ⑥ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
-> **Actions 停擺那條已於 2026-09-05 查證恢復**（本節中段），但 AdminAutoTools 的
-> CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
+> **① ② ③ ⑥ ⑦ ⑧ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
+> AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
 > 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
-> 本 repo 的順序：⑦（給 `adopt.ps1` 加自動守門）、⑧（發佈 1.2.4）、④（GitHub 網頁設定）。
-> ⑦ 與 ⑧ 建議一起做：⑦ 改的是 `adopt-tests.yml`（不是 reusable），本身不需要發版，
-> 但既然 ⑧ 要移 `v1`，把 ⑦ 併進同一版最省事。
+> 本 repo 剩下的：④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）、
+> ⑨（AdminAutoTools 重跑一次 `adopt.sh` 吃到 1.3.0 的薄殼與 `zizmor.yml`）。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
 AdminAutoTools 在 `D:\3_CodingProject\AdminAutoTools\AdminAutoTools\`
 （**巢狀結構**，外層資料夾包著真正的 clone）。
 
-三支薄殼已經是 1.2.1 契約，驗收條件全數滿足：
+三支薄殼已經是 1.2.1 的接線約定，驗收條件全數滿足：
 
 ```bash
 cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
@@ -158,12 +160,15 @@ error），而那正是它 `#Requires -Version 5.1` 宣稱支援、主打「受�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target "某個測試專案" -Std . -DryRun
 ```
 
-### ⑦ 給 adopt.ps1 加自動守門（1.2.3 留下的缺口）
+### ~~⑦ 給 adopt.ps1 加自動守門~~ ✅ 已完成（1.3.0，2026-09-14）
 
-**BOM 是看不見的，編輯器一次「另存新檔」就可能弄掉，而現在沒有任何東西在守。**
-`adopt-tests.yml` 只測 `adopt.sh`，沒有一步會在 5.1 上 parse `adopt.ps1`。
+`adopt-tests.yml` 的 `windows-latest` job 多了一步：用 `shell: powershell`（5.1）parse `adopt.ps1`，
+並檢查檔頭三個 byte 是 `EF BB BF`。下面保留當初的設計說明。
 
-最小成本的作法：在 `adopt-tests.yml` 的 `windows-latest` job 加一步
+**BOM 是看不見的，編輯器一次「另存新檔」就可能弄掉。**
+之前 `adopt-tests.yml` 只測 `adopt.sh`，沒有一步會在 5.1 上 parse `adopt.ps1`。
+
+作法：在 `adopt-tests.yml` 的 `windows-latest` job 加一步
 
 ```yaml
 - name: adopt.ps1 必須能被 PowerShell 5.1 parse
@@ -178,20 +183,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 ⚠️ 一定要用 `shell: powershell`（5.1），用 `pwsh`（7）會永遠是綠的 ——
 7 預設就吃 UTF-8，根本不會重現這個問題。**用錯 shell 等於白加。**
 
-### ⑧ 發佈 1.2.4（`main` 已領先 `v1` 一個實質變更）
+### ~~⑧ 發佈 1.2.4~~ → 併進 1.3.0（PR #32 合併後一起打 tag）
 
-2026-09-05 合併了 Dependabot #27（`80c4c7f`）：`security-reusable.yml` 的
-`github/codeql-action/upload-sarif` 4.37.4 → 4.37.7。只影響 `upload-sarif: true`
-那條路徑（預設關閉、且仍在已知限制），風險極低 —— 但它是 1.2.3 之後第一個
-動到 reusable 的 commit，**`main` 與 `v1` 不再只差文件**。
+原本只是 Dependabot #27 那個 codeql-action 升版要發，結果 1.3.0 一次做完（見 CHANGELOG），
+版號直接跳 1.3.0（有新 input、有行為變更）。
 
-照本節最後的「發佈流程」做：CHANGELOG 把 `[未發佈]` 定版成 `[1.2.4]`、
-打 `v1.2.4`、移 `v1`、`git ls-remote` 驗。**tag 只能在本機推**（雲端 session 403）。
-不急 —— 純升版可以等下次有實質變更（例如 ⑦）再一起發，但別忘了：
-`main` 與 `v1` 差得越久，越容易有人以為「合併了就生效」。
+### ⑨ AdminAutoTools 重跑一次 adopt（吃到 1.3.0）
 
-驗收：`git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'` 中
-`v1` 與 `v1.2.4^{}` 同一個 SHA。
+1.3.0 改了三支薄殼的 `if:`（只理 PR 觸發的 run）、多了 `zizmor.yml`、`ci.yml` / `security.yml`
+多了 `run-hadolint` / `run-zizmor`。光移 `v1` 只會讓 reusable 生效，**薄殼跟新參數要重跑 `adopt.sh` 才會進去**：
+
+```bash
+cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
+/d/3_CodingProject/ci-standards/scripts/adopt.sh --dry-run    # 先看計畫
+/d/3_CodingProject/ci-standards/scripts/adopt.sh
+git diff --stat
+```
+
+驗收：`git diff` 裡三支 `copilot-*` 薄殼的 `if:` 有 `workflow_run.event == 'pull_request'`，
+`.github/zizmor.yml` 存在，`security.yml` 有 `run-zizmor: true`。
+第一次跑 Security Scan 時 zizmor 可能會挑 AdminAutoTools 自己寫的 workflow（若有）的毛病，那是真的該修。
+另外那個 repo 的 `on: pull_request` 若想要「草稿 PR 不跑」，要照範本手動改（升級模式不動 `on:`）。
 
 ### ④ 使用者端設定（GitHub 網頁，非程式）
 
@@ -199,20 +211,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
       違反「先讓免費掃描器擋掉明顯問題、確定值得看了才花 AI credits」的設計順序，
       而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
       只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
+      **2026-09-14 觀察：本 repo 這個還開著** —— PR #32 一開、CI 還沒跑完就被 Copilot 審了
+      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。那次的 7 條意見倒是有 4 條真的該修，
+      所以不急著關；但 Dependabot PR 也會被審這件事還是在燒 credits。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
 - [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
-      Require status checks to pass，加入這兩個 context）：
+      Require status checks to pass，加入這**一個** context）：
 
-      adopt regression (ubuntu-latest)
-      adopt regression (macos-latest)
-      adopt regression (windows-latest)
+      adopt regression gate
 
-      現在它們**只會讓 PR 顯示紅燈、不會擋下合併** —— `adopt-tests.yml` 是獨立
-      workflow，job 不在 `ci / CI Gate` 底下，而 ruleset 只列了兩個 Gate。
+      ⚠️ 1.3.0 起要加的是 gate，**不是**三個 `adopt regression (<os>)`。
+      matrix 現在有 `if` 條件（只動文件的 PR 會整個跳過），被跳過的 required check
+      GitHub 要嘛當通過、要嘛一直 pending；gate 則一定會回報（沒動到就算過，該跑的沒 success 就擋）。
+      設定跟 `ci / CI Gate` 同一套邏輯。
+
+      現在它**只會讓 PR 顯示紅燈、不會擋下合併** —— `adopt-tests.yml` 是獨立
+      workflow，不在 `ci / CI Gate` 底下，而 ruleset 只列了兩個 Gate。
       1.2.2 的整個教訓就是「macOS 這條路徑沒被守住」，補了測試卻沒補守門等於只做一半。
 
-      這三個 job **沒有 `if` 條件、`pull_request` 也沒有 paths 過濾**，每個 PR 必跑，
-      所以設成 required 不會造成「skipped 的 check 永不回報 → PR 卡死」。
+      用 gh 一行加（ruleset id 19769630，2026-09-14 查的）：
+
+      ```bash
+      gh api repos/singi0771/ci-standards/rulesets/19769630 --jq '.rules' > /tmp/rules.json   # 先看現況
+      # 在 required_status_checks 的清單加上 {"context": "adopt regression gate"} 後 PUT 回去
+      ```
 
       ⚠️ **不要加進 `scripts/setup-branch-protection.sh`** —— 那支是給 consumer 用的，
       而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
@@ -269,9 +291,9 @@ README 建議把 spending limit 設 $0 以防爆帳單，代價就是**額度用
 
 > 在這條解決之前，AdminAutoTools 的 Copilot 自動迴圈也不會動 —— 它整條都是 Actions 驅動的。
 
-**這次還順帶抓到一個沒人發現的靜默失效**：兩支 autofix 薄殼**缺 `issues: write`**。
+**這次還順帶抓到一個沒人發現的悄悄失效**：兩支 autofix 薄殼**缺 `issues: write`**。
 達 `max-attempts` 上限時要貼 `needs-human-review` label，而 label API 屬 Issues 權限 ——
-少了會 **403 且不報錯**，等於「升級人工」那一步從來沒成功過。1.1.0 就修過公版這個洞
+少了會 **403 且不報錯**，等於「轉交人工」那一步從來沒成功過。1.1.0 就修過公版這個洞
 （見 CHANGELOG），但 consumer 的薄殼沒跟上。
 
 原始問題如下（保留，因為下一個 consumer 可能也這樣釘）：
@@ -286,7 +308,7 @@ copilot-autoreview-reusable.yml@main
 ```
 
 這等於**繞過整個發佈閘門** —— `@v1` 存在的理由就是「合併進 main 不等於發佈」，
-釘 `@main` 的話任何併進 main 的改動下一次觸發就直接生效，沒有回滾點。
+釘 `@main` 的話任何併進 main 的改動下一次觸發就直接生效，沒有退回點。
 
 現在剛好沒事（`main` 與 `v1` 只差文件），但**下次動 copilot reusable 就會無預警上線**。
 當初大概是為了讓 1.2.0 的迴圈修正快點生效才這樣釘的，那個理由已經消失了。
@@ -300,7 +322,7 @@ copilot-autoreview-reusable.yml@main
   兩個佐證寫在 `docs/KNOWN-LIMITATIONS.md`）。
   已決定**觀察兩週**（自 2026-08-11 起），記錄：
   (a) 每週要按幾次 Approve and run　(b) Copilot 開新 PR vs 推既有 PR 的比例。
-  數據夠了再決定要不要做自動空 commit 的解法。
+  資料夠了再決定要不要做自動空 commit 的解法。
 - **搬到 GitHub organization**：步驟見 `docs/MIGRATION-TO-ORG.md`。
   搬完各專案要用 `adopt.sh --uses-repo ORG/ci-standards` 換掉 `uses:` 的 owner。
 
@@ -330,7 +352,7 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 
 - **tag 釘死完整 SHA，不要用 HEAD** —— 本機 `main` 若落後，用 HEAD 會打到錯的 commit。
 - **`v1` 是會移動的別名**，各專案的 `uses: ...@v1` 在**觸發當下**才解析，沒有 lockfile。
-  `vX.Y.Z` 則是不可變的回滾點，出事時各專案可以臨時改釘那個。
+  `vX.Y.Z` 則是不可變的退回點，出事時各專案可以臨時改釘那個。
 - **破壞性變更不能移 `v1`** —— 改 input 名、改 job 名（consumer 的 ruleset 綁著
   `ci / CI Gate`、`security / Security Gate`）都算，那要開 `v2`。判準見 `CONTRIBUTING.md`。
 - **純文件變更可以不發版**，等下次有實質變更再一起發。
@@ -383,10 +405,10 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 > `~/Library/Application Support/MiniTaiwanPulse/`（**專案外**），排程才不會
 > 隨專案搬家而失效 —— 這次從 OneDrive 搬出來時就是靠這個設計沒壞掉。
 >
-> ⚠️ **排程週期必須對齊資料本身的新鮮度契約。** 太魯閣同步原本設每小時，
+> ⚠️ **排程週期必須跟資料本身的新鮮度一致約定。** 太魯閣同步原本設每小時，
 > 但腳本只採信「10 分鐘內的真實 GPS」—— 等於每小時有 50 分鐘，快照裡的
 > 公車依它自己的規則就已經過期。**公車在圖上消失不是沒有車，是快照太舊。**
-> 這種「兩個時間尺度不一致」的問題從程式碼完全看不出來，只能從資料契約反推。
+> 這種「兩個時間尺度不一致」的問題從程式碼完全看不出來，只能從資料的約定反推。
 
 > 搬出 OneDrive 之後，這三個 compose 專案的 bind mount 已全部指向
 > `/Users/kimi/CodingProject/...`，容器名稱與網路不變（compose 專案名來自資料夾名，
@@ -409,7 +431,11 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬）。
 守住那條路徑的有兩個地方：**macOS 那台**（仍在服役，見下表）與 `adopt-tests.yml`
-的 `macos-latest`。**在 Windows 上 43 項全過，不代表 macOS 會過。**
+的 `macos-latest`。**在 Windows 上 57 項全過，不代表 macOS 會過。**
+
+- **公司 Windows 上的 curl 會被憑證撤銷檢查擋住**（`CRYPT_E_NO_REVOCATION_CHECK`），
+  `gh` 沒事（它用 Go 自己的 TLS）。本機要用 curl 抓 release 檔或查 registry digest 時加
+  `--ssl-no-revoke`。CI 的 runner 沒這個問題，不要把這個旗標寫進 workflow。
 
 ### 移轉當下踩到的（換機器時會再遇到）
 
@@ -429,7 +455,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ---
 
-## 5. 踩過的坑（**別重蹈覆轍**）
+## 5. 踩過的雷（**別重蹈覆轍**）
 
 ### 關於這個 repo
 
@@ -443,7 +469,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   被 skip 的 check 永遠不會回報，PR 直接卡死。只把 Gate 設成 required。
 
 - **公版不能用 adopt 導入自己。**
-  公版的呼叫端刻意用 `uses: ./` 做 dogfooding；被改成 `owner/repo@ref`
+  公版的呼叫端刻意用 `uses: ./` 自己吃自己的狗糧；被改成 `owner/repo@ref`
   之後，PR 上跑的就不再是「這個 PR 的版本」，綠燈會變成假的。
   `adopt.sh` 有安全閥擋這件事，別拿掉。
 
@@ -458,7 +484,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ### 關於工具與環境
 
-- **「43 項全過」只證明它在測試那台機器上會過。**
+- **「全部通過」只證明它在測試那台機器上會過。**
   1.2.1 的回歸測試是在雲端（Linux + bash 5.x + GNU awk）跑的，全綠；
   但 `adopt.sh` 在 macOS（bash **3.2.57** + BSD awk）**從第 120 行就直接中止**，
   也就是 `docs/ADOPT.md` 列在第一順位的平台，腳本根本跑不起來。
@@ -502,7 +528,16 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   - **腳本產出的 YAML 仍是無 BOM** —— 兩件事不要混為一談。
   - **pwsh 7 完全正常，所以它藏了很久。** 驗這種東西一定要用
     `powershell.exe`（5.1），不能用 `pwsh`。
-  - 目前**沒有自動守門**（見 §3 ⑦）。
+  - 1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM（§3 ⑦）。
+
+- **第五類（不是平台，是計費）：GitHub 每個 job 不滿一分鐘也算一分鐘。**
+  1.3.0 之前 actionlint 與 shellcheck 各一個 job，兩個加起來 20 秒卻付 2 分鐘；
+  每次合併進 main 還會白起兩個 autoreview job 進去發現沒 PR 再跳過。
+  新增檢查時先問「能不能當既有 job 的一個步驟」，再問「要不要另開 job」。
+
+- **公版自己也要過 zizmor。** 1.3.0 第一次跑 zizmor 抓到 61 條：checkout 沒 `persist-credentials: false`、
+  呼叫端沒宣告 `permissions`、範本的 `@v1` 沒釘 SHA（那是刻意的，放行）、兩支 `workflow_run` 薄殼
+  （不執行 PR 程式碼，放行）。前兩類是真的該修，都修了。以後新加 job 記得這兩條。
 
   ### 這一類問題的通則
 
@@ -538,7 +573,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   這只影響互動操作，不影響腳本本身。
 
 <details>
-<summary>已作廢：macOS 時期的環境坑（2026-08-13 前）</summary>
+<summary>已作廢：macOS 時期的環境的雷（2026-08-13 前）</summary>
 
 - **多行貼上會卡在輸入緩衝區。** zsh 的 bracketed paste 把多行當一整段待送出內容，
   看起來像「沒反應」。給使用者的指令**寫成一行**，用 `&&` 串接。
@@ -616,11 +651,11 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 - **bash 3.2 + BSD awk 只有 macOS 測得到** —— Windows 的 Git Bash 是
   bash 5.2 + GNU awk，跟 Linux 一樣，測不到 1.2.2 修的那兩個 bug
 
-所以：**在任何一台上「43 項全過」都只證明那一台會過。** 動 `adopt.sh` 時，
-真正的覆蓋來自 `adopt-tests.yml` 的三平台 matrix，不是本機那一次。
+所以：**在任何一台上「全部通過」都只證明那一台會過。** 動 `adopt.sh` 時，
+真正的涵蓋來自 `adopt-tests.yml` 的三平台 matrix，不是本機那一次。
 
-⚠️ 而且那些 check 目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml`
+⚠️ 而且那個 check 目前**只會讓 PR 顯示紅燈，不會擋下合併** —— `adopt-tests.yml`
 是獨立 workflow，它的 job 不在 `ci / CI Gate` 底下，而 ruleset 只把兩個 Gate
-設成 required（見 §3 待辦 ④）。在那三個 check 進 ruleset 之前，**綠燈不是保證，是提示**。
+設成 required（見 §3 待辦 ④，要加的是 `adopt regression gate`）。在它進 ruleset 之前，**綠燈不是保證，是提示**。
 而且**改 shell 腳本時本來就該記得 `${VAR}` 與 `encoding='utf-8'` 那兩條規則** ——
 CI 是最後一道防線，不是第一道。

@@ -18,24 +18,27 @@
 ## 相容性（動到公版邏輯時必填）
 
 - [ ] 沒有改／移除任何 input 名稱
-- [ ] 沒有改任何 job 名稱（consumer 的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate`）
+- [ ] 沒有改任何 job 名稱（使用端的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate`）
 - [ ] 若有以上任一項 → **這是破壞性變更，要開 `v2`，不能移 `v1`**
 
 ## 公版自我檢查
-<!-- 每一條都對應過去真的踩過的坑，詳見 CONTRIBUTING.md -->
+<!-- 每一條都對應過去真的踩過的雷，詳見 CONTRIBUTING.md -->
 
 - [ ] 新增的 job 已加進 `ci-gate` / `security-gate` 的 `needs`
-- [ ] 有 `if` 條件的 job **沒有**被設成 required check（skipped 的 check 永遠不回報 → PR 卡死）
-- [ ] 新 action 與 container image 都釘了 commit SHA / 版本號（不用 `@main`、`:latest`）
+- [ ] 有 `if` 條件的 job **沒有**被設成 required check
+- [ ] 新 action 釘了 commit SHA、新 image 釘了 digest、新下載的執行檔有 sha256（不用 `@main`、`:latest`）
 - [ ] 掃描工具「執行失敗」會擋下，不會被當成通過
-- [ ] 外部輸入先過 `env:`，沒有把 `${{ }}` 直接插進 `run:` 字串
-- [ ] 新增的自動留言有次數上限 + marker 去重 + 達上限後停止
+- [ ] 外部輸入先過 `env:`，沒有把 `${{ }}` 直接塞進 `run:` 字串
+- [ ] 新增的自動留言有次數上限 + 標記防重複 + 達上限後停止
+- [ ] 沒有為了一個不到 30 秒的檢查另開一個 job（每個 job 至少算一分鐘）
 
 ## 怎麼驗證的
 
 - [ ] `actionlint`（含 `templates/` 那次）
+- [ ] `zizmor .`
 - [ ] `shellcheck scripts/*.sh`
-- [ ] 本 repo 的 CI + Security Scan 全綠（用 `./` 跑的是這個 PR 的版本）
+- [ ] `bash scripts/test-adopt.sh`（動到 `scripts/` 或 `templates/` 時）
+- [ ] 本 repo 的 CI + Security Scan + adopt 回歸測試全綠（用 `./` 跑的是這個 PR 的版本）
 - [ ] 高風險改動：已在真實專案用 `@main` 試跑
 - [ ] 其他（說明）：
 

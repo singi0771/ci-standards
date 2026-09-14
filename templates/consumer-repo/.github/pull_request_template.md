@@ -13,11 +13,11 @@
 - [ ] Manual Test（說明步驟）
 
 ## 安全性檢查
-- [ ] 無 hardcoded secret / token / 密碼
-- [ ] 無新增高風險或無維護的 dependency
-- [ ] 無新增 public bucket / privileged container / 0.0.0.0/0 開放
+- [ ] 沒有把密鑰、token、密碼寫死在程式或設定檔裡
+- [ ] 沒有新增高風險或沒人維護的套件
+- [ ] 沒有新增 public bucket、privileged container、對 0.0.0.0/0 開放的規則
 - [ ] 已確認輸入驗證與權限控管
-- [ ] 通過 Security Scan（Semgrep / Trivy / OSV / gitleaks）
+- [ ] 通過 Security Scan（Semgrep / Trivy / OSV / gitleaks / zizmor）
 
 ## Copilot / AI 使用說明
 - [ ] 本 PR 有使用 Copilot 協助

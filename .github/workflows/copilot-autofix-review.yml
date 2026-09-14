@@ -1,4 +1,4 @@
-# 薄殼（本 repo 自用，dogfooding）：review 帶修改意見 → 呼叫公版讓 Copilot 依意見自動修。
+# 薄殼（本 repo 自用，自己吃自己的狗糧）：review 帶修改意見 → 呼叫公版讓 Copilot 依意見自動修。
 # 用 ./ 相對路徑呼叫自己的 reusable —— PR 上跑的永遠是「這個 PR 的版本」。
 #
 # 觸發涵蓋兩種 review（1.2.0 起）：
@@ -6,9 +6,9 @@
 #      限定信任身分，公開 repo 上陌生帳號的 review 不得驅動 agent 執行其指示
 #   2. Copilot code review 的 COMMENTED（login 精確比對，不用 contains ——
 #      contains 會被相似帳號名繞過；[bot] 後綴視 API 來源而異，兩種寫法都收）
-#   空的「審完沒問題」COMMENTED review 由公版判斷跳過；迴圈收斂靠 max-attempts。
+#   空的「審完沒問題」COMMENTED review 由公版判斷跳過；迴圈要停下來靠 max-attempts。
 #
-# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`（設定方式見 README「自動修復閉環」）——
+# ⚠️ 需要 repo secret `COPILOT_TRIGGER_PAT`（設定方式見 README「自動修復流程」）——
 #    @copilot mention 必須由真人帳號發出，bot 發的會被 coding agent 忽略。
 name: Copilot Autofix — Review
 
@@ -18,7 +18,7 @@ on:
 
 permissions:
   pull-requests: write
-  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會靜默 403）
+  issues: write     # 達上限時貼 needs-human-review label 用（label API 屬 Issues 權限，少了會悄悄 403）
 
 jobs:
   autofix-review:

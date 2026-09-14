@@ -1,0 +1,25 @@
+# zizmor（workflow 安全檢查）的設定。本 repo 自己的 Security Scan 有開 run-zizmor。
+# zizmor 從 repo 根目錄掃，會連 templates/consumer-repo/.github/workflows 一起掃到，
+# 所以這裡的規則兩邊都適用（ignore 是比對檔名，不分目錄）。
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # 公版刻意用「會移動的 v1」讓所有專案自動跟版（見 README「版本策略」）。
+        # 這是有意的取捨：不可變的 vX.Y.Z tag 是退回點，SECURITY.md 有寫明風險。
+        # 所以指向本公版的 uses: 只要求有釘 tag / branch（ref-pin），不要求釘 SHA。
+        "singi0771/ci-standards/*": ref-pin
+        # 其他所有第三方 action 一律要釘 commit SHA
+        "*": hash-pin
+  dangerous-triggers:
+    # 這兩支薄殼用 workflow_run 觸發。zizmor 會警告，因為 workflow_run 跑在 main 的權限下、
+    # 卻常被拿來 checkout 並執行 PR 的程式碼。這裡不會：它們不 checkout、不執行任何 PR 內容，
+    # 只把事件的 metadata（分支名、run id）當「資料」傳給公版，公版再全部走 env: 進 shell。
+    ignore:
+      - copilot-autofix-ci-security.yml
+      - copilot-autoreview-gate.yml
+  self-repository:
+    # 本 repo 的呼叫端刻意用 `uses: ./...` 呼叫自己的 reusable（自己吃自己的狗糧：PR 上跑的
+    # 才會是「這個 PR 的版本」）。zizmor 建議改用 2026 年 7 月才推出的 `uses: $/...` 新語法，
+    # 但 actionlint 與 adopt.sh 都還不認得它，先維持 `./`，等工具跟上再換。
+    disable: true

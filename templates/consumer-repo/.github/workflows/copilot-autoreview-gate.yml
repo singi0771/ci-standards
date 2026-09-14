@@ -18,8 +18,11 @@ permissions:
 
 jobs:
   autoreview:
-    # 只在 workflow 成功時才呼叫公版（公版內會再確認「兩條都對同一 SHA 通過」）
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # 只在「PR 觸發的 workflow」成功時才呼叫公版（公版內會再確認「兩條都對同一 SHA 通過」）。
+    # 推到 main 或排程掃描成功了也沒有 PR 可審，不必起 job（每次合併省兩分鐘）。
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
     uses: singi0771/ci-standards/.github/workflows/copilot-autoreview-reusable.yml@v1
     with:
       head-sha:     ${{ github.event.workflow_run.head_sha }}
