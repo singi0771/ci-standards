@@ -24,7 +24,7 @@
 | Shell injection：event payload 進 `run:` | 外部輸入一律先過 `env:`，用 `"$VAR"` 引用，不把 `${{ }}` 插進字串；zizmor 的 `template-injection` 規則在 CI 守著 |
 | 權限過大 | workflow 一律宣告最小 `permissions`，需要什麼加什麼；呼叫端範本也宣告 `contents: read` |
 | checkout 留下的 token 被 artifact 帶出去 | 所有 `actions/checkout` 一律 `persist-credentials: false`（沒有任何 job 需要 push） |
-| 惡意改動混進 main | main 有分支保護；本 repo 自己也跑完整的 CI + 安全掃描 + zizmor（自己吃自己的狗糧） |
+| 惡意改動混進 main | main 有分支保護；本 repo 自己也跑完整的 CI + 安全掃描 + zizmor（公版拿自己當第一個使用者） |
 | `v1` 被移到惡意 commit | 每次發佈同時打不可變的 `vX.Y.Z`，可比對與退回。使用端若要更嚴，可以改釘 `@v1.x.y` 或 commit SHA，代價是不再自動跟版 |
 
 ## 支援的版本
@@ -32,7 +32,7 @@
 | 版本 | 狀態 |
 |---|---|
 | `v1`（目前指向的最新 `v1.x.y`） | ✅ 持續維護 |
-| 更舊的 `v1.x.y` | ⚠️ 僅作為退回點，不再修補 |
+| 更舊的 `v1.x.y` | ⚠️ 僅作為還原點，不再修補 |
 
 安全修補一律直接進最新版並移動 `v1`；不會回頭修舊的 minor 版本。
 

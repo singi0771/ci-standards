@@ -1,4 +1,4 @@
-# 薄殼（本 repo 自用）：CI 與 Security 都對同一 SHA 通過 → 請 Copilot 審。
+# 本 repo 自己的呼叫端 workflow：CI 與 Security 都對同一 SHA 通過 → 請 Copilot 審。
 # workflow_run 觸發器只認 default branch，合併進 main 後才生效。
 name: Copilot Auto Review
 
@@ -15,7 +15,7 @@ permissions:
 jobs:
   autoreview:
     # 只處理「PR 觸發」的成功。推到 main 或每週排程成功了也沒有 PR 可審，
-    # 以前也會起一個 job 進去才發現沒 PR 而跳過 —— 每次合併白付兩分鐘。
+    # 以前也會起一個 job 進去才發現沒 PR 而跳過 —— 每次合併多付兩分鐘。
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'

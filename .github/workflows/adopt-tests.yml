@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 jobs:
-  # 便宜的前哨：算出這次到底有沒有動到「會影響 adopt 的檔案」。
+  # 便宜的第一步：算出這次到底有沒有動到「會影響 adopt 的檔案」。
   # 只有 docs/、根目錄與 .github/ 底下的 .md、Issue 表單、LICENSE 算「純文件」；
   # 其他任何檔案都算會影響 —— adopt.sh 會讀 reusable 的 inputs 宣告，
   # 而 templates/ 底下連 .md（copilot-instructions.md、PR 範本）都會被原樣複製到 consumer，
@@ -197,7 +197,7 @@ jobs:
         run: |
           echo "changes job: $CHANGES / 需要跑: ${SHOULD_RUN:-<空值>} / matrix: $TESTS"
           if [ "$CHANGES" != "success" ]; then
-            echo "::error::前哨 job 沒跑成（$CHANGES），無法判斷要不要測，視為失敗"; exit 1
+            echo "::error::判斷要不要跑的那個 job 沒跑成（$CHANGES），無法判斷要不要測，視為失敗"; exit 1
           fi
           if [ "$SHOULD_RUN" = "true" ]; then
             if [ "$TESTS" != "success" ]; then

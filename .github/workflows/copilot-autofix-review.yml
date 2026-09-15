@@ -1,4 +1,4 @@
-# 薄殼（本 repo 自用，自己吃自己的狗糧）：review 帶修改意見 → 呼叫公版讓 Copilot 依意見自動修。
+# 本 repo 自己的呼叫端 workflow（公版拿自己當第一個使用者）：review 帶修改意見 → 呼叫公版讓 Copilot 依意見自動修。
 # 用 ./ 相對路徑呼叫自己的 reusable —— PR 上跑的永遠是「這個 PR 的版本」。
 #
 # 觸發涵蓋兩種 review（1.2.0 起）：

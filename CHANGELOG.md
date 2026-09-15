@@ -4,9 +4,27 @@
 一次改動會同時影響所有專案，所以每次發佈都必須記在這裡。
 
 版本規則見 [README — 版本策略](README.md#版本策略)。每次發佈打兩個 tag：
-不可變的 `vX.Y.Z`（退回點）+ 會移動的 `vX`（大家指向的別名）。
+不可變的 `vX.Y.Z`（還原點）+ 會移動的 `vX`（大家指向的別名）。
 
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
+
+---
+
+## [1.3.1] — 2026-09-15
+
+**只改用詞，沒有任何行為變更。** 指向 `@v1` 的專案 CI 行為完全不變；因為範本與導入腳本的
+註解、輸出訊息也跟著改，所以還是照規矩發一版。
+
+### 文件與註解
+- 「薄殼」全部改成「呼叫端 workflow」；三支 copilot 那幾支要特別區分時寫
+  「只負責觸發的呼叫端 workflow」。README 那一節改名為「為什麼呼叫端只放觸發條件、不整包複製」。
+- 其他自創的簡語一併換成平常講話的說法：接線約定→呼叫方式、狗糧→公版拿自己當第一個使用者、
+  擋門→擋 PR、安全閥→保護措施、白付→多付、雙綠／雙 Gate→兩個 Gate 都綠、前哨 job→判斷要不要跑的 job、
+  打通→能用、消費端→使用端、技術棧→使用的技術、拼裝品→東拼西湊的東西、硬規定→硬性規定、
+  收尾→最後、退回點→還原點。
+- 保留的詞：「公版」（台灣本來就有這個用法，指大家共用的那一份；README 開頭補了一句解釋）、
+  「範本」、「呼叫端」、「就地合併」、「整份換新」。
+- 回歸測試的 57 項只改了顯示文字，檢查內容不變。
 
 ---
 
@@ -14,14 +32,14 @@
 
 **一次大整理：多三個可選的安全檢查、下載的工具全部釘校驗碼、CI 少開 job、文件改成台灣口語。**
 對既有呼叫端**完全相容**：新 input 都有預設值、`ci / CI Gate` 與 `security / Security Gate` 名稱不變。
-但有幾個行為變更（見「相容性」），而且薄殼與新參數要**重跑一次 `adopt.sh`** 才會進到你的專案。
+但有幾個行為變更（見「相容性」），而且呼叫端 workflow 與新參數要**重跑一次 `adopt.sh`** 才會進到你的專案。
 
 ### 新增 —— 安全檢查（security-reusable）
 - **zizmor**（`run-zizmor`，預設 `false`，範本與 adopt 預設打開）：檢查 `.github/workflows` 本身的安全 ——
   把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、
   沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact。
   這是 actionlint 管不到的一整類問題。放行規則放專案的 `.github/zizmor.yml`（範本已附一份，
-  放行公版刻意用的 `@v1` 與兩支 `workflow_run` 薄殼）；`zizmor-min-severity` 可調門檻。
+  放行公版刻意用的 `@v1` 與兩支用 `workflow_run` 觸發的呼叫端 workflow）；`zizmor-min-severity` 可調門檻。
   `fail-on-findings: false` 時用 zizmor 的 `--no-exit-codes` 而不是 `continue-on-error`：
   只把「有找到問題」壓成綠燈，工具本身當掉或找不到任何 workflow 照樣紅（採納 PR #32 的 Copilot 審查意見）。
 - **SBOM**（`generate-sbom`，預設 `false`）：用 Trivy 產出 CycloneDX JSON 存成 artifact `sbom-cyclonedx`。
@@ -44,13 +62,13 @@
 
 ### 變更 —— 省 Actions 分鐘（每個 job 不滿一分鐘也算一分鐘）
 - **actionlint 與 shellcheck 合成一個 job**「Workflow + shell lint (actionlint, shellcheck)」。
-  兩個加起來不到 30 秒，拆兩個 job 白付一分鐘。CI Gate 的判定跟著改（兩個 input 任一為 true 就必須 success）。
+  兩個加起來不到 30 秒，拆兩個 job 多付一分鐘。CI Gate 的判定跟著改（兩個 input 任一為 true 就必須 success）。
   這兩個 job 名稱**不是** required check，改名不影響任何 ruleset。
 - **actionlint 改抓執行檔**（2 MB），不再拉 docker image（每次省 20–40 秒）；shellcheck 用 runner 內建的。
 - Python job 不再 `pip install --upgrade pip`。
-- **兩支 `workflow_run` 薄殼（autofix-ci-security、autoreview-gate）只理「PR 觸發」的 run**
+- **兩支用 `workflow_run` 觸發的呼叫端 workflow（autofix-ci-security、autoreview-gate）只理「PR 觸發」的 run**
   （`github.event.workflow_run.event == 'pull_request'`）。以前推到 main 或每週排程完成也會起 job，
-  進去發現沒 PR 再跳過 —— 每次合併白付 2 分鐘。**這是薄殼 `if:` 的變更，要重跑 `adopt.sh` 才會換上。**
+  進去發現沒 PR 再跳過 —— 每次合併多付 2 分鐘。**這是呼叫端 workflow `if:` 的變更，要重跑 `adopt.sh` 才會換上。**
 - **草稿 PR 整個跳過**（範本呼叫端）：`pull_request.types` 多列 `ready_for_review`，job 加
   `if: !github.event.pull_request.draft`。草稿本來就不能 merge，沒有安全上的損失。
   升級模式不動 `on:`，既有專案要的話照範本手動改。
@@ -59,7 +77,7 @@
 - **Dependabot 範本**：docker 與 github-actions 改**每月**，pip 維持每週（小版本併一個 PR）。
   每個 Dependabot PR 都會跑整套 CI + Security，少開 PR 就少跑。本 repo 自己的也改每月。
 - 各 job 的 `timeout-minutes` 收緊（gate 3、小工具 5、Semgrep / Trivy 10），跑不完就砍，不會吊著燒分鐘。
-- **本 repo 的 adopt 三平台測試**多了一個便宜的前哨 job：只動文件的 PR 整個跳過 matrix
+- **本 repo 的 adopt 三平台測試**多了一個便宜的判斷 job：只動文件的 PR 整個跳過 matrix
   （macOS runner 算 10 倍分鐘），並新增 `adopt regression gate` 當唯一該設成 required 的 check。
 
 ### 變更 —— 導入腳本（adopt.sh / adopt.ps1 / test-adopt.sh）
@@ -75,7 +93,7 @@
 
 ### 文件
 - **全面改成台灣口語**：閉環→自動流程、去重→防重複、靜默→悄悄、排查→查問題、回滾→退回、冪等→可重複執行、
-  契約→接線約定、旋鈕→設定、收斂→停下來、升級人工→轉交人工、坑→雷…，以及 dogfooding、canary、marker
+  契約→呼叫方式、旋鈕→設定、收斂→停下來、升級人工→轉交人工、坑→雷…，以及 dogfooding、canary、marker
   這類直接用英文的地方補上白話。
 - README 重寫：開頭加「白話版三句話」、每個掃描器「抓什麼 / 抓不到什麼」的表、新的
   「省 Actions 分鐘」一節、疑難排解補上 zizmor 常見紅燈與校驗碼對不上的處理。
@@ -89,7 +107,7 @@
 ### 相容性 —— 既有專案要注意的
 - 對既有呼叫端**完全相容**：新 input 都有預設值，job id 與兩個 Gate 名稱不變，reusable 新版移了 `v1` 就生效。
 - 行為變更（移 `v1` 就吃到）：Trivy 預設不掃 secret；CI 的兩個 lint job 合併成一個（Summary 表少一列）。
-- 要吃到的話得重跑 `adopt.sh`：薄殼只理 PR 觸發的 run、`zizmor.yml`、`run-hadolint` / `run-zizmor`。
+- 要吃到的話得重跑 `adopt.sh`：呼叫端 workflow 只理 PR 觸發的 run、`zizmor.yml`、`run-hadolint` / `run-zizmor`。
 - 要手動改 `on:` 才有：草稿 PR 跳過、Dependabot 每月。
 - 已知仍存在的人工關卡不變：Copilot 推的 commit 觸發的 run 要人按一次「Approve and run workflows」。
 
@@ -154,7 +172,7 @@
   整節改寫（舊的 `/Users/kimi/...` 與 `$CODE_WORK` 全部作廢），§6 對照表更新為
   「本機 = Windows」。同時記下移轉本身踩到的兩個雷：`core.filemode` 要設 `false`
   （否則在 Windows commit 會剝掉 `.sh` 的執行權限），以及用 robocopy 搬
-  使用中的 git repo 會搬出「工作區混著多個 commit」的拼裝品。
+  使用中的 git repo 會搬出一個工作區混著多個 commit 的東西。
 
   ⚠️ 連帶影響：**本機不再測得到 macOS 那條路徑**（以前開發機就是 Mac，
   等於天然有涵蓋），現在只剩 CI 的 `macos-latest` 在守。
@@ -162,7 +180,7 @@
 - `docs/HANDOFF.md` §2／§3：待辦 ①②（AdminAutoTools 重跑 adopt、設
   `COPILOT_TRIGGER_PAT`）經查證**其實都已完成**，改標為完成並附驗證指令；
   ③（驗 `adopt.ps1`）因為開發機變成 Windows 而**從封鎖變成可執行**，升為現在的重點。
-  新增待辦 ⑥：AdminAutoTools 的三支 copilot 薄殼釘的是 `@main` 而不是 `@v1`，
+  新增待辦 ⑥：AdminAutoTools 的三支 copilot 呼叫端 workflow 釘的是 `@main` 而不是 `@v1`，
   等於繞過發佈閘門，要改回來。
 
 ### 文件
@@ -294,23 +312,23 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 `adopt.sh` 才會真正拿到 1.2.0 的自動修迴圈**（1.2.0 那版的升級路徑補不進去）。
 
 ### 修正
-- **`scripts/adopt.sh` / `adopt.ps1`：升級模式漏掉 1.2.0 的接線約定變更。**
+- **`scripts/adopt.sh` / `adopt.ps1`：升級模式漏掉 1.2.0 的呼叫方式變更。**
   原本五支呼叫端一律走「就地合併」，而就地合併只碰 `with:` 區塊。
-  1.2.0 真正改的是三支 `copilot-*` 薄殼的 `if:` 條件與 `secrets:` 區塊
+  1.2.0 真正改的是三支 `copilot-*` 呼叫端 workflow 的 `if:` 條件與 `secrets:` 區塊
   （多收 Copilot 的 `COMMENTED` review、把 `COPILOT_TRIGGER_PAT` 傳進公版），
   所以舊 consumer 升級後會拿到**新的 `uses:` 卻留著舊的 `if:` 和缺席的 `secrets:`**
   —— 版本號變了、自動修迴圈還是壞的。腳本雖然會印一行警告要人「從 templates/ 重新複製」，
-  但一鍵導入卻要人手動補檔，等於這條路沒有真正打通。
+  但一鍵導入卻要人手動補檔，等於這條路沒有真正走通。
 
   改成**檔案分三類**：
   - `ci.yml` / `security.yml`（真的帶專案設定）→ 維持就地合併
-  - 三支 `copilot-*` 薄殼（`if:`/`with:` 接線/`secrets:` 都是公版的接線約定）→ **整份換成新範本**，
+  - 三支 `copilot-*` 呼叫端 workflow（`if:`／`with:` 怎麼傳參數／`secrets:` 都是公版規定的呼叫方式）→ **整份換成新範本**，
     只把使用者自己打開過的設定（`max-attempts`、`max-review-requests`）搬回來，
     舊檔留成 `.bak`；內容沒變就不留，維持可重複執行
   - 專案專屬的四個檔 → 維持絕不覆蓋
 
   「哪些設定該搬」不寫死：判準是「舊檔有設、而新範本沒設」，且公版 reusable
-  仍認得該 input（不認得的照樣移除並回報）。原本的接線檢查改成收尾用的
+  仍認得該 input（不認得的照樣移除並回報）。原本的呼叫方式檢查改成最後才做的
   最後再驗一次的檢查 —— 會叫就代表 `--std` 指到的公版比 1.2.0 舊。
 
   回歸測試新增 15 項（`scripts/test-adopt.sh` 情境 B），模擬停在 1.2.0 之前、
@@ -329,7 +347,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
   免得日後有人再花時間去調那個沒用的設定。總表該列也從「這條要先解」一併更正。
 
 ### 變更
-- `docs/ADOPT.md` 升級一節改寫成「三類檔案、三種策略」，並說明薄殼為什麼不能就地合併。
+- `docs/ADOPT.md` 升級一節改寫成「三類檔案、三種策略」，並說明呼叫端 workflow 為什麼不能就地合併。
 - 導入完的提示新增「設定 repo secret `COPILOT_TRIGGER_PAT`」——
   沒設的話 CI 會過，但自動修迴圈不會動工，是導入後最容易漏掉的一步。
 - `docs/SETUP.md` 新增「只留一個 review 觸發源」與「Review thread 一律要求 resolve」兩節。
@@ -349,12 +367,12 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 實測（AdminAutoTools PR #52–#63）證明 1.1.0 的自動修正迴圈存在兩個致命斷點，
 等於**從未實際運作過**——所有「採納 Copilot 意見」的修正 commit 其實都是人工完成的：
 
-1. **觸發條件錯配**：autofix-review 薄殼只認 `changes_requested`，但 Copilot code review
+1. **觸發條件錯配**：autofix-review 那支呼叫端 workflow 只認 `changes_requested`，但 Copilot code review
    永遠只送 `COMMENTED`（它不會、也不能 request changes）→ Copilot 的意見從不觸發自動修正。
 2. **mention 無效**：`@copilot` 留言由 `github-actions[bot]`（`GITHUB_TOKEN`）發出，
    coding agent 會忽略 bot 的 mention（GitHub 防 bot 迴圈機制）→ 就算觸發了也叫不動 Agent。
 
-### 新增 —— Copilot 迴圈打通（ci-standards PR #12）
+### 新增 —— Copilot 迴圈真的能動了（ci-standards PR #12）
 
 - `copilot-autofix-review-reusable.yml`：
   - 新增 `review-id` / `review-state` 輸入：COMMENTED review 先確認**真的有 inline 意見**
@@ -371,9 +389,9 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - **觸發條件資安強化**（採納 PR #14 的 Copilot 審查意見）：真人 `changes_requested`
   限定信任身分（OWNER/MEMBER/COLLABORATOR）——公開 repo 上陌生帳號的 review
   不得驅動 agent 執行其指示；Copilot login 改精確比對（`contains` 可被相似帳號名繞過）。
-- 本 repo **自用薄殼**同步至新約定（自己吃自己的狗糧：1.2.0 起 ci-standards 自己的 PR
+- 本 repo **自己用的呼叫端 workflow**同步至新約定（公版拿自己當第一個使用者：1.2.0 起 ci-standards 自己的 PR
   也走完整迴圈；需在本 repo secrets 設 `COPILOT_TRIGGER_PAT`）。
-- `adopt` 接線檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
+- `adopt` 的呼叫方式檢查同時涵蓋 `secrets:` 與 COMMENTED 觸發條件兩塊——只補其一
   仍會被警告，避免「半升級」被誤判為相容。
 - README 新增 **`COPILOT_TRIGGER_PAT` 設定步驟**（fine-grained PAT，
   Issues:write + Pull requests:write，範圍限單一 repo）。
@@ -382,7 +400,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
 - 🔴 **deps.dev 解析服務故障會讓所有 PR 全紅**（2026-08-08 起連續兩天實測）：
   osv-scanner 對 manifest（requirements.txt）做間接依賴解析時，Google deps.dev 回
-  `rpc error: Internal`，即使**實際弱點數為 0** 也以 exit 1 收場 → Security Gate 全面擋門，
+  `rpc error: Internal`，即使**實際弱點數為 0** 也以 exit 1 收場 → Security Gate 把所有 PR 都擋下，
   且錯誤訊息被誤標成「Vulnerabilities found!」。
 - 修法：偵測到「非零 exit + `failed resolution`/`rpc error` 字樣 + **第一輪弱點數為 0**」
   三個條件同時成立，才自動以 `--no-resolve` 重掃一次 —— 直接依賴照掃、有弱點照擋，
@@ -428,15 +446,15 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
 ### 相容性 —— 既有 consumer 要做的事
 
-- 公版新增的 input 與 secret 都是 optional，**舊薄殼呼叫新公版不會壞**，
+- 公版新增的 input 與 secret 都是 optional，**舊的呼叫端 workflow 呼叫新公版不會壞**，
   只是自動修正迴圈維持原本的「不會動」狀態。
 - **要啟用迴圈，既有專案必須做兩件事**：
   1. 在 repo secrets 加 `COPILOT_TRIGGER_PAT`（設定步驟見 README）。
   2. **重新複製** `copilot-autofix-review.yml` 與 `copilot-autofix-ci-security.yml`
-     兩支薄殼 —— 這是罕見的**薄殼接線變更**（`if:` 觸發條件 + `secrets:` 區塊），
+     兩支呼叫端 workflow —— 這是罕見的**呼叫端 workflow 呼叫方式的變更**（`if:` 觸發條件 + `secrets:` 區塊），
      `adopt` 的升級模式只同步 `uses:` 與 `with:`，**不會**更新這兩個部分
      （腳本偵測到缺 `secrets:` 時會提醒）。
-- 已知仍存在的人工關卡（GitHub 硬規定）：Copilot 推的 commit 觸發的 workflow run
+- 已知仍存在的人工關卡（GitHub 硬性規定）：Copilot 推的 commit 觸發的 workflow run
   需要人按一次「Approve and run workflows」；替代法是自己推空 commit。
   詳見 `docs/KNOWN-LIMITATIONS.md`。
 
@@ -453,8 +471,8 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - `ci-reusable.yml` 新增 `run-python`、`run-actionlint`、`actionlint-paths`、
   `run-shellcheck`、`shellcheck-paths`。**非 Python 專案現在可以直接用公版**
   （`run-python: false`），不必自己另寫一支 CI，也就不會失去 `ci / CI Gate` 這個統一的 check 名稱。
-- 本 repo 自己套用公版（自己吃自己的狗糧）：`.github/workflows/` 下的 `ci.yml`、`security.yml`
-  與三支 `copilot-auto*` 薄殼，全部用 `./` 呼叫自己的 reusable ——
+- 本 repo 自己套用公版（公版拿自己當第一個使用者）：`.github/workflows/` 下的 `ci.yml`、`security.yml`
+  與三支 `copilot-auto*` 呼叫端 workflow，全部用 `./` 呼叫自己的 reusable ——
   改壞公版時當場就會紅，不會等到別人的專案才爆。
 - `.github/copilot-instructions.md`、`.github/dependabot.yml`。
 
@@ -500,7 +518,7 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 - `docs/KNOWN-LIMITATIONS.md` —— **導入前必看**。實測過但還不能用的功能，
   每條附「怎麼測的 + 結果 + 逐步查問題」。這些結論原本只存在於已關閉 PR 的留言裡。
 
-  實測摘要：Gate 擋門、cooldown 防重複、autoreview 防重複全部正常；Copilot Code Review 正常；
+  實測摘要：Gate 擋 PR、cooldown 防重複、autoreview 防重複全部正常；Copilot Code Review 正常；
   **Copilot Coding Agent 指派 Issue 可用**（會立刻開 PR），但
   ① Actions 貼的 `@copilot` 喚不醒它（GitHub 對 bot 觸發 bot 的防迴圈限制）、
   ② **Copilot 開的 PR，其 CI/Security run 全部卡在 `action_required`**
@@ -537,4 +555,4 @@ macOS 的預設環境是 **bash 3.2.57 + BSD awk**，兩者都會踩 —— 也�
 
 ⚠️ **不要使用這一版**：含 1.1.0 修掉的三種死鎖與掃描悄悄失效問題，
 且 `ci-reusable.yml` 只有 3 個 input，寫 `run-python: false` 會直接 invalid input 啟動失敗。
-留著只作為退回點。
+留著只作為還原點。

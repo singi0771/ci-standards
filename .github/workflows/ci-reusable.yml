@@ -2,7 +2,7 @@
 # 各專案用一行 uses: 呼叫；統一 lint + test + Docker build 檢查。
 #
 # 省 Actions 分鐘的設計（GitHub 每個 job 都是「不滿一分鐘也算一分鐘」）：
-#   - actionlint 與 shellcheck 合成一個 job（兩個加起來不到 30 秒，拆兩個 job 白付一分鐘）
+#   - actionlint 與 shellcheck 合成一個 job（兩個加起來不到 30 秒，拆兩個 job 多付一分鐘）
 #   - hadolint 放在 Docker build 那個 job 裡當一個步驟，不另開 job
 #   - actionlint 改抓 2 MB 的執行檔，不再拉 docker image（省 20–40 秒）
 name: Reusable CI

@@ -1,5 +1,5 @@
 # 中央「公版」Reusable：CI/Security 失敗時請 Copilot Coding Agent 自動修。
-# consumer 端只放一支 workflow_run 觸發的薄殼，用一行 uses: 呼叫本檔並傳入事件參數。
+# 專案端只放一支用 workflow_run 觸發的呼叫端 workflow，用一行 uses: 呼叫本檔並傳入事件參數。
 # 邏輯集中在這裡；改動只要移動 tag，各專案下次觸發即自動跟著更新。
 name: Reusable — Copilot Autofix (CI/Security)
 
@@ -158,7 +158,7 @@ jobs:
           MAX: ${{ inputs.max-attempts }}
         run: |
           if [ "$HAS_PAT" != "true" ]; then
-            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由薄殼傳入。"
+            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由呼叫端 workflow 傳入。"
           fi
           ATTEMPT=$(( ATTEMPTS + 1 ))
           BODY=$(printf '<!-- auto-fix-attempt -->\n🔴 **%s 失敗，自動修正中（第 %d/%s 次）**\n\n失敗的 jobs：\n%s\n\n詳細 log：%s\n\n@copilot 請分析上述失敗原因，直接修正程式碼並 commit 到本 PR 分支。修正後 CI 會自動重跑，不需手動觸發。若為安全掃描問題，請優先以修改程式碼解決，避免使用 ignore 規則。' \

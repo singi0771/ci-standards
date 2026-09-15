@@ -42,7 +42,7 @@ git tag v1 && git push origin v1
 
 ⚠️ **一定要移動 tag，否則所有專案完全不會有感覺**（大家都指向 `@v1`）。
 
-每次發佈打**兩個** tag：不可變的版本號（退回點）+ 會移動的別名（大家指向的）。
+每次發佈打**兩個** tag：不可變的版本號（還原點）+ 會移動的別名（大家指向的）。
 
 ```bash
 git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變
@@ -63,7 +63,7 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 ### 改動公版的自我檢查
 
 - [ ] 有沒有改到 input 名稱或 job 名稱？（會打壞既有 repo 的 ruleset → 該開 v2）
-- [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋門，形同虛設）
+- [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋 PR，形同虛設）
 - [ ] 新 action 有沒有釘 commit SHA？（不要用 `@master` / `@main`，供應鏈風險）
 - [ ] 新 **container image** 有沒有釘 tag + digest？（`:latest` 的話沒改程式的 repo 會隨上游新規則突然變紅，
       只釘 tag 的話上游重推同一個 tag 你不會知道）
@@ -93,7 +93,7 @@ Copilot 會來審 PR 有**兩個**可能的來源，同時開著會互相打架�
 | 來源 | 何時觸發 | 設定位置 |
 |---|---|---|
 | **GitHub 原生自動 review** | **PR 一開就審**（CI 還沒跑） | repo/org 設定或 ruleset 的「Require Copilot code review」 |
-| **本公版的 `copilot-autoreview-gate.yml`** | **雙 Gate 全綠之後**才請審，且跳過 Dependabot | 複製範本即有 |
+| **本公版的 `copilot-autoreview-gate.yml`** | **兩個 Gate 都綠之後**才請審，且跳過 Dependabot | 複製範本即有 |
 
 **兩個都開的話會發生什麼**（2026-08-09 PR #15 的真實案例）：
 
@@ -120,7 +120,7 @@ Copilot 會來審 PR 有**兩個**可能的來源，同時開著會互相打架�
 2. 若是用 **ruleset** 開的：Settings → Rules → Rulesets → 編輯該 ruleset →
    取消 **Require Copilot code review**
 3. 驗證：開一個測試 PR，確認 **CI 跑完之前不會出現 Copilot 的 review**，
-   雙 Gate 綠了之後才由 `copilot-autoreview-gate` 貼出請審留言
+   兩個 Gate 都綠了之後才由 `copilot-autoreview-gate` 貼出請審留言
 
 > 想手動請 Copilot 審某個 PR 隨時可以（PR 頁面 Reviewers → Copilot）。
 > 關掉的只是「每個 PR 都自動審」。
@@ -137,7 +137,7 @@ Copilot 會來審 PR 有**兩個**可能的來源，同時開著會互相打架�
 
 **該調整的是觸發頻率（上一節），不是把關卡拿掉。**
 關掉原生自動 review 之後，需要 resolve 的 thread 自然大幅減少：
-Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 PR，
+Dependabot 的版本更新不再產生 review，而兩個 Gate 都過了才被審的 PR，
 本來就值得人看一眼。
 
 ### Copilot Coding Agent（把 Issue 變 PR）
@@ -158,7 +158,7 @@ Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 P
 3. 該 repo → Settings → Secrets and variables → Actions → New repository secret，
    名稱 `COPILOT_TRIGGER_PAT`
 4. 驗收：開一個測試 PR 讓 Copilot 審出意見，確認 `@copilot` 留言的**作者是那個真人帳號**
-   且 Agent 有動工。若留言作者仍是 `github-actions[bot]`，代表 secret 沒傳到（檢查薄殼
+   且 Agent 有動工。若留言作者仍是 `github-actions[bot]`，代表 secret 沒傳到（檢查呼叫端 workflow
    的 `secrets:` 區塊）；run log 會有 `::warning::` 提示。
 
 > 仍存在的人工關卡：Copilot 推的 commit 觸發的 run 要人按一次「Approve and run workflows」
@@ -174,7 +174,7 @@ Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 P
 
 | 觀察項 | 結果 |
 |---|---|
-| Gate 擋門、cooldown 防重複、autoreview 防重複 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
+| Gate 擋 PR、cooldown 防重複、autoreview 防重複 | ✅ 全部正常（4 個觸發事件只產生 2 則留言） |
 | Copilot **Code Review**（自動審） | ✅ 會動 |
 | Copilot **Coding Agent** — 指派 Issue（官方入口） | ✅ 會動，立刻開出 PR |
 | Copilot **Coding Agent** — Actions 貼的 `@copilot` 留言 | ❌ 等 12 分鐘無反應 |
@@ -189,7 +189,7 @@ Dependabot 的版本更新不再產生 review，而通過雙 Gate 才被審的 P
 > 測法：開一個小 Issue，Assignees 指派給 Copilot，看它會不會開 PR。
 
 > **在自動觸發修好之前照常導入，只是「修」要手動起頭。**
-> 完整可用的路徑是「掃描擋門 → Copilot 自動審 → 開 Issue 指派 Copilot 修 → 人 merge」。
+> 完整可用的路徑是「掃描擋 PR → Copilot 自動審 → 開 Issue 指派 Copilot 修 → 人 merge」。
 > 三支 `copilot-auto*` 複製過去不會有害（沒反應而已，也不燒 credits），
 > 但**不要拿它們當導入成功的驗收標準**。
 
@@ -258,7 +258,7 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 - 還在寫的 PR 開成**草稿**：1.3.0 的範本呼叫端遇到草稿整個跳過，按 Ready for review 才跑
 - Dependabot 的 docker / github-actions 改每月（1.3.0 範本預設）；每個 Dependabot PR 都會跑整套
 - 1.3.0 公版自己已經把 actionlint + shellcheck 合成一個 job、hadolint 併進 Docker build、
-  兩支 `workflow_run` 薄殼只理 PR 觸發的 run —— 這些不用你設定，移了 `v1` 就生效
+  兩支用 `workflow_run` 觸發的呼叫端 workflow 只理 PR 觸發的 run —— 這些不用你設定，移了 `v1` 就生效
 
 完整清單見 [README — 省 Actions 分鐘](../README.md#省-actions-分鐘這套怎麼省你還能怎麼省)。
 
