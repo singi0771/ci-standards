@@ -77,8 +77,8 @@ fi
 TARGET_ROOT="$(git rev-parse --show-toplevel)"
 cd "$TARGET_ROOT"
 
-# 安全閥：不准把公版導入公版自己。
-# 公版的呼叫端刻意用 `uses: ./...` 自己吃自己的狗糧；被這支腳本改成
+# 保護措施：不准把公版導入公版自己。
+# 公版的呼叫端刻意用 `uses: ./...` 呼叫自己，當自己的第一個使用者；被這支腳本改成
 # `owner/repo@ref` 之後，PR 上跑的就不再是「這個 PR 的版本」，
 # 綠燈會變成假的。（這正是 2026-08-08 真的發生過的事故。）
 if [ -d "$TARGET_ROOT/templates/consumer-repo/.github" ]; then
@@ -120,7 +120,7 @@ info "── 目標：$TARGET_ROOT"
 info "── 公版：${STD}（ref: ${REF}，uses: ${USES_REPO}）"
 info ""
 
-# ── 偵測技術棧 ───────────────────────────────────────────────
+# ── 偵測用了哪些技術 ───────────────────────────────────────────────
 found_any() {
   [ -n "$(find . -maxdepth "$1" -name "$2" -not -path './.git/*' -print -quit 2>/dev/null)" ]
 }
@@ -178,7 +178,7 @@ reusable_for() {
 }
 
 # 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）。
-# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（自己吃自己的狗糧），
+# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（公版拿自己當第一個使用者），
 # 把它改成 owner/repo@ref 會讓 PR 上跑的不再是「這個 PR 的版本」。
 patch_uses() {
   awk -v repo="$USES_REPO" -v ref="$REF" '
@@ -274,10 +274,10 @@ with_keys() {
   ' "$1"
 }
 
-# 薄殼換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
+# 呼叫端 workflow 換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
 #
 # 判準只有一條：舊檔有設、而新範本沒設。
-#   - 新範本自己就有的 key（head-branch / review-id 這種接線）→ 範本版本才是對的，
+#   - 新範本自己就有的 key（head-branch / review-id 這種傳參數用的 key）→ 範本版本才是對的，
 #     使用者那份是舊約定，搬過去等於把 bug 一起搬過去
 #   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
 #   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的設定）才是使用者的設定
@@ -301,7 +301,7 @@ carry_knobs() {
   done
 }
 
-# 把 carry_knobs 撈出來的那幾行放回新薄殼：
+# 把 carry_knobs 撈出來的那幾行放回新的呼叫端 workflow：
 # 範本裡有對應的註解提示（# max-attempts: "3"）就取代那一行，否則附在 with: 區塊尾巴。
 inject_knobs() {
   f="$1"; carried="$2"
@@ -340,7 +340,7 @@ REFRESHED=""; SHELL_SAME=""; CARRIED_REPORT=""
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
 CONFIGURED="ci.yml security.yml"
-# SHELL_FILES：純薄殼。if: / with: 的接線與 secrets: 都屬於公版的接線約定，
+# SHELL_FILES：只負責觸發的呼叫端 workflow。if: / with: 怎麼傳參數、secrets: 怎麼傳，都是公版規定的呼叫方式，
 #   使用者能調的只有註解裡標出來的那幾個設定。
 #   → 整份換成新範本，再把使用者打開過的設定搬回來。
 #
@@ -373,7 +373,7 @@ for name in $CONFIGURED; do
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for name in $SHELL_FILES; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（薄殼以範本為準；只搬回你調過的設定，舊檔留 .bak）"
+  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（以範本為準；只搬回你調過的設定，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -505,8 +505,8 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
-# ── 1.2.0 的接線約定的收尾檢查 ─────────────────────────────────────
-# 薄殼現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
+# ── 1.2.0 呼叫方式的最後檢查 ─────────────────────────────────────
+# 呼叫端 workflow 現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
 # 比 1.2.0 舊（或範本被改壞）—— 那就是「導完自動修迴圈還是不會動」，
 # 寧可吵也不要靜靜地過。
 PAT_WARN=""
@@ -517,7 +517,7 @@ for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
   if ! grep -q "copilot-trigger-pat" "$dst"; then
     missing="secrets: copilot-trigger-pat"
   fi
-  # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
+  # review 那支呼叫端 workflow 還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
   # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
   if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
     if [ -n "$missing" ]; then missing="${missing}、COMMENTED 觸發條件"
@@ -533,12 +533,12 @@ done
 info "───────────────────────────────────────────────────────────"
 if [ -n "$CREATED" ];    then info "＋ 新增：$CREATED"; fi
 if [ -n "$MERGED" ];     then info "↻ 合併：$MERGED"; fi
-if [ -n "$REFRESHED" ];  then info "⟳ 換新（薄殼，舊檔留在 .bak）：$REFRESHED"; fi
+if [ -n "$REFRESHED" ];  then info "⟳ 換新（整份換成範本，舊檔留在 .bak）：$REFRESHED"; fi
 if [ -n "$SHELL_SAME" ]; then info "＝ 已是最新：$SHELL_SAME"; fi
 if [ -n "$KEPT" ];       then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
 if [ -n "$CARRIED_REPORT" ]; then
   info ""
-  info "薄殼換新版時搬回來的設定：$CARRIED_REPORT"
+  info "呼叫端 workflow 換新版時搬回來的設定：$CARRIED_REPORT"
 fi
 if [ -n "$DROPPED_REPORT" ]; then
   info ""
@@ -546,7 +546,7 @@ if [ -n "$DROPPED_REPORT" ]; then
 fi
 if [ -n "$PAT_WARN" ]; then
   info ""
-  warn "薄殼缺 1.2.0 的接線約定內容 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
+  warn "呼叫端 workflow 缺 1.2.0 的呼叫方式 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
 fi
 info "───────────────────────────────────────────────────────────"
 
@@ -560,7 +560,7 @@ cat <<'NEXT'
     處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
-    若有 *.bak 檔案：那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版的接線約定，
+    若有 *.bak 檔案：那是被換掉的舊呼叫端 workflow。呼叫端 workflow 的 if:/with:/secrets: 屬於公版的呼叫方式，
     升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
     （額外的 job、改過的 permissions）就把 .bak 刪掉。
 

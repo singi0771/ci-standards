@@ -1,10 +1,10 @@
 # 中央「公版」Reusable：review 有修改意見時，請 Copilot Coding Agent 依意見自動修。
-# consumer 端放一支 pull_request_review 觸發的薄殼呼叫本檔。
+# 專案端放一支用 pull_request_review 觸發的呼叫端 workflow 來呼叫本檔。
 #
 # 涵蓋兩種 review：
 #   1. 人送出的 changes_requested
 #   2. Copilot code review 送出的 COMMENTED（Copilot 永遠不會 request changes，
-#      只送 COMMENTED —— 薄殼若只認 changes_requested，Copilot 的意見永遠不會進自動修正迴圈）
+#      只送 COMMENTED —— 呼叫端 workflow 若只認 changes_requested，Copilot 的意見永遠不會進自動修正迴圈）
 #
 # ⚠️ @copilot mention 必須由「有 Copilot 授權的使用者」發出才會喚醒 coding agent；
 #    github-actions[bot]（github.token）發的 mention 會被 Copilot 忽略（防自動化迴圈）。
@@ -138,7 +138,7 @@ jobs:
           MAX: ${{ inputs.max-attempts }}
         run: |
           if [ "$HAS_PAT" != "true" ]; then
-            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由薄殼傳入。"
+            echo "::warning::copilot-trigger-pat 未設定 —— @copilot mention 將由 github-actions[bot] 發出，Copilot coding agent 不會動工。請在 repo secrets 加入 COPILOT_TRIGGER_PAT 並由呼叫端 workflow 傳入。"
           fi
           ATTEMPT=$(( ATTEMPTS + 1 ))
           BODY=$(printf '<!-- review-fix-attempt -->\n@copilot **%s 提出了 code review 意見（第 %d/%s 次自動修正）**，請閱讀該 review 的每一則 inline 意見，逐條修正程式碼並 commit；不認同的意見請在該則下方回覆理由：\n\n%s\n\n完整 review：%s\n\n修正後 CI 會自動重跑，通過後 review 將再次評估。' \

@@ -86,7 +86,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 類別 | 檔案 | 策略 |
 |---|---|---|
 | 帶專案設定 | `ci.yml`、`security.yml` | **就地合併**（保留你的值） |
-| 純薄殼 | `copilot-autofix-ci-security.yml`、`copilot-autofix-review.yml`、`copilot-autoreview-gate.yml` | **整份換新**（只搬回你調過的設定，舊檔留 `.bak`） |
+| 只負責觸發的呼叫端 workflow | `copilot-autofix-ci-security.yml`、`copilot-autofix-review.yml`、`copilot-autoreview-gate.yml` | **整份換新**（只搬回你調過的設定，舊檔留 `.bak`） |
 | 專案專屬 | `copilot-instructions.md`、`copilot-setup-steps.yml`、`pull_request_template.md`、`dependabot.yml`、`zizmor.yml` | **絕不覆蓋**（只放一份 `.new`） |
 
 #### 1. 帶專案設定的：就地合併
@@ -104,10 +104,10 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 「公版有哪些 input」是**直接讀公版 reusable 的 `workflow_call.inputs` 宣告**得來的，
 不是腳本裡寫死一份清單 —— 公版加減 input 時自動跟上，不會漂移。
 
-#### 2. 純薄殼的：整份換新
+#### 2. 只負責觸發的呼叫端 workflow 的：整份換新
 
-三支 `copilot-*` 薄殼裡，`if:` 條件、`with:` 的事件接線、`secrets:` 區塊
-**全部屬於公版跟薄殼之間的接線約定**，不是你的設定。你能調的只有註解裡標出來的那幾個
+三支 `copilot-*` 呼叫端 workflow 裡，`if:` 條件、`with:` 的事件參數傳法、`secrets:` 區塊
+**全部是公版規定的呼叫方式**，不是你的設定。你能調的只有註解裡標出來的那幾個
 （`max-attempts`、`max-review-requests`）。所以升級時整份換成新範本，
 只把「你有設、而範本沒設」的搬回來，舊檔留成 `.bak`。
 
@@ -121,7 +121,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 只合併 `with:` 的話，舊 consumer 升級後會拿到新的 `uses:` 卻留著舊的 `if:`
 和缺席的 `secrets:` —— **版本號變了、自動修迴圈還是壞的，而且 CI 全綠沒有訊號**。
 
-> 換新會蓋掉你自己加在薄殼裡的東西（額外的 job、改過的 `permissions`）。
+> 換新會蓋掉你自己加在呼叫端 workflow 裡的東西（額外的 job、改過的 `permissions`）。
 > 那些不常見，但真的有的話 `.bak` 裡找得回來 —— 確認完再刪。
 
 #### 3. 絕不覆蓋的檔案
@@ -167,7 +167,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 情境 | 驗什麼 |
 |---|---|
 | A 全新導入 | 偵測結果正確寫入（含 `run-hadolint`、`run-zizmor`）、`zizmor.yml` 有建立、`security.yml` 不傳沒用到的 `python-version`、不產生多餘的 `.new` |
-| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋、三支薄殼整份換新且設定搬回、補上 `zizmor.yml` |
+| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋、三支呼叫端 workflow 整份換新且設定搬回、補上 `zizmor.yml` |
 | C 重複執行 | 跑第二次沒有任何 diff |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |

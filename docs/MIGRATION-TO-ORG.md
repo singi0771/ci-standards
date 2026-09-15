@@ -123,7 +123,7 @@ REQUIRED_APPROVALS=1 ./scripts/setup-branch-protection.sh ORG/ci-standards
 > **順序很重要**：先確認新路徑的 `@v1` 真的解析得到（拿一個 repo 試一次），再通知其他人改。
 > 全部改完之前**不要**刪掉或改名舊 repo。
 
-### 7. 收尾驗證
+### 7. 最後驗證
 
 - [ ] 隨便挑一個 consumer 開 PR，確認 `ci / CI Gate`、`security / Security Gate` 兩個 check 有出現且會過
 - [ ] 確認 ruleset 的 required check 名稱沒變（job id 沒動就不會變）

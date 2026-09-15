@@ -72,7 +72,7 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
       consumer 的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate` 這些字串，
       改名會讓既有專案的 required check 永遠 pending。這種改動要開 `v2`，不能移 `v1`
 - [ ] **新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？**
-      沒加＝這個檢查不會擋門，形同虛設
+      沒加＝這個檢查不會擋 PR，形同虛設
 - [ ] **有 `if` 條件的新 job 有沒有被設成 required check？**
       不可以。被跳過的 required check，GitHub 要嘛當通過（等於沒檢查）、要嘛永遠 pending。
       只把它加進 gate 的 `needs`，由 gate 判斷（開了就必須 success）
@@ -100,7 +100,7 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
 ⚠️ **合進 main 不等於生效。** 所有專案指向 `@v1`，沒有移動 tag 的話它們完全不會有感覺。
 
 ```bash
-git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變的退回點
+git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變的還原點
 git tag -f v1 && git push -f origin v1                  # 大家指向的別名
 ```
 

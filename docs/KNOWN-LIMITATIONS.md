@@ -8,7 +8,7 @@
 
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
-| [Copilot 開的 PR 其 CI 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | 每輪 Copilot 推送要人按一次核准 | **GitHub 硬規定，沒有開關可調**。按一次 Approve，或人推空 commit |
+| [Copilot 開的 PR 其 CI 卡在 `action_required`](#copilot-觸發的-workflow-run-會卡在-action_required) | 每輪 Copilot 推送要人按一次核准 | **GitHub 硬性規定，沒有開關可調**。按一次 Approve，或人推空 commit |
 | [Copilot Coding Agent 不回應 Actions 貼的 `@copilot`](#copilot-coding-agent-對-actions-貼的-copilot-沒有反應) | 「自動修」的**自動觸發**那一步 | Agent 本身可用 —— 改成手動「開 Issue 指派 Copilot」即可 |
 | [`upload-sarif: true` 尚未驗證可用](#upload-sarif-true-尚未驗證可用) | Security 分頁整合 | 維持 `false`，用 artifact |
 | [只有 Python 的 lint/test](#ci-reusable-只內建-python-的-linttest) | 非 Python 專案 | `run-python: false` + 自己補一支 |
@@ -30,7 +30,7 @@ CI 與 Security 會在數秒內相繼失敗，正好用來驗證防重複機制�
 | `ci / CI Gate` 與 `security / Security Gate` 都變紅 | ✅ 三個植入的錯誤全被抓到 |
 | CI 紅 + Security 紅 → autofix 只貼 **1** 則留言 | ✅ 第 2 次判定 `Cooldown: fix request posted in last 15 min — skipping duplicate` |
 | 修好後 autoreview 只請 **1** 次審查 | ✅ CI 那次判定「Security 尚未通過」跳過，Security 那次才 `Review request 1/3` |
-| Copilot **Code Review** 會動 | ✅ 跑了兩次（紅的時候一次、雙綠後一次） |
+| Copilot **Code Review** 會動 | ✅ 跑了兩次（紅的時候一次、兩個 Gate 都綠之後一次） |
 | Copilot **Coding Agent** 會動（指派 Issue，2026-08-01 補測） | ✅ 立刻開出 PR |
 | 通知量 | ✅ **4 個觸發事件只產生 2 則留言** |
 
@@ -44,7 +44,7 @@ CI 與 Security 會在數秒內相繼失敗，正好用來驗證防重複機制�
 
 解法（2026-08-09，ci-standards PR #12）：`copilot-autofix-review-reusable.yml` 與
 `copilot-autofix-reusable.yml` 新增 optional secret `copilot-trigger-pat`，
-發 `@copilot` 留言時改用它；consumer 薄殼把 repo secret `COPILOT_TRIGGER_PAT` 傳入。
+發 `@copilot` 留言時改用它；專案端的呼叫端 workflow 把 repo secret `COPILOT_TRIGGER_PAT` 傳入。
 PAT 身分＝真人身分，不受 bot 防迴圈限制。設定步驟見 README「自動修復流程」。
 未設定 secret 時退回 bot token 並發 `::warning::`（行為等同舊版：留言照貼、Agent 不理）。
 
@@ -125,7 +125,7 @@ PR 留言裡的隱藏標記計數，改開 Issue 就要改成用 label 或 Issue
 **照常導入，只是「修」這一步改成手動觸發。** 完整可用的路徑是：
 
 ```
-免費掃描器「找」→ Security Gate 擋門 → Copilot Code Review「審」（自動）
+免費掃描器「找」→ Security Gate 擋下 → Copilot Code Review「審」（自動）
    → 開 Issue 指派 Copilot「修」（手動一步）→ 人 merge
 ```
 
@@ -136,7 +136,7 @@ PR 留言裡的隱藏標記計數，改開 Issue 就要改成用 label 或 Issue
 
 ## Copilot 觸發的 workflow run 會卡在 `action_required`
 
-**狀態：🟡 已證實仍存在（GitHub 硬規定），但有兩個實用解法（2026-08-09 更新）**
+**狀態：🟡 已證實仍存在（GitHub 硬性規定），但有兩個實用解法（2026-08-09 更新）**
 
 1. **按一次核准**：PR 頁面或 Actions 分頁按「Approve and run workflows」。
    每輪 Copilot 推送後按一次即可，成本是一次點擊。

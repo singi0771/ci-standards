@@ -1,4 +1,4 @@
-# 薄殼（本 repo 自用）：CI/Security 失敗 → 讓 Copilot 自動修。
+# 本 repo 自己的呼叫端 workflow：CI/Security 失敗 → 讓 Copilot 自動修。
 # 用 ./ 呼叫本 repo 的公版。注意 workflow_run 觸發器只認 default branch 上的檔案，
 # 所以這支要合併進 main 之後才會生效。
 #
@@ -20,7 +20,7 @@ permissions:
 jobs:
   autofix:
     # 只處理「PR 觸發」的失敗。推到 main 或每週排程的失敗沒有 PR 可修，
-    # 以前也會起一個 job 跑進去才發現沒 PR 而跳過 —— 白付一分鐘。
+    # 以前也會起一個 job 跑進去才發現沒 PR 而跳過 —— 多付一分鐘。
     if: >
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.event == 'pull_request'

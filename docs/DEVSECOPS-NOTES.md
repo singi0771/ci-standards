@@ -51,7 +51,7 @@
 
 - **action 釘 commit SHA，不釘 tag。** tag 可以被移動，SHA 不行。這也是 zizmor `unpinned-uses` 預設要求的。
   唯一的例外是指向本公版的 `@v1` —— 那是刻意讓所有專案自動跟版的設計，用 `.github/zizmor.yml` 放行，
-  並用不可變的 `vX.Y.Z` 當退回點（見 SECURITY.md）。
+  並用不可變的 `vX.Y.Z` 當還原點（見 SECURITY.md）。
 - **container image 釘 tag + digest。** `semgrep/semgrep:1.171.0@sha256:…`、`ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:…`。
   只釘 tag 的話上游重推同一個 tag 你不會知道。digest 查法：`docker buildx imagetools inspect <image>:<tag>`。
 - **直接下載的執行檔釘版本 + sha256。** OSV-Scanner、actionlint、zizmor、hadolint 都是 `curl --fail` 抓下來 →

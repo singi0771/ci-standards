@@ -105,8 +105,8 @@ $TargetRoot = (Get-Location).Path
 # 「PowerShell 當初啟動的目錄」而不是這裡。兩邊一起設，.github\... 才會落在目標 repo。
 [System.IO.Directory]::SetCurrentDirectory($TargetRoot)
 
-# 安全閥：不准把公版導入公版自己。
-# 公版的呼叫端刻意用 `uses: ./...` 自己吃自己的狗糧；改成 owner/repo@ref 之後，
+# 保護措施：不准把公版導入公版自己。
+# 公版的呼叫端刻意用 `uses: ./...` 呼叫自己，當自己的第一個使用者；改成 owner/repo@ref 之後，
 # PR 上跑的就不再是「這個 PR 的版本」，綠燈會變成假的。
 if (Test-Path -LiteralPath (Join-Path $TargetRoot 'templates\consumer-repo\.github')) {
   Die "目標看起來就是 ci-standards 公版本身（有 templates\consumer-repo\）。公版不需要導入自己。要測試這支腳本請用 scripts/test-adopt.sh。"
@@ -149,7 +149,7 @@ Write-Host "-- 目標: $TargetRoot"
 Write-Host "-- 公版: $Std (ref: $Ref, uses: $UsesRepo)"
 Write-Host ""
 
-# ── 偵測技術棧 ───────────────────────────────────────────────
+# ── 偵測用了哪些技術 ───────────────────────────────────────────────
 # 註：Get-ChildItem 的 -Depth 自 PowerShell 5.0 起提供，本腳本要求 >= 5.1，可用。
 function Test-AnyFile([string]$Filter, [int]$Depth) {
   $hit = Get-ChildItem -Path . -Filter $Filter -Recurse -Depth $Depth -File -ErrorAction SilentlyContinue |
@@ -200,7 +200,7 @@ $ReusableFor = @{
 }
 
 # 就地更新 uses: 的 owner/repo 與 ref。
-# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（自己吃自己的狗糧）。
+# 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（公版拿自己當第一個使用者）。
 function Update-UsesLines([string[]]$Lines) {
   $out = @()
   foreach ($line in $Lines) {
@@ -263,9 +263,9 @@ function Get-WithKeys([string[]]$Lines) {
   return $keys
 }
 
-# 薄殼換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
+# 呼叫端 workflow 換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
 # 判準只有一條：舊檔有設、而新範本沒設。
-#   - 新範本自己就有的 key（head-branch / review-id 這種接線）→ 範本版本才是對的
+#   - 新範本自己就有的 key（head-branch / review-id 這種傳參數用的 key）→ 範本版本才是對的
 #   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
 function Get-CarriedKnobs([string[]]$OldLines, [string[]]$NewLines, [string[]]$Known, [ref]$Dropped) {
   $tplKeys = Get-WithKeys $NewLines
@@ -287,7 +287,7 @@ function Get-CarriedKnobs([string[]]$OldLines, [string[]]$NewLines, [string[]]$K
   return $carried
 }
 
-# 把搬出來的那幾行放回新薄殼：範本裡有對應的註解提示就取代那一行，
+# 把搬出來的那幾行放回新的呼叫端 workflow：範本裡有對應的註解提示就取代那一行，
 # 否則附在 with: 區塊尾巴。
 function Add-Knobs([string[]]$Lines, [string[]]$Carried) {
   if (-not $Carried -or $Carried.Count -eq 0) { return $Lines }
@@ -350,7 +350,7 @@ $SecAdditions = @(
 # ── 三類檔案，三種策略（與 adopt.sh 一致）────────────────────
 # Configured：真的帶專案設定（severity / python-version / 自訂 cron…）→ 就地合併。
 $Configured = @('ci.yml','security.yml')
-# ShellFiles：純薄殼。if: / with: 的接線與 secrets: 都屬於公版的接線約定 →
+# ShellFiles：只負責觸發的呼叫端 workflow。if: / with: 怎麼傳參數、secrets: 怎麼傳，都是公版規定的呼叫方式 →
 #   整份換成新範本，再把使用者打開過的設定搬回來。
 #   1.2.0 改的是 if: 條件與 secrets: 區塊，就地合併只碰 with: —— 舊 consumer 升級後
 #   會拿到新的 uses: 卻留著舊的 if:，變成「版本號變了、自動修迴圈還是壞的」。
@@ -366,7 +366,7 @@ foreach ($n in $Configured) {
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($n in $ShellFiles) {
-  if (Test-Path ".github\workflows\$n") { Write-Host "  o 換新  .github\workflows\$n（薄殼以範本為準；只搬回你調過的設定，舊檔留 .bak）" }
+  if (Test-Path ".github\workflows\$n") { Write-Host "  o 換新  .github\workflows\$n（以範本為準；只搬回你調過的設定，舊檔留 .bak）" }
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($r in $ProjectOwned) {
@@ -479,7 +479,7 @@ foreach ($r in $ProjectOwned) {
 
 Remove-TmpClone
 
-# 1.2.0 的接線約定的收尾檢查。薄殼現在是整份換新的，正常情況不會叫；
+# 1.2.0 呼叫方式的最後檢查。呼叫端 workflow 現在是整份換新的，正常情況不會叫；
 # 會叫就代表 -Std 指到的公版比 1.2.0 舊（或範本被改壞）。
 $PatWarn = @()
 foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.yml')) {
@@ -489,7 +489,7 @@ foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.ym
   if (-not (Select-String -Path $dst -Pattern 'copilot-trigger-pat' -Quiet)) {
     $missing += 'secrets: copilot-trigger-pat'
   }
-  # review 薄殼還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
+  # review 那支呼叫端 workflow 還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
   # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
   if ($name -eq 'copilot-autofix-review.yml' -and
       -not (Select-String -Path $dst -Pattern "'commented'" -SimpleMatch -Quiet)) {
@@ -503,12 +503,12 @@ foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.ym
 Write-Host "-----------------------------------------------------------"
 if ($Created.Count)   { Write-Host ("+ 新增: " + ($Created -join ' ')) }
 if ($Merged.Count)    { Write-Host ("~ 合併: " + ($Merged  -join ' ')) }
-if ($Refreshed.Count) { Write-Host ("o 換新（薄殼，舊檔留在 .bak）: " + ($Refreshed -join ' ')) }
+if ($Refreshed.Count) { Write-Host ("o 換新（整份換成範本，舊檔留在 .bak）: " + ($Refreshed -join ' ')) }
 if ($ShellSame.Count) { Write-Host ("= 已是最新: " + ($ShellSame -join ' ')) }
 if ($Kept.Count)      { Write-Host ("= 保留（未覆蓋，另存 .new）: " + ($Kept -join ' ')) }
 if ($CarriedReport.Count) {
   Write-Host ""
-  Write-Host "薄殼換新版時搬回來的設定:"
+  Write-Host "呼叫端 workflow 換新版時搬回來的設定:"
   $CarriedReport | ForEach-Object { Write-Host $_ }
 }
 if ($DroppedReport.Count) {
@@ -518,7 +518,7 @@ if ($DroppedReport.Count) {
 }
 if ($PatWarn.Count) {
   Write-Host ""
-  Warn "薄殼缺 1.2.0 的接線約定內容 -- 代表 -Std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次:"
+  Warn "呼叫端 workflow 缺 1.2.0 的呼叫方式 -- 代表 -Std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次:"
   $PatWarn | ForEach-Object { Write-Host $_ }
 }
 Write-Host "-----------------------------------------------------------"
@@ -532,7 +532,7 @@ Write-Host "-----------------------------------------------------------"
  2. 若有 *.new 檔案: 那是新版範本，跟現有的比對後自行取捨，處理完把 .new 刪掉。
     (copilot-instructions.md 這類是專案專屬內容，腳本刻意不覆蓋。)
 
-    若有 *.bak 檔案: 那是被換掉的舊薄殼。薄殼的 if:/with:/secrets: 屬於公版的接線約定，
+    若有 *.bak 檔案: 那是被換掉的舊呼叫端 workflow。呼叫端 workflow 的 if:/with:/secrets: 屬於公版的呼叫方式，
     升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
     （額外的 job、改過的 permissions）就把 .bak 刪掉。
 

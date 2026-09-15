@@ -1,4 +1,4 @@
-# 薄殼：CI/Security 失敗 → 呼叫公版讓 Copilot 自動修。
+# 呼叫端 workflow：CI/Security 失敗 → 呼叫公版讓 Copilot 自動修。
 # 觸發器必須在本地（workflow_run），但邏輯全在中央公版；改邏輯只要移動 @v1，本檔幾乎不需再動。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
 #

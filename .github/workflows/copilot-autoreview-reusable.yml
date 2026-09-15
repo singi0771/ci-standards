@@ -1,5 +1,5 @@
 # 中央「公版」Reusable：CI 與 Security 都對同一 SHA 通過後，請 Copilot 審 PR + 觸發 coding agent。
-# consumer 端放一支 workflow_run 觸發的薄殼呼叫本檔。
+# 專案端放一支用 workflow_run 觸發的呼叫端 workflow 來呼叫本檔。
 name: Reusable — Copilot Auto Review
 
 on:

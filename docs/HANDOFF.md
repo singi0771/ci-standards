@@ -2,8 +2,9 @@
 
 > **最後更新**：2026-09-14　**已發佈版本 1.3.0**（發佈基準 `a101f7c`＝PR #32 的合併 commit，
 > `v1` 與 `v1.3.0^{}` 都指向它，已用 `git ls-remote` 驗過）
+> **1.3.1（只改用詞）待打 tag**：這個 PR 合併後照 §3 發佈流程打 `v1.3.1` 並移 `v1`，再把這一行拿掉。
 > **1.3.0 是一次大整理**：多了 zizmor（workflow 安全）、hadolint、SBOM 三個可選檢查，
-> 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支 `workflow_run` 薄殼只理 PR，
+> 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支用 `workflow_run` 觸發的呼叫端 workflow 只理 PR，
 > 文件全面改成台灣口語。細節見 `CHANGELOG.md` 的 1.3.0 段。
 > **2026-08-13 起是「兩台機器並存」** —— Windows 成為主要開發機（1.2.3 在那裡發佈），
 > macOS 那台仍在服役（跑 llmstack／geearning／MLX server），同日搬出了 OneDrive。
@@ -53,7 +54,7 @@
 改公版一次、**把 `v1` 移到新的 commit**，所有專案下次觸發就同步 ——
 這是它存在的全部理由。
 
-⚠️ **合併進 `main` 不等於發佈。** 消費端釘的是 `@v1`，`v1` 沒移動的話，
+⚠️ **合併進 `main` 不等於發佈。** 使用端釘的是 `@v1`，`v1` 沒移動的話，
 改再多它們完全不會有感覺。發佈永遠是兩步：合併 → 移 tag（見 §3 的發佈流程）。
 
 三條主線：
@@ -78,23 +79,23 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | CHANGELOG | 已寫到 **1.3.0** |
 | `v1` tag | ✅ 已移到 `a101f7c`（1.3.0 已發佈，各專案下次觸發就會吃到） |
 | 最新版本 tag | ✅ `v1.3.0`（`v1.3.0^{}` → `a101f7c`，已驗證與 `v1` 同一 SHA） |
-| 公版自己的 CI | ✅ 全綠（自己吃自己的狗糧，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
+| 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | 本 repo 的 `COPILOT_TRIGGER_PAT` | ❌ **沒設**（2026-09-14 用 `gh secret list` 查證是空的）。所以本 repo 自己的 PR 上，autofix 會貼留言但 Agent 不會動工。要不要設看你 —— 公版 PR 多半是人自己改，未必需要 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
-| AdminAutoTools | ✅ **已升到 1.2.1 的接線約定**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
+| AdminAutoTools | ✅ **已升到 1.2.1 的呼叫方式**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
 | adopt.sh | ✅ 57 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
 ### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
 
-1.2.0 修好了 Copilot 自動修迴圈，改的是三支 `copilot-*` 薄殼的 **`if:` 條件**與
+1.2.0 修好了 Copilot 自動修迴圈，改的是三支 `copilot-*` 呼叫端 workflow 的 **`if:` 條件**與
 **`secrets:` 區塊**。但當時的 `adopt.sh` 升級模式是「就地合併」，而**就地合併只碰 `with:`**。
 
 結果：舊 consumer 升級後拿到新的 `uses:`、卻留著舊的 `if:` 和缺席的 `secrets:` ——
-**版本號變了，迴圈還是壞的**。1.2.1 就是修這個：三支薄殼改成整份換新。
+**版本號變了，迴圈還是壞的**。1.2.1 就是修這個：三支呼叫端 workflow 改成整份換新。
 
-所以對 AdminAutoTools 來說，**光移 `v1` tag 沒有用**，壞的是它本地那三支薄殼。
+所以對 AdminAutoTools 來說，**光移 `v1` tag 沒有用**，壞的是它本地那三支呼叫端 workflow。
 必須重跑一次 `adopt.sh`。
 
 ---
@@ -108,14 +109,14 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
 > 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
 > 本 repo 剩下的：④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）、
-> ⑨（AdminAutoTools 重跑一次 `adopt.sh` 吃到 1.3.0 的薄殼與 `zizmor.yml`）。
+> ⑨（AdminAutoTools 重跑一次 `adopt.sh` 吃到 1.3.0 的呼叫端 workflow 與 `zizmor.yml`）。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
 AdminAutoTools 在 `D:\3_CodingProject\AdminAutoTools\AdminAutoTools\`
 （**巢狀結構**，外層資料夾包著真正的 clone）。
 
-三支薄殼已經是 1.2.1 的接線約定，驗收條件全數滿足：
+三支呼叫端 workflow 已經是 1.2.1 的呼叫方式，驗收條件全數滿足：
 
 ```bash
 cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
@@ -189,8 +190,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 
 ### ⑨ AdminAutoTools 重跑一次 adopt（吃到 1.3.0）
 
-1.3.0 改了三支薄殼的 `if:`（只理 PR 觸發的 run）、多了 `zizmor.yml`、`ci.yml` / `security.yml`
-多了 `run-hadolint` / `run-zizmor`。光移 `v1` 只會讓 reusable 生效，**薄殼跟新參數要重跑 `adopt.sh` 才會進去**：
+1.3.0 改了三支呼叫端 workflow 的 `if:`（只理 PR 觸發的 run）、多了 `zizmor.yml`、`ci.yml` / `security.yml`
+多了 `run-hadolint` / `run-zizmor`。光移 `v1` 只會讓 reusable 生效，**呼叫端 workflow 跟新參數要重跑 `adopt.sh` 才會進去**：
 
 ```bash
 cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
@@ -199,7 +200,7 @@ cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
 git diff --stat
 ```
 
-驗收：`git diff` 裡三支 `copilot-*` 薄殼的 `if:` 有 `workflow_run.event == 'pull_request'`，
+驗收：`git diff` 裡三支 `copilot-*` 呼叫端 workflow 的 `if:` 有 `workflow_run.event == 'pull_request'`，
 `.github/zizmor.yml` 存在，`security.yml` 有 `run-zizmor: true`。
 第一次跑 Security Scan 時 zizmor 可能會挑 AdminAutoTools 自己寫的 workflow（若有）的毛病，那是真的該修。
 另外那個 repo 的 `on: pull_request` 若想要「草稿 PR 不跑」，要照範本手動改（升級模式不動 `on:`）。
@@ -239,15 +240,15 @@ git diff --stat
       而 consumer 沒有 `adopt-tests.yml`，列進去就會變成永遠不回報的 required check。
       這是本 repo 專屬的設定，手動加。
 
-### ~~⑥ 把 AdminAutoTools 的三支 copilot 薄殼從 `@main` 改回 `@v1`~~ ✅ 已完成（2026-08-13）
+### ~~⑥ 把 AdminAutoTools 的三支 copilot 呼叫端 workflow 從 `@main` 改回 `@v1`~~ ✅ 已完成（2026-08-13）
 
 **[`cecigehlpj/AdminAutoTools#65`](https://github.com/cecigehlpj/AdminAutoTools/pull/65) 已合併。**
 在 macOS 上用 `adopt.sh --ref v1` 產生，未手動編輯。三件事一起處理掉：
 
-- 三支薄殼的 `uses:` 從 `@main` 改為 `@v1`
+- 三支呼叫端 workflow 的 `uses:` 從 `@main` 改為 `@v1`
 - 它順帶打開了 `run-shellcheck`（偵測到專案有 `.sh`），因而第一次檢查到三支既有腳本的
   SC2181／SC3043，**已一併修掉**，否則這個 PR 會把 CI 弄紅
-- 補上兩支 autofix 薄殼缺的 `issues: write`（見下）
+- 補上兩支 autofix 的呼叫端 workflow 缺的 `issues: write`（見下）
 
 > ⚠️ **合併時 CI 是紅的，但那不是這個 PR 的問題** —— 見下方「Actions 全面停擺」。
 > 變更本身在本機驗過：shellcheck 乾淨、`bash -n`／`sh -n` 通過、六支 workflow YAML 可解析。
@@ -258,7 +259,7 @@ git diff --stat
 > Security 六個 job），`steps=0` 的症狀已消失，配額／spending limit 那條不用再追。
 > **但現在是真的紅**：三支 Dependabot PR（mako、mcp、cryptography）上
 > `ci / Python lint + test`、`security / SAST (Semgrep)`、
-> `security / Dependency vuln (OSV-Scanner)` 都 `failure`，兩個 Gate 因此擋門。
+> `security / Dependency vuln (OSV-Scanner)` 都 `failure`，兩個 Gate 因此擋下 PR。
 > 這是 AdminAutoTools 自己的相依／程式碼問題，去那個 repo 看 job log 處理，
 > 不要回頭改公版。查法：
 >
@@ -290,15 +291,15 @@ README 建議把 spending limit 設 $0 以防爆帳單，代價就是**額度用
 
 > 在這條解決之前，AdminAutoTools 的 Copilot 自動迴圈也不會動 —— 它整條都是 Actions 驅動的。
 
-**這次還順帶抓到一個沒人發現的悄悄失效**：兩支 autofix 薄殼**缺 `issues: write`**。
+**這次還順帶抓到一個沒人發現的悄悄失效**：兩支 autofix 的呼叫端 workflow**缺 `issues: write`**。
 達 `max-attempts` 上限時要貼 `needs-human-review` label，而 label API 屬 Issues 權限 ——
 少了會 **403 且不報錯**，等於「轉交人工」那一步從來沒成功過。1.1.0 就修過公版這個洞
-（見 CHANGELOG），但 consumer 的薄殼沒跟上。
+（見 CHANGELOG），但 專案端的呼叫端 workflow 沒跟上。
 
 原始問題如下（保留，因為下一個 consumer 可能也這樣釘）：
 
 2026-08-13 查到的：AdminAutoTools 的 `ci.yml`／`security.yml` 釘 `@v1`（正確），
-但**三支 `copilot-*` 薄殼釘的是 `@main`**：
+但**三支 `copilot-*` 呼叫端 workflow 釘的是 `@main`**：
 
 ```
 copilot-autofix-reusable.yml@main
@@ -307,7 +308,7 @@ copilot-autoreview-reusable.yml@main
 ```
 
 這等於**繞過整個發佈閘門** —— `@v1` 存在的理由就是「合併進 main 不等於發佈」，
-釘 `@main` 的話任何併進 main 的改動下一次觸發就直接生效，沒有退回點。
+釘 `@main` 的話任何併進 main 的改動下一次觸發就直接生效，沒有還原點。
 
 現在剛好沒事（`main` 與 `v1` 只差文件），但**下次動 copilot reusable 就會無預警上線**。
 當初大概是為了讓 1.2.0 的迴圈修正快點生效才這樣釘的，那個理由已經消失了。
@@ -327,7 +328,7 @@ copilot-autoreview-reusable.yml@main
 
 ### 發佈流程（公版每次有實質變更就要做一次）
 
-**合併進 `main` 不是發佈。** 消費端釘 `@v1`，`v1` 沒移動 = 沒有任何專案會有感覺。
+**合併進 `main` 不是發佈。** 使用端釘 `@v1`，`v1` 沒移動 = 沒有任何專案會有感覺。
 
 ```bash
 cd "$CODE_WORK/ci-standards"
@@ -351,7 +352,7 @@ git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
 
 - **tag 釘死完整 SHA，不要用 HEAD** —— 本機 `main` 若落後，用 HEAD 會打到錯的 commit。
 - **`v1` 是會移動的別名**，各專案的 `uses: ...@v1` 在**觸發當下**才解析，沒有 lockfile。
-  `vX.Y.Z` 則是不可變的退回點，出事時各專案可以臨時改釘那個。
+  `vX.Y.Z` 則是不可變的還原點，出事時各專案可以臨時改釘那個。
 - **破壞性變更不能移 `v1`** —— 改 input 名、改 job 名（consumer 的 ruleset 綁著
   `ci / CI Gate`、`security / Security Gate`）都算，那要開 `v2`。判準見 `CONTRIBUTING.md`。
 - **純文件變更可以不發版**，等下次有實質變更再一起發。
@@ -443,7 +444,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   **在這台機器 commit 就會把執行權限從 repo 裡剝掉**，Linux/macOS 的人
   `./adopt.sh` 直接壞。（歷史上已經修過一次：`9746eda`。）
 
-- **用 robocopy 搬「正在用的」git repo 會搬出拼裝品。** `.git` 與工作檔案
+- **用 robocopy 搬「正在用的」git repo 會搬出東拼西湊的東西。** `.git` 與工作檔案
   在不同同步世代被複製，結果工作區混著四個不同 commit 的檔案、index 還比 HEAD 舊。
   處理方式：確認每個檔案的 blob 都在歷史裡（就沒有獨有工作），
   然後 `git reset --hard origin/main` 重建。搬完務必跑一次
@@ -468,9 +469,9 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   被 skip 的 check 永遠不會回報，PR 直接卡死。只把 Gate 設成 required。
 
 - **公版不能用 adopt 導入自己。**
-  公版的呼叫端刻意用 `uses: ./` 自己吃自己的狗糧；被改成 `owner/repo@ref`
+  公版的呼叫端刻意用 `uses: ./` 呼叫自己，當自己的第一個使用者；被改成 `owner/repo@ref`
   之後，PR 上跑的就不再是「這個 PR 的版本」，綠燈會變成假的。
-  `adopt.sh` 有安全閥擋這件事，別拿掉。
+  `adopt.sh` 有檢查擋這件事，別拿掉。
 
 - **`scripts/test-adopt.sh` 是破壞性測試，一定要先 `cd` 到暫存目錄。**
   2026-08-08 出過事：舊版用命令替換取路徑，`cd` 只發生在子 shell，
@@ -535,7 +536,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
   新增檢查時先問「能不能當既有 job 的一個步驟」，再問「要不要另開 job」。
 
 - **公版自己也要過 zizmor。** 1.3.0 第一次跑 zizmor 抓到 61 條：checkout 沒 `persist-credentials: false`、
-  呼叫端沒宣告 `permissions`、範本的 `@v1` 沒釘 SHA（那是刻意的，放行）、兩支 `workflow_run` 薄殼
+  呼叫端沒宣告 `permissions`、範本的 `@v1` 沒釘 SHA（那是刻意的，放行）、兩支用 `workflow_run` 觸發的呼叫端 workflow
   （不執行 PR 程式碼，放行）。前兩類是真的該修，都修了。以後新加 job 記得這兩條。
 
   ### 這一類問題的通則
@@ -617,7 +618,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 ### 關於 Copilot
 
 - **Copilot code review 永遠送 `COMMENTED`，不送 `changes_requested`。**
-  薄殼只認 `changes_requested` 的話，它的意見永遠進不了自動修迴圈。
+  呼叫端 workflow 只認 `changes_requested` 的話，它的意見永遠進不了自動修迴圈。
 - **Copilot 審完沒問題也是送 `COMMENTED`**（0 則 inline 意見），
   所以公版會先確認該 review 真的有 inline 意見才動作，不會誤觸發也不吃 attempt 次數。
 - **Copilot 有時會進降級模式**（自陳 unable to run its full agentic suite），
