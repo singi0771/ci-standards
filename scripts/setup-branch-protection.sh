@@ -23,14 +23,13 @@ RULESET_NAME="CI Standard - main protection"
 #
 # 預設 0，這是刻意的 —— 設 1 而團隊只有你一個人時，PR 會永遠 merge 不了：
 #   1) GitHub 不允許 PR 作者 approve 自己的 PR
-#   2) Copilot code review 送出的是 COMMENT 類型 review，它不會 approve
-#   3) ruleset 預設沒有 bypass，連 admin 都繞不過
+#   2) ruleset 預設沒有 bypass，連 admin 都繞不過
 # 0 依然強制「必須開 PR + 必須通過 status checks」，只是不強制人工 approve。
 # 有第二位固定 reviewer 之後再改成 1。
 REQUIRED_APPROVALS="${REQUIRED_APPROVALS:-0}"
 
 # 是否要求分支必須與 main 同步後才能 merge（strict / "Require branches to be up to date"）。
-# 預設 false：Copilot 自動修正會頻繁 push，開 strict 會讓 PR 一直被要求 rebase + 重跑全套掃描，
+# 預設 false：開 strict 會讓 main 一有新 commit 就要求每個 PR rebase + 重跑全套掃描，
 # 導入初期非常擾人。流程穩定後再改成 true。
 STRICT_CHECKS="${STRICT_CHECKS:-false}"
 

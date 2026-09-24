@@ -39,7 +39,7 @@ jobs:
   # 便宜的第一步：算出這次到底有沒有動到「會影響 adopt 的檔案」。
   # 只有 docs/、根目錄與 .github/ 底下的 .md、Issue 表單、LICENSE 算「純文件」；
   # 其他任何檔案都算會影響 —— adopt.sh 會讀 reusable 的 inputs 宣告，
-  # 而 templates/ 底下連 .md（copilot-instructions.md、PR 範本）都會被原樣複製到 consumer，
+  # 而 templates/ 底下連 .md（PR 範本）都會被原樣複製到 consumer，
   # 所以 templates/ 裡的 .md 不能排除。
   changes:
     name: adopt regression (changes?)

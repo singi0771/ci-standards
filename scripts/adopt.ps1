@@ -34,9 +34,8 @@
                 保留使用者調過的參數與 on: 觸發設定、更新 uses:、
                 移除公版已廢除的 input、補上公版新增的 input
 
-  專案專屬的檔案（copilot-instructions.md、pull_request_template.md、
-  dependabot.yml、copilot-setup-steps.yml、zizmor.yml）**絕不覆蓋** ——
-  已存在就只放一份 .new 供比對。
+  專案專屬的檔案（pull_request_template.md、dependabot.yml、zizmor.yml）
+  **絕不覆蓋** —— 已存在就只放一份 .new 供比對。
 
   相依：只需要 git 與 Windows 內建的 PowerShell 5.1。
   不用 gh / jq / yq / python / curl —— 受管制的公司環境上那些都不保證存在。
@@ -192,11 +191,8 @@ function Get-ReusableInputs([string]$Path) {
 }
 
 $ReusableFor = @{
-  'ci.yml'                          = 'ci-reusable.yml'
-  'security.yml'                    = 'security-reusable.yml'
-  'copilot-autofix-ci-security.yml' = 'copilot-autofix-reusable.yml'
-  'copilot-autofix-review.yml'      = 'copilot-autofix-review-reusable.yml'
-  'copilot-autoreview-gate.yml'     = 'copilot-autoreview-reusable.yml'
+  'ci.yml'       = 'ci-reusable.yml'
+  'security.yml' = 'security-reusable.yml'
 }
 
 # 就地更新 uses: 的 owner/repo 與 ref。
@@ -249,73 +245,6 @@ function Merge-WithBlock([string[]]$Lines, [string[]]$Known, [string[]]$Addition
   return $out
 }
 
-# 讀一個檔案 with: 區塊裡「真的有設定」的 key（被註解掉的不算）
-function Get-WithKeys([string[]]$Lines) {
-  $keys = @(); $inBlk = $false
-  foreach ($line in $Lines) {
-    if (-not $inBlk) { if ($line -match '^    with:\s*$') { $inBlk = $true }; continue }
-    if ($line -match '^      #') { continue }
-    if ($line -match '^      ([A-Za-z0-9_-]+):') { $keys += $Matches[1]; continue }
-    if ($line -match '^      ') { continue }
-    if ($line -match '^\s*$') { continue }
-    $inBlk = $false
-  }
-  return $keys
-}
-
-# 呼叫端 workflow 換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
-# 判準只有一條：舊檔有設、而新範本沒設。
-#   - 新範本自己就有的 key（head-branch / review-id 這種傳參數用的 key）→ 範本版本才是對的
-#   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
-function Get-CarriedKnobs([string[]]$OldLines, [string[]]$NewLines, [string[]]$Known, [ref]$Dropped) {
-  $tplKeys = Get-WithKeys $NewLines
-  $carried = @(); $inBlk = $false
-  foreach ($line in $OldLines) {
-    if (-not $inBlk) { if ($line -match '^    with:\s*$') { $inBlk = $true }; continue }
-    if ($line -match '^      #') { continue }
-    if ($line -match '^      ([A-Za-z0-9_-]+):') {
-      $k = $Matches[1]
-      if ($tplKeys -notcontains $k) {
-        if ($Known -contains $k) { $carried += $line } else { $Dropped.Value += $k }
-      }
-      continue
-    }
-    if ($line -match '^      ') { continue }
-    if ($line -match '^\s*$') { continue }
-    $inBlk = $false
-  }
-  return $carried
-}
-
-# 把搬出來的那幾行放回新的呼叫端 workflow：範本裡有對應的註解提示就取代那一行，
-# 否則附在 with: 區塊尾巴。
-function Add-Knobs([string[]]$Lines, [string[]]$Carried) {
-  if (-not $Carried -or $Carried.Count -eq 0) { return $Lines }
-  $map = @{}; $order = @()
-  foreach ($c in $Carried) {
-    if ($c -match '^\s*([A-Za-z0-9_-]+):') { $map[$Matches[1]] = $c; $order += $Matches[1] }
-  }
-  $doneK = @{}; $out = @(); $inBlk = $false
-  foreach ($line in $Lines) {
-    if (-not $inBlk -and $line -match '^    with:\s*$') { $out += $line; $inBlk = $true; continue }
-    if ($inBlk) {
-      if ($line -match '^      #\s*([A-Za-z0-9_-]+):') {
-        $k = $Matches[1]
-        if ($map.ContainsKey($k) -and -not $doneK.ContainsKey($k)) {
-          $out += $map[$k]; $doneK[$k] = $true; continue
-        }
-        $out += $line; continue
-      }
-      if ($line -match '^      ' -or $line -match '^\s*$') { $out += $line; continue }
-      foreach ($k in $order) { if (-not $doneK.ContainsKey($k)) { $out += $map[$k]; $doneK[$k] = $true } }
-      $inBlk = $false
-    }
-    $out += $line
-  }
-  if ($inBlk) { foreach ($k in $order) { if (-not $doneK.ContainsKey($k)) { $out += $map[$k] } } }
-  return $out
-}
-
 # 全新安裝：整個 with: 區塊直接換成偵測結果
 function Set-WithBlock([string[]]$Lines, [string[]]$Additions) {
   $out = @(); $inBlk = $false; $done = $false
@@ -347,26 +276,15 @@ $SecAdditions = @(
   'run-zizmor: true'
 )
 
-# ── 三類檔案，三種策略（與 adopt.sh 一致）────────────────────
+# ── 兩類檔案，兩種策略（與 adopt.sh 一致）────────────────────
 # Configured：真的帶專案設定（severity / python-version / 自訂 cron…）→ 就地合併。
 $Configured = @('ci.yml','security.yml')
-# ShellFiles：只負責觸發的呼叫端 workflow。if: / with: 怎麼傳參數、secrets: 怎麼傳，都是公版規定的呼叫方式 →
-#   整份換成新範本，再把使用者打開過的設定搬回來。
-#   1.2.0 改的是 if: 條件與 secrets: 區塊，就地合併只碰 with: —— 舊 consumer 升級後
-#   會拿到新的 uses: 卻留著舊的 if:，變成「版本號變了、自動修迴圈還是壞的」。
-$ShellFiles = @('copilot-autofix-ci-security.yml','copilot-autofix-review.yml',
-                'copilot-autoreview-gate.yml')
 # zizmor.yml 也算專案專屬：使用者會在裡面放自己的放行規則。
-$ProjectOwned = @('workflows\copilot-setup-steps.yml','copilot-instructions.md',
-                  'pull_request_template.md','dependabot.yml','zizmor.yml')
+$ProjectOwned = @('pull_request_template.md','dependabot.yml','zizmor.yml')
 
 Write-Host "計畫:"
 foreach ($n in $Configured) {
   if (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
-  else { Write-Host "  + 新增  .github\workflows\$n" }
-}
-foreach ($n in $ShellFiles) {
-  if (Test-Path ".github\workflows\$n") { Write-Host "  o 換新  .github\workflows\$n（以範本為準；只搬回你調過的設定，舊檔留 .bak）" }
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($r in $ProjectOwned) {
@@ -379,7 +297,6 @@ if ($DryRun) { Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"; Rem
 
 New-Item -ItemType Directory -Force -Path '.github\workflows' | Out-Null
 $Created = @(); $Merged = @(); $Kept = @(); $DroppedReport = @()
-$Refreshed = @(); $ShellSame = @(); $CarriedReport = @()
 
 # ── Configured：就地合併 ─────────────────────────────────────
 foreach ($n in $Configured) {
@@ -406,41 +323,6 @@ foreach ($n in $Configured) {
     Write-TextFile $dst ($lines -join "`n")
     foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
     $Merged += $n
-  }
-}
-
-# ── ShellFiles：整份換新，只搬回使用者的設定 ─────────────────
-foreach ($n in $ShellFiles) {
-  $dst = ".github\workflows\$n"
-  $src = Join-Path $Tpl "workflows\$n"
-  if (-not (Test-Path -LiteralPath $src)) { continue }
-  $known = @()
-  $reu = Join-Path $Std ("\.github\workflows\" + $ReusableFor[$n])
-  if (Test-Path -LiteralPath $reu) { $known = Get-ReusableInputs $reu }
-
-  if (-not (Test-Path -LiteralPath $dst)) {
-    Write-TextFile $dst ((Update-UsesLines (Read-Lines $src)) -join "`n")
-    $Created += $n
-    continue
-  }
-
-  $oldRaw   = [System.IO.File]::ReadAllText($dst)
-  $oldLines = Read-Lines $dst
-  $dropped  = @()
-  $carried  = Get-CarriedKnobs $oldLines (Read-Lines $src) $known ([ref]$dropped)
-  $lines    = Add-Knobs (Read-Lines $src) $carried
-  $newText  = ((Update-UsesLines $lines) -join "`n")
-
-  foreach ($c in $carried) { $CarriedReport += ("    {0} -> 保留你調過的: {1}" -f $n, $c.Trim()) }
-  foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
-
-  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（可重複執行）
-  if ($newText -eq $oldRaw) {
-    $ShellSame += $n
-  } else {
-    Copy-Item -LiteralPath $dst -Destination ($dst + '.bak') -Force
-    Write-TextFile $dst $newText
-    $Refreshed += $n
   }
 }
 
@@ -479,47 +361,14 @@ foreach ($r in $ProjectOwned) {
 
 Remove-TmpClone
 
-# 1.2.0 呼叫方式的最後檢查。呼叫端 workflow 現在是整份換新的，正常情況不會叫；
-# 會叫就代表 -Std 指到的公版比 1.2.0 舊（或範本被改壞）。
-$PatWarn = @()
-foreach ($name in @('copilot-autofix-review.yml','copilot-autofix-ci-security.yml')) {
-  $dst = ".github/workflows/$name"
-  if (-not (Test-Path $dst)) { continue }
-  $missing = @()
-  if (-not (Select-String -Path $dst -Pattern 'copilot-trigger-pat' -Quiet)) {
-    $missing += 'secrets: copilot-trigger-pat'
-  }
-  # review 那支呼叫端 workflow 還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
-  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
-  if ($name -eq 'copilot-autofix-review.yml' -and
-      -not (Select-String -Path $dst -Pattern "'commented'" -SimpleMatch -Quiet)) {
-    $missing += 'COMMENTED 觸發條件'
-  }
-  if ($missing.Count) {
-    $PatWarn += "    $name -> 缺 $($missing -join '、')"
-  }
-}
-
 Write-Host "-----------------------------------------------------------"
 if ($Created.Count)   { Write-Host ("+ 新增: " + ($Created -join ' ')) }
 if ($Merged.Count)    { Write-Host ("~ 合併: " + ($Merged  -join ' ')) }
-if ($Refreshed.Count) { Write-Host ("o 換新（整份換成範本，舊檔留在 .bak）: " + ($Refreshed -join ' ')) }
-if ($ShellSame.Count) { Write-Host ("= 已是最新: " + ($ShellSame -join ' ')) }
 if ($Kept.Count)      { Write-Host ("= 保留（未覆蓋，另存 .new）: " + ($Kept -join ' ')) }
-if ($CarriedReport.Count) {
-  Write-Host ""
-  Write-Host "呼叫端 workflow 換新版時搬回來的設定:"
-  $CarriedReport | ForEach-Object { Write-Host $_ }
-}
 if ($DroppedReport.Count) {
   Write-Host ""
   Warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）:"
   $DroppedReport | ForEach-Object { Write-Host $_ }
-}
-if ($PatWarn.Count) {
-  Write-Host ""
-  Warn "呼叫端 workflow 缺 1.2.0 的呼叫方式 -- 代表 -Std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次:"
-  $PatWarn | ForEach-Object { Write-Host $_ }
 }
 Write-Host "-----------------------------------------------------------"
 
@@ -530,27 +379,17 @@ Write-Host "-----------------------------------------------------------"
  1. git diff  <- 先看清楚改了什麼，尤其是升級模式
 
  2. 若有 *.new 檔案: 那是新版範本，跟現有的比對後自行取捨，處理完把 .new 刪掉。
-    (copilot-instructions.md 這類是專案專屬內容，腳本刻意不覆蓋。)
+    (zizmor.yml、dependabot.yml 這類是專案專屬內容，腳本刻意不覆蓋。)
 
-    若有 *.bak 檔案: 那是被換掉的舊呼叫端 workflow。呼叫端 workflow 的 if:/with:/secrets: 屬於公版的呼叫方式，
-    升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
-    （額外的 job、改過的 permissions）就把 .bak 刪掉。
-
- 3. [必改] 全新導入務必改 .github\copilot-instructions.md ——
-    把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
-
-    另外設好 repo secret COPILOT_TRIGGER_PAT (Settings -> Secrets -> Actions) ——
-    沒設的話 CI 會過，但 Copilot 自動修迴圈不會動工。設定方式見公版 README。
-
- 4. 送出（不需要 gh，PR 可以用瀏覽器開）
+ 3. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards
       git add .github
       git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
 
- 5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+ 4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
 
- 6. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
+ 5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github\zizmor.yml，寫法見公版 README。
 

@@ -110,7 +110,7 @@ git tag -f v1 && git push -f origin v1                  # 大家指向的別名
 
 ### 5. 高風險改動先試跑
 
-動到掃描邏輯、gate 判定、Copilot 迴圈時，先在一個真實專案用 `@main` 跑過一輪，
+動到掃描邏輯或 gate 判定時，先在一個真實專案用 `@main` 跑過一輪，
 再移動 `v1`。本 repo 自己的 CI 用 `./` 呼叫公版，PR 上就會用「這個 PR 的版本」跑，
 是第一道保險，但它涵蓋不到 Python / Docker / hadolint / image 掃描那幾條路徑。
 
@@ -136,7 +136,7 @@ Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘�
 ## Commit 訊息
 
 用 Conventional Commits：`feat:` / `fix:` / `docs:` / `refactor:` / `build(deps):`。
-影響範圍寫在 scope 裡會更好讀：`fix(security):`、`fix(copilot):`。
+影響範圍寫在 scope 裡會更好讀：`fix(security):`、`fix(ci):`。
 
 ## PR
 
