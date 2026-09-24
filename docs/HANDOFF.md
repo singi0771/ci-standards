@@ -80,7 +80,7 @@
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 的呼叫方式**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 48 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
+| adopt.sh | ✅ 49 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
 ### 1.2.1 修了什麼（歷史，1.4.0 後已無對象）
@@ -137,11 +137,24 @@
    這一行同時做掉四件事：必須開 PR（禁止直接 push）、三個 check 必須綠才能 merge、
    禁止 force push、禁止刪分支。ruleset 沒有 `bypass_actors`，**admin 也繞不過**。
 
+   建出來的名稱是 `CI Standard - main+develop protection`，而本 repo 目前已經有一份
+   舊的 `CI Standard - main protection`（id `19769630`）。**兩份會疊加生效**，
+   腳本跑完會警告並印出刪除指令，照著刪掉舊的那份：
+
+   ```bash
+   gh api -X DELETE repos/singi0771/ci-standards/rulesets/19769630
+   ```
+
    > 沒有 admin 權限的人可以先跑 `--dry-run` 把 payload 印出來交給有權限的人。
 
-3. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
+3. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
+   `develop`。**已經開著的 PR #31 是發到 `main` 的**，要嘛把它的 base 改成 `develop`、
+   要嘛關掉讓 Dependabot 重開一份。留著不動的話，等政策生效後它會被 branch-policy 擋住。
+
+4. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
    `ci / CI Gate` 應該紅，Summary 會說「不能直接合併進 main，允許的來源只有 develop」。
-   把 base 改成 `develop` 之後應該轉綠。
+   把 base 改成 `develop` 之後應該轉綠。（這一步到目前為止**還沒實證過** ——
+   失敗路徑只在本機用抽出來的判定邏輯跑過七種情境，沒有在真的 PR 上驗收。）
 
 > ⚠️ 第 2 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
 > 做了這步就不必再另外手動加。
@@ -469,7 +482,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬）。
 守住那條路徑的有兩個地方：**macOS 那台**（仍在服役，見下表）與 `adopt-tests.yml`
-的 `macos-latest`。**在 Windows 上 57 項全過，不代表 macOS 會過。**
+的 `macos-latest`。**在 Windows 上全過，不代表 macOS 會過。**
 
 - **公司 Windows 上的 curl 會被憑證撤銷檢查擋住**（`CRYPT_E_NO_REVOCATION_CHECK`），
   `gh` 沒事（它用 Go 自己的 TLS）。本機要用 curl 抓 release 檔或查 registry digest 時加

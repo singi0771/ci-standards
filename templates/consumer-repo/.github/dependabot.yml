@@ -5,6 +5,12 @@
 #   - docker / github-actions：每月一次就夠，它們很少有急著要吃的更新
 # 真正緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），
 # 不受這裡的排程限制。
+# ⚠️ 走 develop / GitFlow 這類流程時要注意：
+# Dependabot 預設把 PR 發到 **default branch**。如果 ci.yml 設了
+# restricted-base-branches（限制誰能 merge 進正式分支），而 default branch 正好是
+# 那個受管制的分支，dependabot/* 的 PR 會被擋下、永遠 merge 不了。
+# 兩個解法擇一：把 default branch 設成整合分支，或在下面每個 updates 項目加
+#     target-branch: "develop"
 version: 2
 
 updates:

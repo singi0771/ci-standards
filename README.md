@@ -16,6 +16,7 @@
 ## 目錄
 
 0. **[已知限制（導入前先看）](docs/KNOWN-LIMITATIONS.md)** —— 哪些功能實測過但還不能用
+0'. **[流程圖：這個 repo 到底在做什麼](docs/FLOW.md)** —— 讀 README 之前的地圖
 1. [運作原理（先看這個）](#運作原理先看這個)
 2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
@@ -49,6 +50,7 @@
    jobs.ci:                                ├─ Python lint + test (ruff, pytest)               ←可選
      uses: ...@v1                          ├─ Docker build check（可加 hadolint 檢查 Dockerfile） ←可選
      with: { ... }                         ├─ Workflow + shell lint (actionlint, shellcheck)   ←可選
+                                           ├─ PR source branch policy 誰可以 merge 進哪裡     ←可選
                                            └─ 🧪 CI Gate ←總結，分支保護只認這個
 ```
 
@@ -643,8 +645,9 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（48 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（49 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
+│   ├── FLOW.md                        ← 流程圖：一個 PR 從打開到能 merge 發生什麼、由哪支檔案負責
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
 │   ├── SETUP.md                       ← 管理者用：公版發佈、方案/額度
@@ -704,6 +707,7 @@ ci-standards/
 
 | 文件 | 給誰看 |
 |---|---|
+| [`docs/FLOW.md`](docs/FLOW.md) | 讀 README 之前的地圖 —— 一個 PR 從打開到能 merge，中間發生什麼、由哪支檔案負責 |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | **接手的人（含 AI）先讀這份** —— 現況快照、下一步做什麼、踩過哪些雷 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 一鍵導入 —— Windows / macOS、內網與離線做法、`gh` 是不是必要 |
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含查問題的步驟 |

@@ -140,7 +140,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋六個情境共 57 項檢查，改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋六個情境共 49 項檢查，改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
