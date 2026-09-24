@@ -1,8 +1,22 @@
 # 各專案的「呼叫端」CI workflow —— 邏輯全在中央公版。
 # ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+#
+# ── 選配：PR 來源分支政策（走 develop / GitFlow 這類流程時才需要）────────────
+# 公版不預設任何分支模型，分支名稱完全由你決定。要限制「誰可以 merge 進哪裡」，
+# 在下面 jobs.ci.with 加這兩個 input（不加＝不檢查）：
+#
+#     restricted-base-branches: "main"              # 要管的 base，空白隔開，支援 glob
+#     allowed-head-branches: "develop hotfix/*"     # 允許的來源分支
+#
+# 這組的意思是「main 只接受從 develop 或 hotfix/* 發來的 PR」，其他分支發到 main 會被擋下。
+# 檢查結果收進 `ci / CI Gate`，所以分支保護的 ruleset 不必加新的 required check。
+# ⚠️ 它擋的是誤操作。真正不讓人繞過的是 ruleset（必須開 PR、禁止 force push），兩者要一起設。
 name: CI
 
 on:
+  # push 觸發：列出「合併後要再驗一次」的長壽分支。
+  # GitHub 的 on: 不吃 ${{ }} 運算式，只能寫死分支名。
+  # 走 develop 流程的專案把 develop 一起列進來：branches: [main, develop]
   push:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]
@@ -11,6 +25,12 @@ on:
   # 根本不會啟動 workflow → required check 永遠 pending → 純文件 PR 永遠 merge 不了
   # （連 admin 都不行，ruleset 沒有例外名單）。省那幾分鐘不值得換一個卡死。
   # 多列 ready_for_review 是為了讓「草稿 PR 不跑、改成正式 PR 那一刻才跑」能運作（見 jobs 的 if）。
+  # 沒有 branches: 篩選＝「發到任何分支的 PR 都跑」。
+  # 只想對特定分支的 PR 跑，就自己加，例如：
+  #   pull_request:
+  #     branches: [main, develop]
+  #     types: [...]
+  # ⚠️ 加了之後，沒被列到的分支其 PR 不會有 `ci / CI Gate` —— 那些分支就不能設成 required check。
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 

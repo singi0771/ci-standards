@@ -10,6 +10,35 @@
 
 ---
 
+## [1.4.0] — 未發佈
+
+**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變，既有專案升級零改動。**
+
+從 #36 拆出來先發：#36 其餘的「移除 Copilot 自動修 / 自動審」是破壞性變更，依[版本策略](README.md#版本策略)改走 `v2.0.0`。
+
+### 新增 —— PR 來源分支政策（ci-reusable）
+- 兩個選配 input：`restricted-base-branches`（要管制的 base，空白隔開、支援 glob）與
+  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**，既有呼叫端行為完全不變。
+- 新 job `PR source branch policy`，只在 `pull_request` 事件且 `restricted-base-branches`
+  有值時執行，結果收進 `ci / CI Gate` —— **專案端的 ruleset 一個字都不用改**。
+- 判定順序：base 不受管制→通過；受管制但沒列允許來源→失敗（視為漏填）；
+  來自 fork→失敗；head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
+- 公版不寫死任何分支名稱，也不預設任何分支模型。
+
+### 新增 —— Dockerfile 路徑（ci-reusable、security-reusable）
+- 新 input `dockerfile`（預設 `Dockerfile`）與 `docker-context`（預設 `.`），
+  Docker build check、hadolint、Trivy image 掃描都改用它們。Dockerfile 放在子資料夾
+  （例如 `src/Web.Api/Dockerfile`）的專案不必再整組關掉。
+- `adopt.sh` / `adopt.ps1` 也會找子資料夾裡的 Dockerfile：只有一個時自動填入兩個 input，
+  多個時印出清單請使用者挑。
+
+### 變更 —— 分支保護腳本（setup-branch-protection.sh）
+- 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，支援 fnmatch 樣式。
+  不給分支時維持舊行為（只保護 default branch）。
+- 新增 `REQUIRED_CHECKS` 環境變數與 `--dry-run`。
+
+---
+
 ## [1.3.1] — 2026-09-15
 
 **只改用詞，沒有任何行為變更。** 指向 `@v1` 的專案 CI 行為完全不變；因為範本與導入腳本的

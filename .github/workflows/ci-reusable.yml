@@ -45,6 +45,18 @@ on:
         description: "釘死的 ruff 版本，避免 lint 結果隨新版 ruff 漂移（要升級在這裡改）"
         type: string
         default: "0.16.0"
+      restricted-base-branches:
+        description: >-
+          要管制「誰可以 merge 進來」的 base 分支，空白隔開，支援 glob（例如 main、或 main release/*）。
+          留空＝不做這項檢查。公版刻意不寫死任何分支名稱，用什麼分支模型由各專案自己決定。
+        type: string
+        default: ""
+      allowed-head-branches:
+        description: >-
+          承上，允許合併進那些 base 的來源分支，空白隔開，支援 glob（例如 develop、或 develop hotfix/*）。
+          只有 restricted-base-branches 有值時才會用到；那時這個留空＝擋掉全部，視為設定錯誤。
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -181,6 +193,95 @@ jobs:
             shellcheck "${FILES[@]}"
           fi
 
+  # PR 來源分支政策：擋下「從不該來的分支發 PR 到受管制的 base」。
+  #
+  # 典型用法是 develop 流程 —— 功能分支只能發 PR 到 develop，
+  # 而 main 只接受 develop 的 PR。但公版不寫死任何分支名稱：
+  # 要管哪些 base、允許哪些來源，全由呼叫端用兩個 input 決定，沒填就整個不啟用。
+  #
+  # 為什麼放在 CI 裡而不是另開一支 workflow：它的結果會被 ci-gate 收進去，
+  # 而 `ci / CI Gate` 本來就是 required check —— 專案端的 ruleset 一個字都不用改。
+  #
+  # ⚠️ 這是「擋得住誤操作」，不是「擋得住惡意」。真正不讓人繞過的是 ruleset
+  # （必須開 PR、禁止 force push、required check 必須綠），兩者要一起設。
+  branch-policy:
+    name: PR source branch policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    if: ${{ github.event_name == 'pull_request' && inputs.restricted-base-branches != '' }}
+    steps:
+      - name: Check PR source branch
+        env:
+          # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
+          BASES: ${{ inputs.restricted-base-branches }}
+          ALLOWED: ${{ inputs.allowed-head-branches }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          # glob 比對：把「空白隔開的樣式」逐一拿去 case 比對。
+          # 用 case 而不是 [[ ]]，是為了讓樣式來自變數時仍然當 glob 解讀。
+          matches() {
+            _value="$1"; _patterns="$2"
+            for _p in $_patterns; do
+              # shellcheck disable=SC2254  # 故意讓 $_p 展開成 glob 樣式
+              case "$_value" in
+                $_p) return 0 ;;
+              esac
+            done
+            return 1
+          }
+
+          if ! matches "$BASE_REF" "$BASES"; then
+            echo "✅ base 分支 \`$BASE_REF\` 不在管制清單（$BASES）內，不檢查來源" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "## 🔀 PR 來源分支政策"
+            echo ""
+            echo "| 項目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 目標分支（base） | \`$BASE_REF\` |"
+            echo "| 來源分支（head） | \`$HEAD_REF\` |"
+            echo "| 受管制的 base | \`$BASES\` |"
+            echo "| 允許的來源 | \`${ALLOWED:-<空白>}\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # 設定錯誤要吵，不要安靜放行：管了 base 卻沒列允許來源＝任何 PR 都進不去，
+          # 那幾乎一定是漏填而不是本意。
+          if [ -z "$ALLOWED" ]; then
+            echo "::error::restricted-base-branches 有設 \`$BASES\`，但 allowed-head-branches 是空的 —— 這樣不會有任何 PR 能合併進去，請補上允許的來源分支"
+            echo "❌ 設定錯誤：allowed-head-branches 未設定" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # fork 的分支名稱可以隨便取，叫 develop 不代表是這個 repo 的 develop。
+          # 受管制的 base 一律不接 fork 的 PR —— 外部貢獻請發到不受管制的整合分支。
+          if [ "$HEAD_REPO" != "$THIS_REPO" ]; then
+            echo "::error::這個 PR 來自 fork（$HEAD_REPO），不能直接合併進受管制的 \`$BASE_REF\`。請改發到整合分支。"
+            echo "❌ 來自 fork 的 PR 不得合併進 \`$BASE_REF\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if matches "$HEAD_REF" "$ALLOWED"; then
+            echo "✅ \`$HEAD_REF\` 允許合併進 \`$BASE_REF\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::\`$HEAD_REF\` 不能直接發 PR 到 \`$BASE_REF\`。允許的來源只有：$ALLOWED"
+          {
+            echo "❌ **\`$HEAD_REF\` 不能直接合併進 \`$BASE_REF\`**"
+            echo ""
+            echo "允許的來源分支：\`$ALLOWED\`"
+            echo ""
+            echo "請把這個 PR 的 base 改成整合分支（PR 頁面 Edit → base 下拉選單），"
+            echo "等它合併進整合分支之後，再由整合分支發 PR 過來。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
   # 總結：分支保護「只需要要求 ci / CI Gate 這一個」status check。
   # 不要把 docker-build 之類的直接設成 required —— 它們有 if 條件，關掉時會 skipped，
   # 而 skipped 的 required check 要嘛被 GitHub 當通過（等於沒檢查）、要嘛永遠 pending，
@@ -190,7 +291,7 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    needs: [python, docker-build, lint]
+    needs: [python, docker-build, lint, branch-policy]
     if: ${{ always() }}
     steps:
       - name: Evaluate all CI results
@@ -198,10 +299,12 @@ jobs:
           PYTHON: ${{ needs.python.result }}
           DOCKER: ${{ needs.docker-build.result }}
           LINT: ${{ needs.lint.result }}
+          POLICY: ${{ needs.branch-policy.result }}
           # 每個檢查「是否應該要跑」——判斷通過與否的關鍵，見下方說明
           RUN_PYTHON: ${{ inputs.run-python }}
           RUN_DOCKER: ${{ inputs.run-docker-build }}
           RUN_LINT: ${{ inputs.run-actionlint || inputs.run-shellcheck }}
+          RUN_POLICY: ${{ github.event_name == 'pull_request' && inputs.restricted-base-branches != '' }}
         run: |
           {
             echo "## 🧪 CI Gate 結果"
@@ -211,6 +314,7 @@ jobs:
             echo "| Python lint + test | $RUN_PYTHON | $PYTHON |"
             echo "| Docker build check（含 hadolint） | $RUN_DOCKER | $DOCKER |"
             echo "| Workflow + shell lint (actionlint, shellcheck) | $RUN_LINT | $LINT |"
+            echo "| PR source branch policy | $RUN_POLICY | $POLICY |"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -246,6 +350,7 @@ jobs:
           assert_job "Python lint + test"     "$RUN_PYTHON" "$PYTHON"
           assert_job "Docker build check"     "$RUN_DOCKER" "$DOCKER"
           assert_job "Workflow + shell lint"  "$RUN_LINT"   "$LINT"
+          assert_job "PR source branch policy" "$RUN_POLICY" "$POLICY"
 
           if [ "$FAIL" = "1" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"

@@ -4,8 +4,11 @@
 name: CI
 
 on:
+  # push 觸發：列出「合併後要再驗一次」的長壽分支。
+  # GitHub 的 on: 不吃 ${{ }} 運算式，這裡只能寫死分支名 ——
+  # 用什麼分支模型是各專案自己的事，改這一行即可（例如只有 main、或 main + develop）。
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore: ["**/*.md", "docs/**"]
   # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。
@@ -34,3 +37,7 @@ jobs:
       # 除了本 repo 的 .github/workflows，consumer 範本也要一起檢查 ——
       # 範本壞掉的話，每個照著導入的專案都會壞
       actionlint-paths: "templates/consumer-repo/.github/workflows/*.yml"
+      # 本 repo 走 develop 流程：功能分支只能發 PR 到 develop，main 只收 develop 的 PR。
+      # 這兩個 input 是選配的，不填就不檢查 —— 公版不預設任何分支模型。
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop"
