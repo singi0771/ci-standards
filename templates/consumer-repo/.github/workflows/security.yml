@@ -4,6 +4,8 @@
 name: Security Scan
 
 on:
+  # push 觸發：列出「合併後要再驗一次」的長壽分支（on: 不吃運算式，只能寫死）。
+  # 走 develop 流程的專案改成：branches: [main, develop]
   push:
     branches: [main]
     paths-ignore: ["**/*.md", "docs/**"]

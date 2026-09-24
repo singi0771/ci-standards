@@ -75,9 +75,9 @@
 ## 建議導入順序
 
 1. **第一階段（現在就有）**：gitleaks + Semgrep + OSV + Trivy FS + zizmor → PR 守門。
-2. **第二階段**：加 Copilot Code Review + Coding Agent 的修復流程 + PR template + instructions（已附）。
+2. **第二階段**：加 PR template + CODEOWNERS + 分支保護，把「非過不可」立起來。
 3. **第三階段**：`scan-docker-image: true` 打開 image 掃描、`run-hadolint: true`、`generate-sbom: true`。
 4. **第四階段（可選）**：SonarQube 當 main 的品質儀表板（自己架，不當 gate）。
 5. **第五階段（成熟後）**：ZAP DAST + preview 環境 + SBOM 簽章（cosign）。
 
-> 一句話：先用 `gitleaks + Semgrep + OSV + Trivy + zizmor` 打好基礎，Copilot 接「修 + 審」，Sonar / ZAP 再視需要加，別第一天全上。
+> 一句話：先用 `gitleaks + Semgrep + OSV + Trivy + zizmor` 打好基礎，Sonar / ZAP 再視需要加，別第一天全上。

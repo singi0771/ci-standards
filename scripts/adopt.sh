@@ -170,9 +170,6 @@ reusable_for() {
   case "$1" in
     ci.yml)                        echo "$STD/.github/workflows/ci-reusable.yml" ;;
     security.yml)                  echo "$STD/.github/workflows/security-reusable.yml" ;;
-    copilot-autofix-ci-security.yml) echo "$STD/.github/workflows/copilot-autofix-reusable.yml" ;;
-    copilot-autofix-review.yml)    echo "$STD/.github/workflows/copilot-autofix-review-reusable.yml" ;;
-    copilot-autoreview-gate.yml)   echo "$STD/.github/workflows/copilot-autoreview-reusable.yml" ;;
     *) echo "" ;;
   esac
 }
@@ -260,98 +257,15 @@ replace_with_block() {
   mv "$f.tmp" "$f"
 }
 
-# 讀一個檔案 with: 區塊裡「真的有設定」的 key（被註解掉的不算）
-with_keys() {
-  awk '
-    /^    with:[[:space:]]*$/ { inblk=1; next }
-    inblk && /^      #/ { next }
-    inblk && match($0, /^      [A-Za-z0-9_-]+:/) {
-      k=$0; sub(/^ +/, "", k); sub(/:.*$/, "", k); print k; next
-    }
-    inblk && /^      / { next }
-    inblk && /^[[:space:]]*$/ { next }
-    inblk { inblk=0 }
-  ' "$1"
-}
-
-# 呼叫端 workflow 換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
-#
-# 判準只有一條：舊檔有設、而新範本沒設。
-#   - 新範本自己就有的 key（head-branch / review-id 這種傳參數用的 key）→ 範本版本才是對的，
-#     使用者那份是舊約定，搬過去等於把 bug 一起搬過去
-#   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
-#   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的設定）才是使用者的設定
-carry_knobs() {
-  _old="$1"; _new="$2"; _known="$3"; _carried="$4"; _dropped="$5"
-  : > "$_carried"; : > "$_dropped"
-  _tplk="$(with_keys "$_new")"
-  with_keys "$_old" | while IFS= read -r k; do
-    [ -n "$k" ] || continue
-    if printf '%s\n' "$_tplk" | grep -qx -- "$k"; then continue; fi
-    if ! printf '%s\n' "$_known" | grep -qx -- "$k"; then
-      printf '%s\n' "$k" >> "$_dropped"; continue
-    fi
-    # 整行搬過去（連值帶註解），不重新組字串
-    awk -v key="$k" '
-      /^    with:[[:space:]]*$/ { inblk=1; next }
-      inblk && index($0, "      " key ":") == 1 { print; exit }
-      inblk && /^      / { next }
-      inblk { exit }
-    ' "$_old" >> "$_carried"
-  done
-}
-
-# 把 carry_knobs 撈出來的那幾行放回新的呼叫端 workflow：
-# 範本裡有對應的註解提示（# max-attempts: "3"）就取代那一行，否則附在 with: 區塊尾巴。
-inject_knobs() {
-  f="$1"; carried="$2"
-  [ -s "$carried" ] || return 0
-  awk -v carriedfile="$carried" '
-    BEGIN {
-      n=0
-      while ((getline line < carriedfile) > 0) {
-        if (line == "") continue
-        k=line; sub(/^ +/, "", k); sub(/:.*$/, "", k)
-        C[k]=line; order[++n]=k
-      }
-    }
-    function flush(  i) {
-      for (i=1; i<=n; i++) if (!(order[i] in done)) { print C[order[i]]; done[order[i]]=1 }
-    }
-    /^    with:[[:space:]]*$/ { print; inblk=1; next }
-    inblk && match($0, /^      #[[:space:]]*[A-Za-z0-9_-]+:/) {
-      k=$0; sub(/^ +#[[:space:]]*/, "", k); sub(/:.*$/, "", k)
-      if (k in C) { print C[k]; done[k]=1; next }
-      print; next
-    }
-    inblk && /^      / { print; next }
-    inblk && /^[[:space:]]*$/ { print; next }
-    inblk { flush(); inblk=0 }
-    { print }
-    END { if (inblk) flush() }
-  ' "$f" > "$f.tmp"
-  mv "$f.tmp" "$f"
-}
-
 CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""
-REFRESHED=""; SHELL_SAME=""; CARRIED_REPORT=""
 
-# ── 三類檔案，三種策略 ───────────────────────────────────────
+# ── 兩類檔案，兩種策略 ───────────────────────────────────────
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
 CONFIGURED="ci.yml security.yml"
-# SHELL_FILES：只負責觸發的呼叫端 workflow。if: / with: 怎麼傳參數、secrets: 怎麼傳，都是公版規定的呼叫方式，
-#   使用者能調的只有註解裡標出來的那幾個設定。
-#   → 整份換成新範本，再把使用者打開過的設定搬回來。
-#
-#   為什麼不能跟 CONFIGURED 一樣就地合併：1.2.0 改的是 if: 條件與 secrets: 區塊
-#   （Copilot 的 COMMENTED review 要能進迴圈、@copilot 必須由真人 PAT 發出），
-#   而就地合併只碰 with:。舊 consumer 升級後會拿到新的 uses: 卻留著舊的 if:，
-#   結果是「版本號變了、自動修迴圈還是壞的」。
-SHELL_FILES="copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
 #   zizmor.yml 也算：使用者會在裡面放自己的放行規則。
-PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml zizmor.yml"
+PROJECT_OWNED="pull_request_template.md dependabot.yml zizmor.yml"
 
 CI_ADDITIONS="python-version: \"$PYVER\"
 run-python: $HAS_PY
@@ -370,10 +284,6 @@ plan_line() { info "  $1"; }
 info "計畫："
 for name in $CONFIGURED; do
   if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
-  else plan_line "＋ 新增  .github/workflows/$name"; fi
-done
-for name in $SHELL_FILES; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（以範本為準；只搬回你調過的設定，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -422,53 +332,6 @@ for name in $CONFIGURED; do
   fi
 done
 
-# ── SHELL_FILES：整份換新，只搬回使用者的設定 ────────────────
-for name in $SHELL_FILES; do
-  dst=".github/workflows/$name"
-  src="$TPL/workflows/$name"
-  [ -f "$src" ] || continue
-  reu="$(reusable_for "$name")"
-  known=""
-  if [ -n "$reu" ] && [ -f "$reu" ]; then known="$(reusable_inputs "$reu")"; fi
-
-  if [ ! -f "$dst" ]; then
-    cp "$src" "$dst"
-    patch_uses "$dst"
-    CREATED="$CREATED $name"
-    continue
-  fi
-
-  cp "$dst" "$dst.prev"
-  cp "$src" "$dst"
-  carry_knobs "$dst.prev" "$dst" "$known" "$dst.carried" "$dst.dropped"
-  inject_knobs "$dst" "$dst.carried"
-  patch_uses "$dst"
-
-  if [ -s "$dst.carried" ]; then
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      CARRIED_REPORT="$CARRIED_REPORT
-    $name → 保留你調過的：$(printf '%s' "$line" | sed 's/^ *//')"
-    done < "$dst.carried"
-  fi
-  if [ -s "$dst.dropped" ]; then
-    while IFS= read -r k; do
-      DROPPED_REPORT="$DROPPED_REPORT
-    $name → 移除已廢除的 input：$k"
-    done < "$dst.dropped"
-  fi
-  rm -f "$dst.carried" "$dst.dropped"
-
-  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（可重複執行）
-  if cmp -s "$dst.prev" "$dst"; then
-    rm -f "$dst.prev"
-    SHELL_SAME="$SHELL_SAME $name"
-  else
-    mv "$dst.prev" "$dst.bak"
-    REFRESHED="$REFRESHED $name"
-  fi
-done
-
 # ── PROJECT_OWNED ────────────────────────────────────────────
 # zizmor.yml 裡有一條「指向公版的 uses: 只要求釘 tag」的放行規則，寫死了公版的 owner/repo。
 # 搬到組織（--uses-repo）時要跟著換，否則那條規則對不到、zizmor 會開始抱怨 @v1 沒釘 SHA。
@@ -505,48 +368,14 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
-# ── 1.2.0 呼叫方式的最後檢查 ─────────────────────────────────────
-# 呼叫端 workflow 現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
-# 比 1.2.0 舊（或範本被改壞）—— 那就是「導完自動修迴圈還是不會動」，
-# 寧可吵也不要靜靜地過。
-PAT_WARN=""
-for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
-  dst=".github/workflows/$name"
-  [ -f "$dst" ] || continue
-  missing=""
-  if ! grep -q "copilot-trigger-pat" "$dst"; then
-    missing="secrets: copilot-trigger-pat"
-  fi
-  # review 那支呼叫端 workflow 還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
-  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
-  if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
-    if [ -n "$missing" ]; then missing="${missing}、COMMENTED 觸發條件"
-    else missing="COMMENTED 觸發條件"; fi
-  fi
-  if [ -n "$missing" ]; then
-    PAT_WARN="$PAT_WARN
-    $name → 缺 $missing"
-  fi
-done
-
 # ── 報告 ─────────────────────────────────────────────────────
 info "───────────────────────────────────────────────────────────"
 if [ -n "$CREATED" ];    then info "＋ 新增：$CREATED"; fi
 if [ -n "$MERGED" ];     then info "↻ 合併：$MERGED"; fi
-if [ -n "$REFRESHED" ];  then info "⟳ 換新（整份換成範本，舊檔留在 .bak）：$REFRESHED"; fi
-if [ -n "$SHELL_SAME" ]; then info "＝ 已是最新：$SHELL_SAME"; fi
 if [ -n "$KEPT" ];       then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
-if [ -n "$CARRIED_REPORT" ]; then
-  info ""
-  info "呼叫端 workflow 換新版時搬回來的設定：$CARRIED_REPORT"
-fi
 if [ -n "$DROPPED_REPORT" ]; then
   info ""
   warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）：$DROPPED_REPORT"
-fi
-if [ -n "$PAT_WARN" ]; then
-  info ""
-  warn "呼叫端 workflow 缺 1.2.0 的呼叫方式 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
 fi
 info "───────────────────────────────────────────────────────────"
 
@@ -557,29 +386,17 @@ cat <<'NEXT'
  1. git diff  ← 先看清楚改了什麼，尤其是升級模式
 
  2. 若有 *.new 檔案：那是新版範本，跟你現有的比對後自行取捨，
-    處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
+    處理完把 .new 刪掉。（zizmor.yml、dependabot.yml 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
-    若有 *.bak 檔案：那是被換掉的舊呼叫端 workflow。呼叫端 workflow 的 if:/with:/secrets: 屬於公版的呼叫方式，
-    升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
-    （額外的 job、改過的 permissions）就把 .bak 刪掉。
-
- 3. ⚠️ 全新導入務必改 .github/copilot-instructions.md ——
-    把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
-    沒改是導入後最常見的失敗原因。
-
-    另外設好 repo secret COPILOT_TRIGGER_PAT（Settings → Secrets → Actions）——
-    沒設的話 CI 會過，但 Copilot 自動修迴圈不會動工（@copilot 必須由真人帳號
-    發出，github-actions[bot] 發的會被忽略）。設定方式見公版 README。
-
- 4. 送出（不需要 gh，PR 可以用瀏覽器開）
+ 3. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards
       git add .github && git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
 
- 5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+ 4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
 
- 6. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
+ 5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github/zizmor.yml，寫法見公版 README。
 

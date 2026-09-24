@@ -31,11 +31,7 @@ action 釘 commit SHA、image 釘 tag + digest、執行檔釘版本 + sha256。�
 使用端的 ruleset 綁著 job 名稱（`ci / CI Gate`、`security / Security Gate`），
 改名會讓既有專案的 required check 永遠 pending。這種改動要開 `v2`，不能移 `v1`。
 
-**5. 自動化留言要有停止條件。**
-任何會在 PR 留言的自動流程都必須有：次數上限、隱藏標記防重複、達上限後停止（不是繼續重貼）。
-沒有上限的迴圈會燒光 AI credits 並把通知塞爆。
-
-**6. 每多一個 job 就多付一分鐘。**
+**5. 每多一個 job 就多付一分鐘。**
 GitHub 每個 job 不滿一分鐘也算一分鐘。跑不到 30 秒的檢查要併進既有 job 當一個步驟，不要另開 job。
 
 ## 安全要求

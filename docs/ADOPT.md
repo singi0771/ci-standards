@@ -86,8 +86,12 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 類別 | 檔案 | 策略 |
 |---|---|---|
 | 帶專案設定 | `ci.yml`、`security.yml` | **就地合併**（保留你的值） |
-| 只負責觸發的呼叫端 workflow | `copilot-autofix-ci-security.yml`、`copilot-autofix-review.yml`、`copilot-autoreview-gate.yml` | **整份換新**（只搬回你調過的設定，舊檔留 `.bak`） |
-| 專案專屬 | `copilot-instructions.md`、`copilot-setup-steps.yml`、`pull_request_template.md`、`dependabot.yml`、`zizmor.yml` | **絕不覆蓋**（只放一份 `.new`） |
+| 專案專屬 | `pull_request_template.md`、`dependabot.yml`、`zizmor.yml` | **絕不覆蓋**（只放一份 `.new`） |
+
+> 1.4.0 之前還有第三類「只負責觸發的呼叫端 workflow」（三支 `copilot-*`），
+> 升級時整份換新。Copilot 流程移除後那一類已經沒有成員，腳本裡對應的程式碼也一併刪了。
+> **已導入的專案要自己 `git rm` 那三支**（加上 `copilot-setup-steps.yml`）——
+> 導入腳本從不刪專案裡既有的檔案，留著會指向不存在的 reusable、每次 PR 直接 `startup_failure`。
 
 #### 1. 帶專案設定的：就地合併
 
@@ -104,33 +108,11 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 「公版有哪些 input」是**直接讀公版 reusable 的 `workflow_call.inputs` 宣告**得來的，
 不是腳本裡寫死一份清單 —— 公版加減 input 時自動跟上，不會漂移。
 
-#### 2. 只負責觸發的呼叫端 workflow 的：整份換新
+#### 2. 絕不覆蓋的檔案
 
-三支 `copilot-*` 呼叫端 workflow 裡，`if:` 條件、`with:` 的事件參數傳法、`secrets:` 區塊
-**全部是公版規定的呼叫方式**，不是你的設定。你能調的只有註解裡標出來的那幾個
-（`max-attempts`、`max-review-requests`）。所以升級時整份換成新範本，
-只把「你有設、而範本沒設」的搬回來，舊檔留成 `.bak`。
+這三個含專案專屬內容，已存在時腳本只放一份 `.new` 給你比對：
 
-**為什麼不能跟第 1 類一樣就地合併？** 因為就地合併只碰 `with:`。
-1.2.0 改的是 `if:` 與 `secrets:`，1.3.0 又改了 `if:`（只理 PR 觸發的 run）：
-
-- `if:` 要多收 Copilot 的 `COMMENTED` review（Copilot 永遠不送 `changes_requested`）
-- `secrets: copilot-trigger-pat` 要把真人 PAT 傳進公版（`github-actions[bot]` 發的
-  `@copilot` mention 會被 coding agent 忽略）
-
-只合併 `with:` 的話，舊 consumer 升級後會拿到新的 `uses:` 卻留著舊的 `if:`
-和缺席的 `secrets:` —— **版本號變了、自動修迴圈還是壞的，而且 CI 全綠沒有訊號**。
-
-> 換新會蓋掉你自己加在呼叫端 workflow 裡的東西（額外的 job、改過的 `permissions`）。
-> 那些不常見，但真的有的話 `.bak` 裡找得回來 —— 確認完再刪。
-
-#### 3. 絕不覆蓋的檔案
-
-這五個含專案專屬內容，已存在時腳本只放一份 `.new` 給你比對：
-
-- `copilot-instructions.md` ← **最重要**，是你手寫的專案規範
-- `copilot-setup-steps.yml` ← 專案的環境準備步驟
-- `pull_request_template.md`
+- `pull_request_template.md` ← 你可能加過自己的檢查項
 - `dependabot.yml` ← 你可能加過 npm 區塊、改過排程
 - `zizmor.yml` ← 你會在裡面放自己的放行規則（不存在時會建立，`--uses-repo` 會順手換 owner）
 
@@ -158,7 +140,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋六個情境共 57 項檢查，改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋六個情境共 49 項檢查，改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -167,7 +149,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 情境 | 驗什麼 |
 |---|---|
 | A 全新導入 | 偵測結果正確寫入（含 `run-hadolint`、`run-zizmor`）、`zizmor.yml` 有建立、`security.yml` 不傳沒用到的 `python-version`、不產生多餘的 `.new` |
-| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`copilot-instructions.md` 未被覆蓋、三支呼叫端 workflow 整份換新且設定搬回、補上 `zizmor.yml` |
+| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`pull_request_template.md` 未被覆蓋、補上 `zizmor.yml`、已移除的 Copilot 檔案不會被重新導入 |
 | C 重複執行 | 跑第二次沒有任何 diff |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |
@@ -250,10 +232,9 @@ Windows PowerShell 5.1 讀 `.ps1` 沒看到 BOM 就用 ANSI codepage（繁中 = 
 
 腳本跑完會把後續步驟印在畫面上。重點：
 
-1. **⚠️ 一定要改 `.github/copilot-instructions.md`** —— 這是導入後最常見的失敗原因
-2. 檢查 `git diff --stat`
-3. 開 PR（瀏覽器就行）
-4. **等第一次 CI 跑完再開分支保護** —— check 名稱要先存在於 GitHub，否則 ruleset 對不上
+1. 檢查 `git diff --stat`
+2. 開 PR（瀏覽器就行）
+3. **等第一次 CI 跑完再開分支保護** —— check 名稱要先存在於 GitHub，否則 ruleset 對不上
 5. 第一次一定會有東西紅，那是掃描器真的找到問題。**不要為了讓它變綠就關掉檢查**
 6. zizmor 挑到你自己寫的 workflow 的毛病（沒釘 SHA、權限太大）多半是真的該修；確定是誤判才放進 `.github/zizmor.yml`
 

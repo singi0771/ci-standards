@@ -19,6 +19,6 @@
 - [ ] 已確認輸入驗證與權限控管
 - [ ] 通過 Security Scan（Semgrep / Trivy / OSV / gitleaks / zizmor）
 
-## Copilot / AI 使用說明
-- [ ] 本 PR 有使用 Copilot 協助
-- [ ] 已人工確認 Copilot 產生的內容
+## AI 使用說明
+- [ ] 本 PR 有使用 AI 工具協助
+- [ ] 已人工確認 AI 產生的內容

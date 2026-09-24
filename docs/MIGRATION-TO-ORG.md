@@ -12,8 +12,7 @@
 | 好處 | 說明 |
 |---|---|
 | private repo 能開分支保護 | ruleset 在**免費個人帳號的 private repo 上直接被 403 擋掉**。Team 方案的 org 沒這個限制，這通常是搬家的直接動機 |
-| Copilot policy 統一管 | Coding Agent / Code Review 的開關在 org → Settings → Copilot 一次設定，不用每個帳號各弄一次 |
-| Billing 統一 | Actions 分鐘與 AI Credits 集中看、集中設 spending limit |
+| Billing 統一 | Actions 分鐘集中看、集中設 spending limit |
 | 權限與交接 | 公版不再綁在某一個人的帳號上。個人帳號離職／換手就是災難 |
 | 可以用 org ruleset | 一次對「組織內所有 repo」要求 `Security Gate`，不必逐 repo 跑腳本 |
 
@@ -49,9 +48,6 @@ Settings → General → 最底下 Danger Zone → **Transfer ownership** → �
 # 範本呼叫端
 templates/consumer-repo/.github/workflows/ci.yml                      # 註解 + uses:
 templates/consumer-repo/.github/workflows/security.yml                # 註解 + uses:
-templates/consumer-repo/.github/workflows/copilot-autofix-ci-security.yml
-templates/consumer-repo/.github/workflows/copilot-autofix-review.yml
-templates/consumer-repo/.github/workflows/copilot-autoreview-gate.yml
 templates/consumer-repo/.github/zizmor.yml        # unpinned-uses 的放行規則
 .github/zizmor.yml                                # 本 repo 自己的那份
 
@@ -96,10 +92,8 @@ bash scripts/test-adopt.sh
 
 ### 5. 組織層級設定（原本散在個人帳號的，現在集中）
 
-- [ ] Org → Settings → Copilot → Policies → 開 **Copilot code review** 與 **Copilot coding agent**
 - [ ] Org → Settings → Billing → **Spending limit**，Actions 設 **$0**
 - [ ] Org → Settings → Actions → General → 確認 workflow 核准政策
-      （跟 [已知限制](KNOWN-LIMITATIONS.md#copilot-觸發的-workflow-run-會卡在-action_required) 有關）
 - [ ] **把 required approvals 從 0 改成 1**。個人 repo 只有一個人時設 0 是不得已；
       組織裡公版一改就影響所有專案，**必須要有第二個人看過**。搭配 CODEOWNERS：
 
@@ -116,7 +110,7 @@ REQUIRED_APPROVALS=1 ./scripts/setup-branch-protection.sh ORG/ci-standards
 +    uses: ORG/ci-standards/.github/workflows/ci-reusable.yml@v1
 ```
 
-（`security.yml` 與三支 `copilot-auto*` 同理；`.github/zizmor.yml` 裡的放行規則也要換 owner，
+（`security.yml` 同理；`.github/zizmor.yml` 裡的放行規則也要換 owner，
 不然 zizmor 會開始抱怨 `@v1` 沒釘 SHA。）
 最省事的做法是用導入腳本一次換完：`adopt.sh --uses-repo ORG/ci-standards`。
 

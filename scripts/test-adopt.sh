@@ -73,9 +73,9 @@ has "$CI"  'python-version: "3.11"'    "python-version 讀到 .python-version"
 has "$SEC" 'scan-docker-image: true'   "scan-docker-image 依 Dockerfile 設為 true"
 has "$SEC" 'run-zizmor: true'          "run-zizmor 預設打開"
 hasnt "$SEC" 'python-version'          "security.yml 不再傳沒有任何步驟用到的 python-version"
-has ".github/copilot-instructions.md" 'Copilot 專案指引' "copilot-instructions.md 有建立"
 has ".github/zizmor.yml" 'singi0771/ci-standards/*' "zizmor.yml 有建立，且放行規則指向公版"
-if [ ! -e ".github/copilot-instructions.md.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
+if [ -f ".github/pull_request_template.md" ]; then ok "pull_request_template.md 有建立"; else bad "應建立 pull_request_template.md"; fi
+if [ ! -e ".github/zizmor.yml.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 B：升級既有的舊版呼叫端\n'
@@ -99,6 +99,8 @@ jobs:
     with:
       python-version: "3.9"
       run-docker-build: false
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop hotfix/*"
       legacy-option: true
 OLD
 
@@ -118,59 +120,8 @@ jobs:
       obsolete-flag: "x"
 OLD
 
-# 1.2.0 之前的呼叫端 workflow：只認 changes_requested、沒有 review-id/review-state、
-# 沒有 secrets: 區塊。AdminAutoTools 就是停在這個版本。
-# 這幾支的 if:/with:/secrets: 是公版規定的呼叫方式，不是專案設定 —— 升級時必須整份換掉，
-# 只保留使用者調過的設定（max-attempts / max-review-requests）。
-cat > .github/workflows/copilot-autofix-review.yml <<'OLD'
-name: Copilot Autofix — Review
-
-on:
-  pull_request_review:
-    types: [submitted]
-
-permissions:
-  pull-requests: write
-
-jobs:
-  autofix-review:
-    if: ${{ github.event.review.state == 'changes_requested' }}
-    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
-    with:
-      pr-number:    ${{ github.event.pull_request.number }}
-      pr-author:    ${{ github.event.pull_request.user.login }}
-      reviewer:     ${{ github.event.review.user.login }}
-      review-body:  ${{ github.event.review.body }}
-      review-url:   ${{ github.event.review.html_url }}
-      max-attempts: "5"
-      legacy-knob:  "x"
-OLD
-
-cat > .github/workflows/copilot-autoreview-gate.yml <<'OLD'
-name: Copilot Auto Review
-
-on:
-  workflow_run:
-    workflows: ["CI", "Security Scan"]
-    types: [completed]
-
-permissions:
-  pull-requests: write
-  contents: read
-  actions: read
-
-jobs:
-  autoreview:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    uses: singi0771/ci-standards/.github/workflows/copilot-autoreview-reusable.yml@v1
-    with:
-      head-sha:            ${{ github.event.workflow_run.head_sha }}
-      head-branch:         ${{ github.event.workflow_run.head_branch }}
-      triggered-by:        ${{ github.event.workflow_run.name }}
-      max-review-requests: "7"
-OLD
-
-printf '# 我們自己寫的 Copilot 指引\n專案專屬內容，絕不能被洗掉。\n' > .github/copilot-instructions.md
+# 專案專屬檔案：使用者改過的內容絕不能被洗掉
+printf '# 我們自己的 PR 檢查清單\n專案專屬內容，絕不能被洗掉。\n' > .github/pull_request_template.md
 
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
 
@@ -184,6 +135,11 @@ has "$SEC" 'cron: "30 19 * * 3"'                "保留使用者自訂的 cron�
 # ── 公版已廢除的 input 必須移除 ──
 hasnt "$CI"  'legacy-option'  "移除公版已不存在的 legacy-option"
 hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
+
+# ── 選配的分支政策設定：公版認得，升級時必須原封不動 ──
+# 分支名稱是專案自己的決定，adopt 不能替它改或刪掉。
+has "$CI" 'restricted-base-branches: "main"'            "保留使用者設定的 restricted-base-branches"
+has "$CI" 'allowed-head-branches: "develop hotfix/*"'   "保留使用者設定的 allowed-head-branches"
 
 # ── 公版新增的 input 要補上 ──
 has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"
@@ -202,33 +158,17 @@ has "$CI"  '  ci:'        "job id 'ci' 未被更動"
 has "$SEC" '  security:'  "job id 'security' 未被更動"
 
 # ── 專案專屬檔案絕不覆蓋 ──
-has ".github/copilot-instructions.md" '專案專屬內容，絕不能被洗掉' "既有 copilot-instructions.md 未被覆蓋"
-if [ -f ".github/copilot-instructions.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
+has ".github/pull_request_template.md" '專案專屬內容，絕不能被洗掉' "既有 pull_request_template.md 未被覆蓋"
+if [ -f ".github/pull_request_template.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
 
-# ── 呼叫端 workflow：1.2.0 的呼叫方式必須真的補進去 ──
-# 這一段是整個升級路徑最會出事的地方：只合併 with: 的話，舊 consumer 會拿到
-# 新的 uses: 卻留著舊的 if: 與缺席的 secrets: —— 版本號變了、自動修迴圈還是壞的。
-REV=".github/workflows/copilot-autofix-review.yml"
-GATE=".github/workflows/copilot-autoreview-gate.yml"
-has "$REV" "'commented'"            "review 那支呼叫端 workflow 補上 COMMENTED 觸發條件（Copilot 只送 COMMENTED）"
-has "$REV" 'copilot-pull-request-reviewer' "review 那支呼叫端 workflow 補上 Copilot 帳號比對"
-has "$REV" 'OWNER'                  "review 那支呼叫端 workflow 補上真人 reviewer 的信任身分檢查"
-has "$REV" 'review-id:'             "review 那支呼叫端 workflow 補上新版才有的 review-id"
-has "$REV" 'review-state:'          "review 那支呼叫端 workflow 補上新版才有的 review-state"
-has "$REV" 'copilot-trigger-pat'    "review 那支呼叫端 workflow 補上 secrets: copilot-trigger-pat"
-has ".github/workflows/copilot-autofix-ci-security.yml" 'copilot-trigger-pat' \
-    "CI/Security 那支呼叫端 workflow 補上 secrets: copilot-trigger-pat"
-
-# ── 換新時，使用者調過的設定要搬回來；廢除的要丟掉 ──
-has   "$REV"  'max-attempts: "5"'        "換新後仍保留使用者調過的 max-attempts"
-hasnt "$REV"  'legacy-knob'              "換新時丟掉公版已不認得的 legacy-knob"
-has   "$GATE" 'max-review-requests: "7"' "換新後仍保留使用者調過的 max-review-requests"
-hasnt "$GATE" '# max-review-requests'    "被搬回來的設定取代掉範本的註解提示（不會兩份並存）"
-has   "$REV"  'copilot-autofix-review-reusable.yml@v1.1.0' "呼叫端 workflow 的 uses: ref 也有更新"
-
-# ── 舊檔要留下來供比對 ──
-if [ -f "$REV.bak" ]; then ok "被換掉的舊呼叫端 workflow 留成 .bak"; else bad "應留下 .bak"; fi
-has "$REV.bak" 'legacy-knob' ".bak 是原本那份（沒被動過）"
+# ── 已移除的 Copilot 流程不得再被導入 ──
+# 1.4.0 把 Copilot 自動修 / 自動審整組拿掉了。導入腳本若還在複製那些檔案，consumer 會
+# 拿到指向不存在 reusable 的呼叫端 workflow —— 每次 PR 都直接 startup_failure。
+for gone in copilot-autofix-ci-security.yml copilot-autofix-review.yml \
+            copilot-autoreview-gate.yml copilot-setup-steps.yml; do
+  if [ -e ".github/workflows/$gone" ]; then bad "不該再導入已移除的 $gone"; else ok "不再導入已移除的 $gone"; fi
+done
+if [ -e ".github/copilot-instructions.md" ]; then bad "不該再導入 copilot-instructions.md"; else ok "不再導入 copilot-instructions.md"; fi
 
 # ── 產生的 YAML 必須合法 ──
 # 先確認 PyYAML 真的裝得起來 —— 只檢查 python3 存在是不夠的：
@@ -267,10 +207,10 @@ fi
 printf '\n▸ 情境 C：重複執行（同樣的指令跑兩次，第二次不應再改動）\n'
 # ═════════════════════════════════════════════════════════════
 # 使用者處理完 .new / .bak 之後的正常狀態
-rm -f .github/copilot-instructions.md.new .github/workflows/*.bak
+rm -f .github/pull_request_template.md.new
 git add -A >/dev/null 2>&1; git commit -qm "after first adopt"
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
-rm -f .github/copilot-instructions.md.new
+rm -f .github/pull_request_template.md.new
 if [ -z "$(git status --porcelain)" ]; then ok "第二次執行沒有產生任何差異"; else
   bad "第二次執行仍有變動："; git --no-pager diff --stat; git status --porcelain
 fi

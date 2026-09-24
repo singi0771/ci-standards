@@ -17,9 +17,6 @@ body:
       options:
         - ci-reusable
         - security-reusable
-        - copilot-autofix-ci-security
-        - copilot-autofix-review-reusable
-        - copilot-autoreview-reusable
     validations:
       required: true
 
