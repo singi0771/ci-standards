@@ -23,8 +23,10 @@
 name: Adopt Script Tests
 
 on:
+  # 跟 ci.yml / security.yml 列同一組長壽分支 —— 少列的話，合併進整合分支之後
+  # 回歸測試不會重跑，那條路徑就沒人守。
   push:
-    branches: [main]
+    branches: [main, develop]
   # pull_request 不加 paths-ignore —— 與本 repo 的 ci.yml 同理（要跑不跑由下面的 changes job 決定）
   pull_request:
 

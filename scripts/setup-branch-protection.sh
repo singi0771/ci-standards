@@ -25,29 +25,45 @@
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO="${1:?用法: $0 <owner>/<repo> [分支...]}"
-shift
-
+# 旗標要先解析完，才輪到必填的 <owner>/<repo> ——
+# 反過來的話 `--help` 會被當成 repo 名稱，直接去打 repos/--help/rulesets。
+#
 # --dry-run：只把要送出的 ruleset 印出來，不呼叫任何 API。
-# 沒有 admin 權限時也能用它產出 payload 交給有權限的人。
+#            沒有 admin 權限時也能用它產出 payload 交給有權限的人。
+usage() { sed -n '/^# 用法：/,/^# ────/p' "$0" | sed 's/^# \{0,1\}//;$d'; }
+
 DRY_RUN=false
-BRANCHES=()
+POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
-    -*) echo "❌ 不認得的參數：$arg" >&2; exit 1 ;;
-    *) BRANCHES+=("$arg") ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "❌ 不認得的參數：$arg（用 --help 看用法）" >&2; exit 1 ;;
+    *) POSITIONAL+=("$arg") ;;
   esac
 done
+
+if [ "${#POSITIONAL[@]}" -eq 0 ]; then
+  echo "❌ 缺少目標 repo。" >&2; usage >&2; exit 1
+fi
+REPO="${POSITIONAL[0]}"
+BRANCHES=("${POSITIONAL[@]:1}")
 
 # 要保護哪些分支。沒給就是 default branch（維持舊行為）。
 if [ "${#BRANCHES[@]}" -eq 0 ]; then
   BRANCHES=("~DEFAULT_BRANCH")
+  # 沿用舊名稱，既有 repo 重跑才會是「更新」而不是多出一份。
   DEFAULT_RULESET_NAME="CI Standard - main protection"
 else
-  # 名稱要能穩定對應，重跑才會更新同一份而不是再建一份。
-  DEFAULT_RULESET_NAME="CI Standard - ${BRANCHES[0]} protection"
+  # 名稱要由**整份分支清單**決定，不能只取第一個 ——
+  # 否則 `… main` 與 `… main develop` 會算成同一份 ruleset，
+  # 後跑的那次會把前一次的 include 整個蓋掉（develop 的保護就這樣無聲消失）。
+  _joined=""
+  for _b in "${BRANCHES[@]}"; do
+    if [ -n "$_joined" ]; then _joined="$_joined+"; fi
+    _joined="$_joined$_b"
+  done
+  DEFAULT_RULESET_NAME="CI Standard - $_joined protection"
 fi
 RULESET_NAME="${RULESET_NAME:-$DEFAULT_RULESET_NAME}"
 
@@ -83,6 +99,15 @@ echo "  strict status checks：$STRICT_CHECKS"
 
 # ── 組 JSON：分支條件 ────────────────────────────────────────
 # ruleset 的 include 只認 refs/heads/<樣式> 或 ~DEFAULT_BRANCH / ~ALL 這兩個保留字。
+# 進 JSON 的字串一律先跳脫反斜線與雙引號，否則名稱裡有一個 " 就會產出壞掉的
+# JSON，而 gh 回的是看不懂的 parse error。
+json_escape() {
+  _s="$1"
+  _s="${_s//\\/\\\\}"
+  _s="${_s//\"/\\\"}"
+  printf '%s' "$_s"
+}
+
 INCLUDE=""
 for b in "${BRANCHES[@]}"; do
   case "$b" in
@@ -91,7 +116,7 @@ for b in "${BRANCHES[@]}"; do
     *)               ref="refs/heads/$b" ;;
   esac
   if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE, "; fi
-  INCLUDE="$INCLUDE\"$ref\""
+  INCLUDE="$INCLUDE\"$(json_escape "$ref")\""
 done
 
 # ── 組 JSON：required status checks ──────────────────────────
@@ -106,7 +131,7 @@ while IFS= read -r c; do
   c="${c%"${c##*[![:space:]]}"}"
   [ -n "$c" ] || continue
   if [ -n "$CHECKS" ]; then CHECKS="$CHECKS, "; fi
-  CHECKS="$CHECKS{ \"context\": \"$c\" }"
+  CHECKS="$CHECKS{ \"context\": \"$(json_escape "$c")\" }"
 done <<EOF
 $(printf '%s' "$REQUIRED_CHECKS" | tr ',' '
 ')
@@ -118,7 +143,7 @@ fi
 
 PAYLOAD=$(cat <<JSON
 {
-  "name": "$RULESET_NAME",
+  "name": "$(json_escape "$RULESET_NAME")",
   "target": "branch",
   "enforcement": "active",
   "conditions": {
@@ -171,8 +196,22 @@ else
     -H "Accept: application/vnd.github+json" --input -
 fi
 
+# 同一個 repo 上兩份都叫 "CI Standard - …" 的 ruleset 會**疊加**生效，
+# 出問題時極難 debug（規則看起來都對，但有一份在暗處多要求了東西）。
+OTHERS=$(gh api "repos/$REPO/rulesets" \
+  --jq ".[] | select(.name != \"$RULESET_NAME\") | select(.name | startswith(\"CI Standard - \")) | \"\(.id)\t\(.name)\"" 2>/dev/null || true)
+
 echo
 echo "✅ 完成。到 $REPO → Settings → Rules → Rulesets 可檢視。"
+
+if [ -n "$OTHERS" ]; then
+  echo
+  echo "⚠️ 這個 repo 還有其他 CI Standard 的 ruleset，規則會**疊加**生效："
+  echo "$OTHERS" | while IFS="$(printf '\t')" read -r oid oname; do
+    echo "     id=$oid  $oname"
+    echo "       確認不再需要就刪掉：gh api -X DELETE repos/$REPO/rulesets/$oid"
+  done
+fi
 echo
 echo "⚠️ 三件事要確認："
 echo "   1. required check 名稱要和 Checks 分頁上實際出現的字串完全一致。"
