@@ -10,6 +10,68 @@
 
 ---
 
+## [1.4.0] — 未發佈
+
+**把 Copilot 自動修 / 自動審整組拿掉，公版只剩 CI 與 Security 兩條線。**
+
+**⚠️ 這是破壞性變更。** 已導入的專案升級後，留在專案裡的三支 `copilot-*` 呼叫端 workflow
+會指向不存在的 reusable，每次 PR 直接 `startup_failure`。
+`adopt.sh` **不會**幫忙刪（它從不刪專案裡既有的檔案），必須各專案自己動手：
+
+```bash
+git rm .github/workflows/copilot-autofix-ci-security.yml \
+       .github/workflows/copilot-autofix-review.yml \
+       .github/workflows/copilot-autoreview-gate.yml \
+       .github/workflows/copilot-setup-steps.yml
+```
+
+repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可一併刪除；
+`.github/zizmor.yml` 裡若還留著對那兩支的 `dangerous-triggers` 放行，也要拿掉。
+
+### 為什麼拿掉
+
+- 要 **Copilot Business** 授權，還要每個 repo 各設一支真人 fine-grained PAT（`COPILOT_TRIGGER_PAT`）——
+  `github-actions[bot]` 發的 `@copilot` mention 會被 coding agent 忽略，這是平台限制，繞不掉。
+- Copilot 每推一次 commit，觸發的 CI/Security run 都會卡在 `action_required`，
+  要人在 PR 頁面按一次「Approve and run workflows」。**GitHub 硬性規定，沒有開關可調。**
+  等於「全自動」流程每一輪都還是要人動手。
+- 六支 workflow（約 850 行）與 `adopt.sh` / `adopt.ps1` 裡整條「整份換新 + 搬回設定」的升級路徑
+  都是為了它而存在，維護成本大於效益。
+
+掃描與 Gate 完全不受影響 —— 公版本來就是「找問題、擋 PR」，修與決定交回給人。
+
+### 移除
+- `.github/workflows/copilot-autofix-ci-security.yml`、`copilot-autofix-reusable.yml`、
+  `copilot-autofix-review.yml`、`copilot-autofix-review-reusable.yml`、
+  `copilot-autoreview-gate.yml`、`copilot-autoreview-reusable.yml`
+- `templates/consumer-repo/.github/` 底下的三支呼叫端、`copilot-setup-steps.yml`、`copilot-instructions.md`
+
+### 變更 —— 導入腳本（adopt.sh / adopt.ps1）
+- **三類檔案策略變成兩類**：`SHELL_FILES`（只負責觸發的呼叫端 workflow → 整份換新、舊檔留 `.bak`）
+  已無成員，該條路徑與 `carry_knobs` / `inject_knobs` / `with_keys` 三個函式一併移除。
+- `PROJECT_OWNED` 從五個減為三個：`pull_request_template.md`、`dependabot.yml`、`zizmor.yml`。
+- 移除 1.2.0 的 `COPILOT_TRIGGER_PAT` / COMMENTED 觸發條件最後檢查。
+- 兩支輸出仍 **byte-identical**（CI 的 Windows job 每次都會實跑 PowerShell 5.1 對拍）。
+
+### 變更 —— 其他
+- `test-adopt.sh`：情境 B 的專案專屬檔案 fixture 改用 `pull_request_template.md`，
+  新增「已移除的 Copilot 檔案不得再被導入」斷言。共 48 項。
+- `.github/zizmor.yml`（本 repo 與範本）：`dangerous-triggers` 的放行已無對象，移除。
+- `setup-branch-protection.sh`：`REQUIRED_APPROVALS` / `STRICT_CHECKS` 預設值不變，
+  但註解裡以 Copilot 為前提的兩條理由改掉了。
+- `docs/KNOWN-LIMITATIONS.md`：兩條 Copilot 限制（`action_required`、bot mention 喚不醒 Agent）
+  隨流程移除一併刪除。
+- README 的第 4 章「自動修、自動審」整章移除，目錄重新編號；
+  `docs/SETUP.md` 的 §B「啟用 Copilot 兩個 Agent」整節移除，後續章節遞補為 §B / §C / §D。
+
+### 相容性
+- **input 與 job 名稱完全沒動**：`ci / CI Gate`、`security / Security Gate` 不變，
+  `ci-reusable.yml` / `security-reusable.yml` 的所有 input 不變 —— 既有 ruleset 不必改。
+- 破壞的只有「專案裡那三支 Copilot 呼叫端 workflow」。依[版本策略](README.md#版本策略)，
+  移除 workflow 屬於破壞性變更；要沿用 `v1` 就得先把每個已導入的專案清乾淨再移 tag。
+
+---
+
 ## [1.3.1] — 2026-09-15
 
 **只改用詞，沒有任何行為變更。** 指向 `@v1` 的專案 CI 行為完全不變；因為範本與導入腳本的

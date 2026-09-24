@@ -16,7 +16,7 @@
 | 類型 | 檔名特徵 | 誰會有 | 作用 |
 |---|---|---|---|
 | **公版本體** | `*-reusable.yml` | 只有這個 repo | 真正的檢查邏輯，被別人 `uses:` 呼叫 |
-| **呼叫端** | `ci.yml`、`security.yml`、`copilot-*.yml`（不含 reusable） | 每個導入的專案都有一份 | 只寫「什麼時候觸發」＋「傳什麼參數」 |
+| **呼叫端** | `ci.yml`、`security.yml` | 每個導入的專案都有一份 | 只寫「什麼時候觸發」＋「傳什麼參數」 |
 | **工具測試** | `adopt-tests.yml` | 只有這個 repo | 測 `scripts/adopt.*` 導入腳本，跟公版無關 |
 
 這個 repo 自己也放了一份呼叫端（用 `./` 相對路徑呼叫自己的 reusable），
@@ -38,38 +38,28 @@ flowchart TD
     CI --> CIG{CI Gate}
     SEC --> SG{Security Gate}
 
-    CIG -->|fail| AF
-    SG -->|fail| AF
-    CIG -->|pass| BOTH{同一個 SHA<br/>兩邊都 success?}
+    CIG -->|fail| FIX[看 Summary 的表<br/>自己修，再推一次]
+    SG -->|fail| FIX
+    FIX --> PR
+
+    CIG -->|pass| BOTH{兩個 Gate 都綠?}
     SG -->|pass| BOTH
-
-    BOTH -->|否，另一邊還沒好| WAIT[skip；等另一條跑完會再判一次]
-    BOTH -->|是| AR[Copilot Auto Review<br/>copilot-autoreview-gate.yml]
-
-    AF[Copilot Autofix — CI/Security<br/>copilot-autofix-ci-security.yml] --> FIXPUSH[Copilot 直接 commit 到 PR 分支]
-    FIXPUSH --> APPROVE[⚠️ 人工按一次<br/>Approve and run workflows]
-    APPROVE --> PR
-
-    AR --> REVIEW[Copilot code review]
-    REVIEW --> RSTATE{review 結果}
-    RSTATE -->|COMMENTED 且 0 則 inline<br/>= 審完沒問題| MERGE[人工 approve → merge]
-    RSTATE -->|COMMENTED 有 inline<br/>或 真人 changes_requested| AFR[Copilot Autofix — Review<br/>copilot-autofix-review.yml]
-    AFR --> FIXPUSH
+    BOTH -->|否| WAIT[等另一條跑完]
+    BOTH -->|是| MERGE[人工 review → merge]
 
     SCHED[schedule：每週一 03:00<br/>只跑 Security] --> SEC
     PUSHMAIN[push 到 main<br/>非 md/docs 變更] --> CI
     PUSHMAIN --> SEC
 ```
 
-讀這張圖要記住四件事：
+讀這張圖要記住兩件事：
 
 1. **CI 與 Security 是兩條獨立、並行的 workflow**，各自有自己的 Gate。分支保護只要求這兩個 Gate。
-2. **Copilot 那三支是選配**，而且用 `workflow_run` 觸發 —— 這種觸發器只認 **default branch 上的檔案版本**，
-   所以那幾支必須先 merge 進 `main` 才會生效（在 PR 上改它們，改的內容不會在該 PR 生效）。
-3. **推 main 或每週排程的結果不會進 Copilot 流程**（條件寫死只處理 pull_request 觸發的 run）——
-   沒有 PR 可修、可審，起 job 只是白付分鐘。
-4. **Copilot 推的 commit，CI 會卡在 `action_required`**，要人在 PR 頁按一次「Approve and run workflows」。
-   GitHub 硬性規定，繞不掉；替代法是自己推個空 commit（`git commit --allow-empty`）。
+2. **公版不會替你改任何程式碼**。它只負責「找」與「擋」，修與決定都是人。
+
+> ℹ️ 1.4.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。
+> 那套已整組移除 —— 它需要 Copilot Business 授權與真人 PAT，而且 Copilot 每推一次 commit，
+> 觸發的 CI/Security run 都會卡在 `action_required` 要人手動核准（GitHub 硬性規定）。
 
 ---
 
@@ -164,39 +154,17 @@ reusable 的 `permissions` 是 `contents: read`，而 reusable 只能「縮減�
 
 ---
 
-## 4. Copilot 自動修的判定邏輯（兩條路共用同一個形狀）
+## 4. 呼叫端為什麼只有二十幾行
 
-```mermaid
-flowchart TD
-    T1[CI / Security 失敗<br/>workflow_run 結果為 failure] --> FIND[用 head-branch 找 open PR]
-    T2[review submitted<br/>changes_requested 或 Copilot COMMENTED] --> INLINE{COMMENTED 有 inline 意見?}
-    INLINE -->|0 則 = 審完沒問題| SKIP[skip，而且不吃掉一次 attempt]
-    INLINE -->|有| GUARD
-    FIND --> DEP{Dependabot PR?}
-    DEP -->|是| SKIP2[skip，Dependabot 自己管自己的 PR]
-    DEP -->|否| GUARD
+專案裡的 `ci.yml` / `security.yml` 只寫兩件事：**什麼時候觸發**、**傳什麼參數**。
+一行 `uses:` 之後就進公版，所有 bash 邏輯、工具版本、Gate 判定都在這個 repo。
 
-    GUARD[Guard：數 PR 留言裡的隱藏 HTML 標記] --> ESC{已經轉交人工?}
-    ESC -->|是| QUIET[done，保持安靜，避免洗版]
-    ESC -->|否| COOL{15 分鐘內已發過?<br/>僅 CI/Security 這條路}
-    COOL -->|是| SKIP3[cooldown：同一個 commit 的<br/>CI 和 Security 會相繼失敗，只修一次]
-    COOL -->|否| CNT{attempts 已達上限? 預設 3}
-    CNT -->|是| ESCAL[🚨 貼留言 @PR 作者<br/>+ needs-human-review label<br/>留下 escalated 標記，之後不再出聲]
-    CNT -->|否| FIX[貼 @copilot 留言<br/>留下 attempt 標記<br/>用 COPILOT_TRIGGER_PAT 以真人身分發]
-    FIX --> AGENT[Copilot coding agent commit 到 PR 分支]
-    AGENT --> RERUN[CI / Security 重跑（需人工 approve 一次）]
-```
+這樣切的好處是升級不必動專案：公版改完移動 `v1` tag，各專案**下次跑 CI 就吃到新版**。
+代價是呼叫端的 `uses:` 指向會移動的 `v1`（不是釘死的 SHA）——
+這是有意的取捨，`.github/zizmor.yml` 對公版的 `uses:` 只要求 ref-pin，其餘第三方 action 一律 hash-pin。
 
-**狀態存在哪**：沒有資料庫，**次數與狀態全記在 PR 留言的隱藏 HTML 註解裡** ——
-`auto-fix-attempt`、`auto-fix-escalated`、`review-fix-attempt`、`review-fix-escalated`、
-`auto-review-request:<sha>`。
-所以「想重啟自動修正，把那則 🚨 留言刪掉就好」是真的，不是比喻。
-
-**最容易踩的前提**：`@copilot` mention **必須用真人 PAT（repo secret `COPILOT_TRIGGER_PAT`）發**。
-`github-actions[bot]` 發的 mention 會被 coding agent 忽略 —— 沒設的話，流程只會乖乖貼留言，但沒有人動工。
-
-**誰可以驅動自動修**：只有 `OWNER` / `MEMBER` / `COLLABORATOR` 按 Request changes，
-或 Copilot reviewer 本人的 review。公開 repo 上陌生帳號的 review 不得驅動 agent 執行其指示。
+唯一需要回頭改專案的情況是**input 約定改變**（改名或移除）。那種改動走 `v2`，
+不移動 `v1`，既有專案不會被動到 —— 見 README「版本策略」。
 
 ---
 
@@ -207,7 +175,7 @@ flowchart TD
 1. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)（36 行）—— 呼叫端長什麼樣，一眼看完。
 2. [`.github/workflows/ci-reusable.yml`](../.github/workflows/ci-reusable.yml) 的 `ci-gate` job —— Gate 判定的核心，註解寫了為什麼這樣寫。
 3. [`.github/workflows/security-reusable.yml`](../.github/workflows/security-reusable.yml) 的 `inputs` 區塊 —— 可調的旋鈕全在這裡。
-4. [`templates/consumer-repo/`](../templates/consumer-repo/) —— 別人導入時實際會拿到的整包檔案。
+4. [`templates/consumer-repo/`](../templates/consumer-repo/) —— 別人導入時實際會拿到的整包檔案（五個，沒有邏輯）。
 5. [`scripts/adopt.sh`](../scripts/adopt.sh) / [`adopt.ps1`](../scripts/adopt.ps1) —— 把上面那包複製過去的一鍵導入腳本（兩支輸出 byte-identical，CI 會三平台對拍）。
 
 其他文件各自負責什麼：
@@ -218,7 +186,7 @@ flowchart TD
 | `docs/HANDOFF.md` | 換人／換機器接手，想知道「現在做到哪」 |
 | `docs/KNOWN-LIMITATIONS.md` | 導入前必看：實測過但還不能用的東西 |
 | `docs/ADOPT.md` | 一鍵導入腳本的跨平台／離線用法 |
-| `docs/SETUP.md` | 管理者：發版、開 Copilot、方案額度 |
+| `docs/SETUP.md` | 管理者：發版、方案額度 |
 | `docs/DEVSECOPS-NOTES.md` | 想問「為什麼是這幾套工具、那個誰誰誰為什麼沒放」 |
 | `CHANGELOG.md` | 想知道某個設計是哪一版、為什麼改的 |
 
@@ -233,6 +201,4 @@ flowchart TD
 | Gate | 總結 job（`CI Gate` / `Security Gate`），`needs` 所有子 job，分支保護只認它 |
 | required check | 分支保護要求「必須綠」的那個 check，這裡固定是兩個 Gate |
 | `workflow_call` | 「我可以被別人呼叫」的觸發器，公版本體都用這個 |
-| `workflow_run` | 「某條 workflow 跑完了」的觸發器；只認 default branch 上的檔案版本 |
-| escalate / 轉交人工 | 自動修達到次數上限，貼 `needs-human-review` label 然後閉嘴 |
 | GHAS | GitHub Advanced Security，付費項目；這套刻意設計成不需要它 |

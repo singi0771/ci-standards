@@ -4,7 +4,6 @@
 公版更新 → 移動 `v1` tag → 各專案下次跑 CI 就自動吃到新版，不必一個一個 repo 去改。
 
 > 適用環境：私有 repo、全部是免費的開源工具，**不需要 GitHub Advanced Security**。
-> 有 Copilot Business 的話，可以再打開「掃到問題自動請 Copilot 修、全過自動請 Copilot 審」的流程。
 
 **白話版三句話：**
 
@@ -20,14 +19,13 @@
 1. [運作原理（先看這個）](#運作原理先看這個)
 2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
-4. [自動修、自動審（選配，需 Copilot Business）](#自動修自動審選配需-copilot-business)
-5. [可調參數（inputs）](#可調參數inputs)
-6. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
-7. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
-8. [常見情境客製](#常見情境客製)
-9. [疑難排解](#疑難排解)
-10. [版本策略](#版本策略)
-11. [檔案地圖](#檔案地圖)
+4. [可調參數（inputs）](#可調參數inputs)
+5. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
+6. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
+7. [常見情境客製](#常見情境客製)
+8. [疑難排解](#疑難排解)
+9. [版本策略](#版本策略)
+10. [檔案地圖](#檔案地圖)
 12. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
 
 ---
@@ -68,30 +66,22 @@
 而 skipped 的 required check，GitHub 要嘛把它當通過（等於沒檢查）、要嘛一直 pending，兩種都不是你要的。
 Gate job 用 `if: always()` 執行、自己判斷「開了就得 success」，就沒有這個問題。
 
-### 完整的自動流程（有 Copilot Business 時）
+### 一個 PR 的完整流程
 
 ```
-免費掃描器「找」弱點 → 開 Issue → 指派 Copilot Coding Agent「修」並開 PR
-      → Copilot Code Review「審」→ Security Gate 擋下 → 你「決定」merge
+你開 PR ─▶ CI + Security 並行跑 ─▶ 兩個 Gate 都綠 ─▶ 你 review ─▶ merge
+                │
+                └─ 任一 Gate 紅 ─▶ 看 Summary 的表 ─▶ 自己修 ─▶ 再推一次
 ```
 
-免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
+掃描器負責「找」，你負責「修」與「決定」。公版不會替你改任何程式碼 ——
+它只在 PR 上把問題攤開、擋住不該進 main 的東西。
 
-> ✅ **「bot 喚不醒 Agent」已在 1.2.0 解決**：`@copilot` mention 改由
-> **`COPILOT_TRIGGER_PAT`**（有 Copilot 授權的使用者的 PAT）以真人身分發出。
-> 佐證（2026-08-09，本 repo PR #12）：Agent 對真人發出的 mention 會實際動工 ——
-> 在**人類開的 PR** 上依 review 意見連推 3 個修正 commit；bot 身分的 mention 則從未喚醒過它。
-> 設定方式見[自動修、自動審](#自動修自動審選配需-copilot-business)；首次導入後建議實測一輪。
->
-> 🟡 **仍存在的一道人工關卡**（GitHub 硬性規定，改不掉）：
-> **Copilot 推的 commit，觸發的 CI/Security run 會卡在 `action_required`**，
-> 需要人在 PR 頁面按一次「Approve and run workflows」才會跑。
-> 每輪 Copilot 修正後按一次即可；不想按的替代法是自己推個空 commit
-> （`git commit --allow-empty`，人類 push 觸發的 run 不需核准）。
-
-> **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
-> 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，
-> 而分支保護的 required approvals 若設成 1，Copilot 是**湊不出**那一票的（見[分支保護](#分支保護讓流程非過不可)）。
+> ℹ️ 1.4.0 把「掃到問題自動請 Copilot 修、全過自動請 Copilot 審」那套整組拿掉了。
+> 原因：它要 Copilot Business 授權與一支真人 PAT，而且 Copilot 每推一次 commit，
+> 觸發的 CI/Security run 都會卡在 `action_required`、要人手動按一次
+> 「Approve and run workflows」（GitHub 硬性規定，沒有開關可調）。
+> 維護成本大於效益。已導入的專案要怎麼收尾見[版本策略](#版本策略)。
 
 ---
 
@@ -138,19 +128,13 @@ cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 |---|---|---|
 | `workflows/security.yml` | 呼叫安全公版 | ✅ 改 `uses:` 與 `with:` |
 | `workflows/ci.yml` | 呼叫 CI 公版 | ✅ 改 `uses:` |
-| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v1` 與兩支呼叫端 workflow 已放行） | 有誤判才加規則 |
-| `workflows/copilot-setup-steps.yml` | Copilot Coding Agent 動工前的環境準備 | 依專案相依調整 |
-| `workflows/copilot-autofix-ci-security.yml` | CI/Security 失敗 → 以 PAT `@copilot` 修，含重試上限與轉交人工 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
-| `workflows/copilot-autofix-review.yml` | review 帶意見（真人或 Copilot）→ 以 PAT `@copilot` 依意見修 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
-| `workflows/copilot-autoreview-gate.yml` | CI+Security 全過 → 透過 API 自動請 Copilot 審 | 不用改（需 Copilot Business） |
+| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v1` 已放行） | 有誤判才加規則 |
 | `dependabot.yml` | pip 每週、docker / actions 每月自動開更新 PR | 有前端再加 npm 區塊 |
-| `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，前四段是待填的佔位符 |
 | `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
 
-> 三支 `copilot-auto*` workflow 是**選配的自動化流程**，沒有 Copilot Business 也能複製過去（只是不會動）。
-> 這三支呼叫端 workflow 只有觸發條件加一行 `uses:`，邏輯都在公版。細節見[下方說明](#自動修自動審選配需-copilot-business)。
+> 總共只有五個檔案，**沒有任何邏輯**：兩支呼叫端 workflow 各二十幾行，其餘三個是設定與範本。
 
-### 步驟 2 — 改三個地方
+### 步驟 2 — 改兩個地方
 
 **① `security.yml` 的 `uses:` 與參數**
 
@@ -180,9 +164,6 @@ jobs:
 
 > ⚠️ **job id（`security` / `ci`）不要亂改**。分支保護的 check 名稱是 `<job id> / <公版 job 名>`，改了名稱 ruleset 就對不上。
 
-**③ `copilot-instructions.md`**
-把「專案概觀 / 使用技術 / 進入點 / 開發測試指令」四段換成這個專案的實況。Copilot 修碼會照著跑測試，寫錯它就修不動。
-
 ### 步驟 3 — 推上去
 
 ```bash
@@ -209,10 +190,6 @@ gh run list -L 5
 這會建立 ruleset：必須開 PR + 對話解決 + 通過 `Security Gate` 與 `CI Gate` + 禁止 force push / 刪分支。
 ⚠️ 有方案限制、以及 required approvals 預設為何是 0，見[分支保護](#分支保護讓流程非過不可)。
 
-> 三支 `copilot-auto*` 的觸發器（`workflow_run` / `pull_request_review`）依 GitHub 規則
-> **只認 default branch 上的檔案**。所以「導入這件事」本身的那個 PR 不會有自動修 / 自動審，
-> 要等合併進 `main` 之後的下一個 PR 才會生效 —— 不是壞掉。
-
 ---
 
 ## 導入後，日常怎麼用
@@ -226,7 +203,7 @@ git push -u origin feat/xxx
 gh pr create
 ```
 
-開 PR 後自動發生：CI（ruff + pytest + docker build + lint）→ 四到六項安全掃描 → 兩個 Gate 總結 → Copilot Code Review（若已啟用）。
+開 PR 後自動發生：CI（ruff + pytest + docker build + lint）→ 四到六項安全掃描 → 兩個 Gate 總結。
 全綠才能 merge。Gate 紅的話點進 Actions 看是哪一項掛掉。
 
 > 還在寫、不想每推一次就跑一輪？**開成草稿 PR（Draft）**。範本的呼叫端遇到草稿會整個跳過，
@@ -239,19 +216,15 @@ gh pr create
 - **Artifact `sbom-cyclonedx`**：`generate-sbom: true` 時會多一份「這個 commit 用了哪些套件」的清單
 - `upload-sarif: true` 時才會進 Security 分頁（需 public repo 或 GHAS）
 
-### 掃到弱點 → 交給 Copilot 修
+### 掃到弱點怎麼處理
 
-> ✅ **這條路已實測可用**（2026-08-01）。「CI 紅了自動 @copilot」與「review 意見自動修」
-> 兩條自動路徑自 1.2.0 起也已經能用（需設定 `COPILOT_TRIGGER_PAT`，見
-> [自動修、自動審](#自動修自動審選配需-copilot-business)）；人工開 Issue 起頭仍然可用，
-> 適合處理排程掃描（非 PR 情境）發現的弱點。
+1. 先看 Gate 的 Summary 表，確定是哪一項掛掉
+2. 點進該 job 的 log 拿檔案、行號與掃描器訊息
+3. 判斷是真弱點還是誤判 —— 誤判的處理方式（各掃描器的忽略寫法）見[疑難排解](#疑難排解)
+4. 修好再推一次，Gate 會重跑
 
-1. 依掃描結果開 Issue，把弱點檔案、行號、掃描器訊息貼進去
-2. Issue 右側 Assignees **指派給 Copilot**
-3. Copilot 先跑 `copilot-setup-steps.yml` 準備環境 → 修碼 → 跑測試 → 開 PR
-4. PR 一樣要過 Security Gate；你 review 後 merge
-
-> 用量提醒：Coding Agent 與 Code Review 都會扣 AI Credits（1,900 / 人 / 月）+ Actions 分鐘。先從小型、明確的 Issue 開始。
+**不要為了讓它變綠就關掉檢查。** 真的要放行就放在該掃描器的忽略設定裡，
+留下一行註解寫清楚為什麼 —— 下一個人才知道那不是隨手關掉的。
 
 ### 定期會自動發生
 
@@ -262,87 +235,6 @@ gh pr create
 
 什麼都不用做。`uses: ...@v1` 且 `v1` tag 已移動 → 你下次跑 CI 就吃到新版。
 新增的參數都有預設值，舊的呼叫端不會壞；想用新功能再跑一次 `adopt.sh`，它會把新參數補上、舊的保留。
-
----
-
-## 自動修、自動審（選配，需 Copilot Business）
-
-範本裡三支 `copilot-auto*` workflow 讓「修 + 審」完全自動化。**不裝 Copilot Business 也能複製過去，只是不會動**；有的話會形成這個流程：
-
-> **架構**：這三支放在專案裡的檔案只是**十幾行的呼叫端 workflow**（觸發器 + 一行 `uses:`），所有邏輯放在公版的三支 `*-reusable.yml`。改邏輯只要動公版、移 `v1`，**各專案下次觸發就自動跟著更新**，跟 ci/security 一樣不必逐一改。詳見[為什麼這樣設計](#為什麼呼叫端只放觸發條件不整包複製)。
-
-```
-             ┌───────────────────────────────────────────────────────────┐
-             ▼                                                           │
-  你開 PR ─▶ CI + Security ──失敗──▶ copilot-autofix-ci-security ──▶ @copilot 修 ─┤
-             │                        （最多 3 次，超過就轉交人工）              │
-             │全過                                                              │
-             ▼                                                                  │
-     copilot-autoreview-gate ──▶ 透過 API 請 Copilot 審                          │
-             │                                                                  │
-             ├── review 帶 inline 意見（Copilot COMMENTED 或真人 Request changes）│
-             ▼                                                                  │
-     copilot-autofix-review ──▶ 用 COPILOT_TRIGGER_PAT 發 @copilot ──▶ Agent 修 ─┘
-             │                   （最多 3 次；空 review 不觸發）
-             │  ⚠️ Agent 推的 commit 觸發的 CI 要人按一次 Approve and run
-             ▼
-        意見都處理完、全綠 → 你決定 Merge
-```
-
-> **注意這裡沒有「Copilot approve」這一格。** Copilot 只會留 COMMENT，不會 approve，
-> 最後的 Merge 一定是人。
->
-> **1.2.0 的兩個關鍵改變**（缺一不可，缺了迴圈就是死的）：
-> 1. `copilot-autofix-review` 現在**也吃 Copilot 的 COMMENTED review**（它永遠不會送
->    changes_requested）。空的「審完沒問題」review 由公版判斷跳過，迴圈靠 max-attempts 上限停下來，
->    不再靠「不接 commented」。
-> 2. `@copilot` mention 改由 **`COPILOT_TRIGGER_PAT` secret** 以真人身分發出 ——
->    實測證明 `github-actions[bot]` 發的 mention 會被 Agent 直接忽略，
->    舊版等於從來沒有真正觸發過自動修正。
-
-| 專案裡的呼叫端 workflow | 顯示名 | 呼叫的公版 | 觸發時機 → 做什麼 |
-|---|---|---|---|
-| `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | `copilot-autofix-reusable.yml` | PR 的 CI/Security 失敗 → 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 |
-| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | 真人 `changes_requested` **或 Copilot COMMENTED（帶 inline 意見）** → 以 PAT 發 `@copilot` 依意見修碼 |
-| `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | PR 的 CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 透過 API 請 Copilot 審 |
-
-### 啟用自動修正必做：設定 `COPILOT_TRIGGER_PAT`
-
-沒有這個 secret，review → 修正那條路**不會動**（公版會在 run log 發 warning，留言照貼但 Agent 不理）。
-
-1. 用**有 Copilot 授權**的帳號到 GitHub → Settings → Developer settings →
-   Fine-grained personal access tokens → Generate new token
-2. Repository access：**只勾目標 repo**；權限給 **Issues: Read and write** 與
-   **Pull requests: Read and write**，其他一律不給
-3. 到目標 repo → Settings → Secrets and variables → Actions →
-   New repository secret，名稱 `COPILOT_TRIGGER_PAT`，貼上 token
-
-> 為什麼需要 PAT：GitHub 規定 Copilot coding agent 只回應「真人」的 `@copilot` mention，
-> `github-actions[bot]`（`GITHUB_TOKEN`）發的一律忽略（防 bot 互相觸發的無窮迴圈）。
-> 這是平台限制，不是本 repo 的設計選擇。
-
-**內建的保護措施（避免無限燒 Credits）：**
-
-- **空 review 不觸發**：Copilot「審完沒問題」也是送一則 COMMENTED review；公版會先數該
-  review 的 inline 意見數，0 則就跳過，不進修正迴圈、不吃 attempt 次數。
-- **修正次數上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏標記計數；達上限改貼 `needs-human-review` label 轉交人工，不再自動修。
-- **審查次數上限**：`max-review-requests`（預設 3）。Copilot 依意見 commit → 新 SHA → CI/Security 又全綠 → 又請審，**這條迴圈本身沒有終點**，靠這個上限停下來。
-- **轉交人工後就不再留言**：轉交人工的留言帶 `<!-- *-escalated -->` 標記，之後同一 PR 不再自動留言。想重啟自動修正就把那則留言刪掉。
-- **冷卻時間（cooldown）**：`copilot-autofix-ci-security` 對同一 commit 15 分鐘內只觸發一次（CI 與 Security 常在數秒內相繼失敗，避免重複）。
-- **同一個 SHA 不重複 + 排隊**：`copilot-autoreview-gate` 用 `concurrency` 把同一 SHA 的兩次呼叫排隊（CI 與 Security 幾乎同時完成時，兩邊會同時判定「該請審了」），後到的那次看到標記就跳過。
-- **跳過 Dependabot**：Dependabot PR 不進 autofix，**也不進 autoreview**（每個 Dependabot PR 各燒一次 review + agent 是純浪費）。
-- **兩邊都綠才放行**：`copilot-autoreview-gate` 會確認 CI 與 Security **都**對同一 SHA 成功才動作，不會只過一半就請審。
-- **只理 PR**：1.3.0 起兩支用 `workflow_run` 觸發的呼叫端 workflow 只在「PR 觸發的 run」完成時才起 job，推到 main 或排程掃描完成不會再白起一個 job。
-
-### 為什麼呼叫端只放觸發條件、不整包複製
-
-這三支的**觸發器**（`workflow_run` / `pull_request_review`）依 GitHub 規則**必須存在於 consumer repo 的 default branch**，無法純靠 `uses:` 繼承。但「觸發器要在本地」不代表「邏輯也要在本地」——
-
-- 專案端只留**觸發條件 + 一行 `uses: ...copilot-*-reusable.yml@v1`，把事件參數（PR、SHA、run-id…）當 `with:` 傳進去。
-- **所有 bash 邏輯集中在公版的 `*-reusable.yml`**。改邏輯（新的轉交人工規則、未來的測試涵蓋率門檻、資安擴充）只要動公版、移 `v1` → 各專案下次觸發自動吃到，**不必逐一改 repo**。
-- 這幾支呼叫端 workflow 只有在 **input 約定改變**時才需要重新複製，頻率極低（`adopt.sh` 升級時會整份換新、把你調過的設定搬回來）。
-
-> 要調重試次數，在呼叫端 workflow 的 `with:` 加 `max-attempts: "5"` 即可，不必改公版。
 
 ---
 
@@ -410,7 +302,6 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 | hadolint 放在 Docker build job 裡當一個步驟 | 不另開 job |
 | actionlint 改抓 2 MB 執行檔，不再拉 docker image | 每次省 20–40 秒 |
 | Python job 不再 `pip install --upgrade pip` | runner 的 pip 已經夠新，省 5–10 秒 |
-| 兩支用 `workflow_run` 觸發的呼叫端 workflow 只理「PR 觸發」的 run | 每次合併進 main 少白起 2 個 job |
 | 草稿 PR 整個跳過（範本呼叫端） | 還在寫的 PR 每推一次省一整輪 |
 | Trivy 預設不再掃 secret（gitleaks 已掃過含歷史） | 大 repo 省數十秒 |
 | Dependabot：docker / actions 改每月 | 每個 Dependabot PR 都會跑整套，少開 PR 就少跑 |
@@ -424,7 +315,7 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 - 連續 push 會自動取消舊 run（範本已設 `concurrency` + `cancel-in-progress`）
 - Settings → Billing → Spending limit 設 **$0**，額度用完就停，不會爆帳單（代價：那天 CI 直接不跑，見 [`docs/HANDOFF.md`](docs/HANDOFF.md) 記的症狀）
 
-一個 Python + Docker 的 private 專案，每次 push 到 PR 大約是 **CI 4–5 分鐘 + Security 5–6 分鐘**（含 zizmor），合併進 main 再一輪、少了自動審的 2 分鐘。
+一個 Python + Docker 的 private 專案，每次 push 到 PR 大約是 **CI 4–5 分鐘 + Security 5–6 分鐘**（含 zizmor），合併進 main 再一輪。
 
 ---
 
@@ -439,15 +330,14 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 403 Upgrade to GitHub Pro or make this repository public to enable this feature.
 ```
 
-三個解法：把 repo 轉到有 Team 方案的 org（推薦，順便統一管 Copilot policy）／帳號升 Pro／repo 轉 public（多數情況不適合）。
+三個解法：把 repo 轉到有 Team 方案的 org（推薦，順便統一管組織層級的 ruleset）／帳號升 Pro／repo 轉 public（多數情況不適合）。
 
 ### ⚠️ required approvals 為什麼預設是 0
 
-腳本預設 `required_approving_review_count: 0`，這是刻意的。設 1 而團隊只有你一個人時，**PR 會永遠 merge 不了**，三件事疊在一起：
+腳本預設 `required_approving_review_count: 0`，這是刻意的。設 1 而團隊只有你一個人時，**PR 會永遠 merge 不了**，兩件事疊在一起：
 
 1. GitHub 不允許 PR 作者 approve 自己的 PR
-2. Copilot Code Review 送的是 COMMENT 類型 review，**它不會 approve**
-3. ruleset 預設沒有 `bypass_actors`，連 org admin 都繞不過（跟舊版 classic branch protection 不同）
+2. ruleset 預設沒有 `bypass_actors`，連 org admin 都繞不過（跟舊版 classic branch protection 不同）
 
 設 0 **不代表沒有守門**——「必須開 PR」和「必須通過 Security Gate / CI Gate」照樣強制，只是不強制人工按 Approve。等有第二位固定 reviewer 再改：
 
@@ -489,12 +379,11 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 （`push: main` 那邊保留 `paths-ignore` 沒問題，那不影響 required check。）
 
-### 另外要做的兩件事
+### 另外要做的一件事
 
-- **Copilot 政策**：Org → Settings → Copilot → Policies，開啟 **Copilot code review** 與 **Copilot coding agent**
 - **防止爆帳單**：Settings → Billing → Spending limit，Actions 設 **$0**
 
-這兩項是組織層級的一次性設定，細節見 [`docs/SETUP.md`](docs/SETUP.md)。
+這是組織層級的一次性設定，細節見 [`docs/SETUP.md`](docs/SETUP.md)。
 
 > 本 repo 目前在個人帳號底下。**private repo 的 ruleset 需要 Pro 以上方案**，
 > 而組織可以用「一條 org ruleset 管所有 repo」，不必逐個跑腳本。
@@ -594,6 +483,24 @@ git tag -f v1 && git push -f origin v1                 # 會移動的別名：�
 >
 > ⚠️ **只有會移動的 `v1` 是不夠的**。`v1` 移壞了就沒有「昨天的 v1」可退，所以每次都要留一個不可變的 `v1.x.y`。退回＝把 `v1` 指回上一個版本號。
 
+### 1.4.0：已導入的專案要怎麼收尾
+
+1.4.0 移除了 Copilot 自動修 / 自動審。這是**破壞性變更** —— 已導入的專案升級後，
+留在專案裡的那三支呼叫端 workflow 會指向不存在的 reusable，每次 PR 都直接 `startup_failure`。
+
+升級步驟（`adopt.sh` 不會幫你刪 —— 它從不刪專案裡既有的檔案）：
+
+```bash
+git rm .github/workflows/copilot-autofix-ci-security.yml \
+       .github/workflows/copilot-autofix-review.yml \
+       .github/workflows/copilot-autoreview-gate.yml \
+       .github/workflows/copilot-setup-steps.yml
+```
+
+`.github/copilot-instructions.md` 可以留著（Copilot 在 IDE 裡仍會讀它），
+repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可以一併刪掉。
+`.github/zizmor.yml` 裡若還留著 `dangerous-triggers` 對那兩支的放行，一起拿掉。
+
 發佈過哪些版本、每版改了什麼，記在 [CHANGELOG.md](CHANGELOG.md)。
 
 發佈的實際操作（tag 釘完整 SHA 而不是 HEAD、用 `git ls-remote` 驗收、tag 只能在本機推）
@@ -623,22 +530,16 @@ ci-standards/
 │   │   │  ── ① 公版本體（給別人 uses: 呼叫的）──
 │   │   ├── security-reusable.yml          ← 安全公版（Semgrep+OSV+Trivy+gitleaks+zizmor+Security Gate）
 │   │   ├── ci-reusable.yml                ← CI 公版（Python + Docker/hadolint + actionlint/shellcheck）
-│   │   ├── copilot-autofix-reusable.yml        ← Copilot 自動修（CI/Security 失敗）邏輯
-│   │   ├── copilot-autofix-review-reusable.yml ← Copilot 自動修（依 review 意見）邏輯
-│   │   ├── copilot-autoreview-reusable.yml     ← Copilot 自動審（兩個 Gate 都綠才請審）邏輯
 │   │   │
 │   │   │  ── ② 本 repo 自己的呼叫端（公版拿自己當第一個使用者，用 ./ 呼叫上面那些）──
 │   │   ├── ci.yml                         ← 自己跑 actionlint + shellcheck
 │   │   ├── security.yml                   ← 自己跑全部安全掃描（含 zizmor）
-│   │   ├── copilot-autofix-ci-security.yml
-│   │   ├── copilot-autofix-review.yml
-│   │   ├── copilot-autoreview-gate.yml
 │   │   │
 │   │   │  ── ③ 本 repo 自己的工具測試（不是公版，consumer 不會有這支）──
 │   │   └── adopt-tests.yml                ← 跑 scripts/test-adopt.sh，ubuntu / macOS / Windows 三平台；只動文件時整個跳過
 │   ├── zizmor.yml                     ← 本 repo 的 zizmor 放行規則（連 templates/ 一起管）
 │   ├── ISSUE_TEMPLATE/                ← bug / feature 兩種 Issue 表單
-│   ├── copilot-instructions.md        ← 本 repo 自己的 Copilot 規範
+│   ├── copilot-instructions.md        ← 給 AI 助理看的「改這個 repo 的鐵則」
 │   ├── pull_request_template.md       ← 本 repo 自己的 PR 檢查清單
 │   ├── CODEOWNERS
 │   └── dependabot.yml                 ← 本 repo 只有 github-actions 相依，每月
@@ -648,28 +549,23 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（57 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（48 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
-│   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
+│   ├── SETUP.md                       ← 管理者用：公版發佈、方案/額度
 │   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
 │   ├── MIGRATION-TO-ORG.md            ← 把本 repo 搬到組織底下的 checklist
 │   ├── DEVSECOPS-NOTES.md             ← 工具怎麼選：為什麼是這幾套、哪些評估過但沒放進來
 │   └── openspec-dev-standards-report-2026-08-29.md
 │                                      ← 跨專案開發規範盤點與下一階段（OpenSpec／多 Agent）規劃，不是公版本體
 └── templates/consumer-repo/.github/   ← 各專案要複製過去的「呼叫端」範本
-    ├── zizmor.yml                     ← zizmor 放行規則（公版 @v1、兩支用 workflow_run 觸發的呼叫端 workflow）
+    ├── zizmor.yml                     ← zizmor 放行規則（公版 @v1 只要求釘 tag）
     ├── dependabot.yml
-    ├── copilot-instructions.md
     ├── pull_request_template.md
     └── workflows/
         ├── security.yml               ← 呼叫安全公版
-        ├── ci.yml                     ← 呼叫 CI 公版
-        ├── copilot-setup-steps.yml        ← Copilot agent 環境準備
-        ├── copilot-autofix-ci-security.yml ← 選配：CI/Security 失敗 → 自動 @copilot 修
-        ├── copilot-autofix-review.yml     ← 選配：review 要求變更 → 自動 @copilot 修
-        └── copilot-autoreview-gate.yml    ← 選配：全過 → 自動請 Copilot 審
+        └── ci.yml                     ← 呼叫 CI 公版
 ```
 
 ---
@@ -717,7 +613,7 @@ ci-standards/
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | **接手的人（含 AI）先讀這份** —— 現況快照、下一步做什麼、踩過哪些雷 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 一鍵導入 —— Windows / macOS、內網與離線做法、`gh` 是不是必要 |
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含查問題的步驟 |
-| [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
+| [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、方案與額度 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 管理者 —— 搬到組織底下的 checklist |
 | [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md) | 想知道工具怎麼選、哪些評估過但沒放進來的人 |
 | [`docs/openspec-dev-standards-report-2026-08-29.md`](docs/openspec-dev-standards-report-2026-08-29.md) | 想知道「下一階段」怎麼規劃的人 —— 跨專案開發規範盤點、CLAUDE.md／rules／hooks 分層、OpenSpec 與多 Agent 工作流評估 |

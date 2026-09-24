@@ -36,7 +36,7 @@
 | 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 / 1.2.2 / 1.2.3 五段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這五段是全部的教訓來源 |
 | 4 | `docs/KNOWN-LIMITATIONS.md` | 哪些問題已知無解，別再花時間 |
 | 5 | `CONTRIBUTING.md` | 改公版的規矩（尤其「什麼情況要開 v2」） |
-| 6 | `docs/ADOPT.md` | 導入腳本的三類檔案策略 |
+| 6 | `docs/ADOPT.md` | 導入腳本的兩類檔案策略 |
 
 再跑一次 `git log --oneline -20` 與 `gh pr list --state merged --limit 10`
 （或用瀏覽器看 PR #8～#18），commit message 與 PR 內文寫得很細，是主要的決策紀錄。
@@ -56,17 +56,14 @@
 ⚠️ **合併進 `main` 不等於發佈。** 使用端釘的是 `@v1`，`v1` 沒移動的話，
 改再多它們完全不會有感覺。發佈永遠是兩步：合併 → 移 tag（見 §3 的發佈流程）。
 
-三條主線：
+兩條主線（1.4.0 起；之前還有第三條 Copilot 自動迴圈，已整組移除）：
 
 1. **CI**（`ci-reusable.yml`）：Python lint/test、Docker build（可加 hadolint）、actionlint + shellcheck（同一個 job）
 2. **Security**（`security-reusable.yml`）：Semgrep、Trivy（可加 SBOM / license）、OSV-Scanner、gitleaks、zizmor（可選）
-3. **Copilot 自動迴圈**：CI/Security 失敗 → 請 Copilot 修；兩條都過 → 請 Copilot 審；
-   審有意見 → 再請 Copilot 修
 
-**CI 與 Security 各有一個 Gate job**（`ci / CI Gate`、`security / Security Gate`），
-那兩個才是唯一該設為 required status check 的東西。
-Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 `if` 條件，
-被 skip 的 check 永遠不會回報，PR 會直接卡死。
+**兩條各有一個 Gate job**（`ci / CI Gate`、`security / Security Gate`），
+那兩個才是唯一該設為 required status check 的東西 ——
+子 job 都有 `if` 條件，被 skip 的 required check 永遠不會回報，PR 會直接卡死。
 
 ---
 
@@ -79,14 +76,18 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 | `v1` tag | ✅ 已移到 `386c990`（1.3.1 已發佈，各專案下次觸發就會吃到） |
 | 最新版本 tag | ✅ `v1.3.1`（`v1.3.1^{}` → `386c990`，已驗證與 `v1` 同一 SHA） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
-| 本 repo 的 `COPILOT_TRIGGER_PAT` | ❌ **沒設**（2026-09-14 用 `gh secret list` 查證是空的）。所以本 repo 自己的 PR 上，autofix 會貼留言但 Agent 不會動工。要不要設看你 —— 公版 PR 多半是人自己改，未必需要 |
+| Copilot 自動修 / 自動審 | 🗑️ **1.4.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 的呼叫方式**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 57 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
+| adopt.sh | ✅ 48 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
-### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
+### 1.2.1 修了什麼（歷史，1.4.0 後已無對象）
+
+> ⚠️ 這一段講的是 Copilot 呼叫端 workflow，**那三支在 1.4.0 已經整組移除**。
+> 保留是因為「就地合併只碰 `with:`，改 `if:` / `secrets:` 就必須整份換新」這個教訓還在，
+> 未來若再出現同類的呼叫端 workflow，會踩到一模一樣的坑。
 
 1.2.0 修好了 Copilot 自動修迴圈，改的是三支 `copilot-*` 呼叫端 workflow 的 **`if:` 條件**與
 **`secrets:` 區塊**。但當時的 `adopt.sh` 升級模式是「就地合併」，而**就地合併只碰 `with:`**。
@@ -108,7 +109,13 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
 > 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
 > 本 repo 剩下的：④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）、
-> ⑨（AdminAutoTools 重跑一次 `adopt.sh` 吃到 1.3.0 的呼叫端 workflow 與 `zizmor.yml`）。
+> ⑨（AdminAutoTools 重跑一次 `adopt.sh`）、⑩（發佈 1.4.0）。
+>
+> **⚠️ 1.4.0 是破壞性變更**：Copilot 自動修 / 自動審整組移除。已導入的專案升級後，
+> 留在專案裡的三支 `copilot-*` 呼叫端 workflow 會指向不存在的 reusable，
+> 每次 PR 直接 `startup_failure` —— **`adopt.sh` 不會幫忙刪，必須各專案自己 `git rm`**。
+> 依[版本策略](../README.md#版本策略)這種改動該開 `v2`；若要沿用 `v1`，
+> 發佈前務必先把每個已導入的專案清乾淨（目前只有 AdminAutoTools，見 ⑨）。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
@@ -187,32 +194,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 原本只是 Dependabot #27 那個 codeql-action 升版要發，結果 1.3.0 一次做完（見 CHANGELOG），
 版號直接跳 1.3.0（有新 input、有行為變更）。
 
-### ⑨ AdminAutoTools 重跑一次 adopt（吃到 1.3.0）
+### ⑨ AdminAutoTools 重跑一次 adopt（吃到 1.4.0）並刪掉 Copilot 呼叫端
 
-1.3.0 改了三支呼叫端 workflow 的 `if:`（只理 PR 觸發的 run）、多了 `zizmor.yml`、`ci.yml` / `security.yml`
-多了 `run-hadolint` / `run-zizmor`。光移 `v1` 只會讓 reusable 生效，**呼叫端 workflow 跟新參數要重跑 `adopt.sh` 才會進去**：
+**順序很重要：先刪 Copilot 那幾支，再跑 adopt。** 反過來也行，但別漏掉刪那一步 ——
+1.4.0 之後那三支指向的 reusable 已經不存在，留著每次 PR 都直接 `startup_failure`。
 
 ```bash
 cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
+git rm .github/workflows/copilot-autofix-ci-security.yml \
+       .github/workflows/copilot-autofix-review.yml \
+       .github/workflows/copilot-autoreview-gate.yml \
+       .github/workflows/copilot-setup-steps.yml
 /d/3_CodingProject/ci-standards/scripts/adopt.sh --dry-run    # 先看計畫
 /d/3_CodingProject/ci-standards/scripts/adopt.sh
 git diff --stat
 ```
 
-驗收：`git diff` 裡三支 `copilot-*` 呼叫端 workflow 的 `if:` 有 `workflow_run.event == 'pull_request'`，
-`.github/zizmor.yml` 存在，`security.yml` 有 `run-zizmor: true`。
+驗收：`.github/workflows/` 底下只剩 `ci.yml` 與 `security.yml`（加上那個 repo 自己寫的），
+`.github/zizmor.yml` 存在且沒有指向已刪 workflow 的 `dangerous-triggers` 放行，
+`security.yml` 有 `run-zizmor: true`。順手把 repo secret `COPILOT_TRIGGER_PAT` 刪掉。
 第一次跑 Security Scan 時 zizmor 可能會挑 AdminAutoTools 自己寫的 workflow（若有）的毛病，那是真的該修。
 另外那個 repo 的 `on: pull_request` 若想要「草稿 PR 不跑」，要照範本手動改（升級模式不動 `on:`）。
 
 ### ④ 使用者端設定（GitHub 網頁，非程式）
 
-- [ ] **關掉 GitHub 原生的「自動請 Copilot code review」**。它會在 CI 之前就審，
-      違反「先讓免費掃描器擋掉明顯問題、確定值得看了才花 AI credits」的設計順序，
-      而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
-      只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
-      **2026-09-14 觀察：本 repo 這個還開著** —— PR #32 一開、CI 還沒跑完就被 Copilot 審了
-      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。那次的 7 條意見倒是有 4 條真的該修，
-      所以不急著關；但 Dependabot PR 也會被審這件事還是在燒 credits。
+- [ ] **決定 GitHub 原生的「自動請 Copilot code review」要不要留**。1.4.0 拿掉了公版那條
+      gate 驅動的請審，所以現在只剩原生這一條，不再有「兩個來源互相打架」的問題。
+      它會在 CI 跑完之前就審（包含 Dependabot 的純版本更新），要省 credits 就關掉、
+      改成需要時在 PR 頁面手動 Reviewers → Copilot。本 repo 目前**還開著**
+      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
 - [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
       Require status checks to pass，加入這**一個** context）：
@@ -614,7 +624,10 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 </details>
 
-### 關於 Copilot
+### 關於 Copilot（歷史；1.4.0 已移除自動修 / 自動審）
+
+> 前兩條講的是已移除的迴圈判定，保留是因為「Copilot 的 review 類型」這個事實沒變，
+> 將來若有人想重做類似的東西，這是第一個會踩的坑。第三條現在仍然適用。
 
 - **Copilot code review 永遠送 `COMMENTED`，不送 `changes_requested`。**
   呼叫端 workflow 只認 `changes_requested` 的話，它的意見永遠進不了自動修迴圈。
