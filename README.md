@@ -22,10 +22,11 @@
 4. [可調參數（inputs）](#可調參數inputs)
 5. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
 6. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
-7. [常見情境客製](#常見情境客製)
-8. [疑難排解](#疑難排解)
-9. [版本策略](#版本策略)
-10. [檔案地圖](#檔案地圖)
+7. [分支模型：PR 要發到哪裡](#分支模型pr-要發到哪裡)
+8. [常見情境客製](#常見情境客製)
+9. [疑難排解](#疑難排解)
+10. [版本策略](#版本策略)
+11. [檔案地圖](#檔案地圖)
 12. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
 
 ---
@@ -267,6 +268,8 @@ gh pr create
 | `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
 | `shellcheck-paths` | string | `""` | 要檢查的 `.sh` glob。空字串＝自動找全 repo（找不到就略過） |
+| `restricted-base-branches` | string | `""` | 要管制「誰可以 merge 進來」的 base 分支，空白隔開、支援 glob。留空＝不檢查。見[分支模型](#分支模型pr-要發到哪裡) |
+| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填 |
 | `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改程式的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
 
 > **`run-*` 全部關掉也不會卡住**：子 job 都可能因 input 而 `skipped`，Gate 只在「開了卻不是 success」才擋。
@@ -388,6 +391,97 @@ gh auth login                                        # 需有目標 repo 的 adm
 > 本 repo 目前在個人帳號底下。**private repo 的 ruleset 需要 Pro 以上方案**，
 > 而組織可以用「一條 org ruleset 管所有 repo」，不必逐個跑腳本。
 > 建議在導入第 3 個專案之前搬到組織，見 [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md)。
+
+---
+
+## 分支模型：PR 要發到哪裡
+
+**公版不預設任何分支模型。** 你要只有 `main`、`main` + `develop`、還是完整 GitFlow，
+都是專案自己的決定 —— 公版只提供兩件事：**PR 上跑檢查**，以及**選配的來源分支限制**。
+
+### 哪些 PR 會跑檢查
+
+由呼叫端的 `on.pull_request` 決定，跟分支名稱無關：
+
+```yaml
+# 範本預設：發到「任何分支」的 PR 都跑
+pull_request:
+  types: [opened, synchronize, reopened, ready_for_review]
+
+# 只想對特定分支的 PR 跑，自己加 branches:
+pull_request:
+  branches: [main, develop]
+  types: [opened, synchronize, reopened, ready_for_review]
+```
+
+> ⚠️ 加了 `branches:` 篩選之後，**沒被列到的分支其 PR 不會有 `ci / CI Gate`**。
+> 那些分支就不能設成 required check，否則會永遠 pending。
+> 不確定就別加 —— 「全部都跑」永遠是安全的預設。
+
+`push:` 那邊同理，但 GitHub 的 `on:` **不吃 `${{ }}` 運算式**，分支名只能寫死。
+走 develop 流程就把它列進去：`branches: [main, develop]`。
+
+### 限制「誰可以 merge 進哪裡」
+
+`ci-reusable` 有兩個選配 input，不填就不檢查：
+
+```yaml
+jobs:
+  ci:
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      restricted-base-branches: "main"              # 要管的 base，空白隔開，支援 glob
+      allowed-head-branches: "develop hotfix/*"     # 允許的來源分支
+```
+
+意思是「`main` 只接受從 `develop` 或 `hotfix/*` 發來的 PR」，其他分支發到 `main` 會被擋下，
+Summary 會印出目標／來源／允許清單，並提示把 base 改成整合分支。
+
+判定順序：
+
+1. base 不在 `restricted-base-branches` 內 → 直接通過（不管制）
+2. `restricted-base-branches` 有值但 `allowed-head-branches` 空白 → **失敗**（這幾乎一定是漏填，不是本意）
+3. PR 來自 fork → **失敗**（fork 的分支名可以隨便取，叫 `develop` 不代表是你的 `develop`；外部貢獻請發到整合分支）
+4. head 符合 `allowed-head-branches` 的任一樣式 → 通過，否則失敗
+
+檢查結果收進 `ci / CI Gate`，所以**分支保護的 ruleset 不必加新的 required check**。
+
+> ⚠️ **這擋的是誤操作，不是惡意。** 它是一個 status check，沒有 ruleset 的話，
+> 有權限的人照樣可以直接 push 或用 admin 權限硬 merge。
+> 真正不讓人繞過的是下面這組設定 —— 兩者要一起用。
+
+### 一個 develop 流程完整長什麼樣
+
+```
+功能分支 ──PR──▶ develop ──PR──▶ main
+   ↑                 ↑              ↑
+   隨便取名        整合分支        正式版
+```
+
+| 要達成的事 | 靠什麼 |
+|---|---|
+| 功能分支不能直接推 develop | develop 的 ruleset：`pull_request` 規則（必須開 PR） |
+| 檢查沒過不能按 merge | develop 的 ruleset：required status checks = 兩個 Gate |
+| 不能 force push / 刪掉 develop | develop 的 ruleset：`non_fast_forward` + `deletion` |
+| 連 admin 都不能繞過 | ruleset 不設 `bypass_actors`（腳本預設就沒有） |
+| 只有 develop 能 merge 進 main | `restricted-base-branches` + `allowed-head-branches` |
+| 不能直接推 main | main 的 ruleset，同上 |
+
+設定指令：
+
+```bash
+# 兩條長壽分支一起保護（腳本可重複執行，同名 ruleset 會更新而不是新增一份）
+./scripts/setup-branch-protection.sh <owner>/<repo> main develop
+
+# 先看要送出什麼、不打 API（沒有 admin 權限時也能用，把 payload 交給有權限的人）
+./scripts/setup-branch-protection.sh <owner>/<repo> main develop --dry-run
+```
+
+再到 repo → Settings → General → Default branch 把預設分支改成 `develop`，
+新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
+
+> 💡 分支名稱不必是 `develop`。腳本吃的是你給的名字，`restricted-base-branches` /
+> `allowed-head-branches` 吃的也是你寫的 glob —— 叫 `integration`、`staging` 都行。
 
 ---
 

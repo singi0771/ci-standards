@@ -99,6 +99,8 @@ jobs:
     with:
       python-version: "3.9"
       run-docker-build: false
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop hotfix/*"
       legacy-option: true
 OLD
 
@@ -133,6 +135,11 @@ has "$SEC" 'cron: "30 19 * * 3"'                "保留使用者自訂的 cron�
 # ── 公版已廢除的 input 必須移除 ──
 hasnt "$CI"  'legacy-option'  "移除公版已不存在的 legacy-option"
 hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
+
+# ── 選配的分支政策設定：公版認得，升級時必須原封不動 ──
+# 分支名稱是專案自己的決定，adopt 不能替它改或刪掉。
+has "$CI" 'restricted-base-branches: "main"'            "保留使用者設定的 restricted-base-branches"
+has "$CI" 'allowed-head-branches: "develop hotfix/*"'   "保留使用者設定的 allowed-head-branches"
 
 # ── 公版新增的 input 要補上 ──
 has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"

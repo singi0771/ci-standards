@@ -48,14 +48,17 @@ flowchart TD
     BOTH -->|是| MERGE[人工 review → merge]
 
     SCHED[schedule：每週一 03:00<br/>只跑 Security] --> SEC
-    PUSHMAIN[push 到 main<br/>非 md/docs 變更] --> CI
+    PUSHMAIN[push 到 main / develop<br/>非 md/docs 變更] --> CI
     PUSHMAIN --> SEC
 ```
 
-讀這張圖要記住兩件事：
+讀這張圖要記住三件事：
 
 1. **CI 與 Security 是兩條獨立、並行的 workflow**，各自有自己的 Gate。分支保護只要求這兩個 Gate。
 2. **公版不會替你改任何程式碼**。它只負責「找」與「擋」，修與決定都是人。
+3. **圖裡沒有出現任何分支名稱**，這是刻意的 —— 要用什麼分支模型由各專案決定，
+   見 [README 的分支模型](../README.md#分支模型pr-要發到哪裡)。本 repo 自己走的是
+   「功能分支 → PR → `develop` → PR → `main`」，靠 `restricted-base-branches` 擋住發錯地方的 PR。
 
 > ℹ️ 1.4.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。
 > 那套已整組移除 —— 它需要 Copilot Business 授權與真人 PAT，而且 Copilot 每推一次 commit，
@@ -80,12 +83,18 @@ flowchart TD
     L -->|true| LJ[Workflow + shell lint<br/>actionlint 1.7.12 + shellcheck<br/>兩個併成一個 job 省分鐘]
     L -->|false| LS[skipped]
 
-    PJ --> G[CI Gate<br/>needs 三個 job、always 執行]
+    CALL --> B2{restricted-base-branches<br/>有值 且 是 PR?}
+    B2 -->|是| BJ[PR source branch policy<br/>base 受管制時檢查 head]
+    B2 -->|否| BS[skipped]
+
+    PJ --> G[CI Gate<br/>needs 四個 job、always 執行]
     PS --> G
     DJ --> G
     DS --> G
     LJ --> G
     LS --> G
+    BJ --> G
+    BS --> G
 
     G --> RULE{白名單判定}
     RULE -->|啟用 且 result 是 success| OK[✅ CI Gate 通過]

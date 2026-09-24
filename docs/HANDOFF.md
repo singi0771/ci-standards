@@ -109,13 +109,42 @@
 > AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
 > 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
 > 本 repo 剩下的：④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）、
-> ⑨（AdminAutoTools 重跑一次 `adopt.sh`）、⑩（發佈 1.4.0）。
+> ⑨（AdminAutoTools 重跑一次 `adopt.sh`）、⑩（套用 develop 流程的分支保護，**需 owner 帳號**）、
+> 之後才是發佈 1.4.0。
 >
 > **⚠️ 1.4.0 是破壞性變更**：Copilot 自動修 / 自動審整組移除。已導入的專案升級後，
 > 留在專案裡的三支 `copilot-*` 呼叫端 workflow 會指向不存在的 reusable，
 > 每次 PR 直接 `startup_failure` —— **`adopt.sh` 不會幫忙刪，必須各專案自己 `git rm`**。
 > 依[版本策略](../README.md#版本策略)這種改動該開 `v2`；若要沿用 `v1`，
 > 發佈前務必先把每個已導入的專案清乾淨（目前只有 AdminAutoTools，見 ⑨）。
+
+### ⑩ 套用 develop 流程的分支保護（**需要 repo owner 帳號**）
+
+`develop` 分支已建立（從 `main` 開出，同一個 commit）。剩下的都要 **admin 權限**，
+而 `joshisman12` / `joshisman0925` 兩個帳號對本 repo 都是 `admin: false` ——
+下面這幾步必須用 `singi0771` 本人的帳號做：
+
+1. **Settings → General → Default branch 改成 `develop`**
+   新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
+
+2. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
+
+   ```bash
+   REQUIRED_CHECKS="ci / CI Gate,security / Security Gate,adopt regression gate" \
+     ./scripts/setup-branch-protection.sh singi0771/ci-standards main develop
+   ```
+
+   這一行同時做掉四件事：必須開 PR（禁止直接 push）、三個 check 必須綠才能 merge、
+   禁止 force push、禁止刪分支。ruleset 沒有 `bypass_actors`，**admin 也繞不過**。
+
+   > 沒有 admin 權限的人可以先跑 `--dry-run` 把 payload 印出來交給有權限的人。
+
+3. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
+   `ci / CI Gate` 應該紅，Summary 會說「不能直接合併進 main，允許的來源只有 develop」。
+   把 base 改成 `develop` 之後應該轉綠。
+
+> ⚠️ 第 2 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
+> 做了這步就不必再另外手動加。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
