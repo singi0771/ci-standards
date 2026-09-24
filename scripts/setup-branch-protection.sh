@@ -95,17 +95,22 @@ for b in "${BRANCHES[@]}"; do
 done
 
 # ── 組 JSON：required status checks ──────────────────────────
+# 逗號先換成換行再逐行讀，**不要動全域 IFS** ——
+# 改了 IFS 會影響後面所有未加引號的展開，是很典型的 shell 地雷
+# （Semgrep 的 bash.lang.security.ifs-tampering 就是在抓這個）。
+# check 名稱本身含空白（"ci / CI Gate"），所以用 IFS= read -r 整行讀。
 CHECKS=""
-OLD_IFS="$IFS"; IFS=','
-for c in $REQUIRED_CHECKS; do
+while IFS= read -r c; do
   # 去掉逗號後可能殘留的前後空白（"a, b" 這種寫法）
   c="${c#"${c%%[![:space:]]*}"}"
   c="${c%"${c##*[![:space:]]}"}"
   [ -n "$c" ] || continue
   if [ -n "$CHECKS" ]; then CHECKS="$CHECKS, "; fi
   CHECKS="$CHECKS{ \"context\": \"$c\" }"
-done
-IFS="$OLD_IFS"
+done <<EOF
+$(printf '%s' "$REQUIRED_CHECKS" | tr ',' '
+')
+EOF
 if [ -z "$CHECKS" ]; then
   echo "❌ REQUIRED_CHECKS 是空的 —— 沒有任何 check 要求等於沒有守門" >&2
   exit 1
