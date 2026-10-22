@@ -352,6 +352,36 @@ case "$OUT" in
 esac
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 G：Dockerfile 不在根目錄（.NET 常見的 src/<專案>/Dockerfile）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo subdir-docker
+mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+CI=".github/workflows/ci.yml"; SEC=".github/workflows/security.yml"
+has "$CI"  'run-docker-build: true'                "子資料夾唯一的 Dockerfile 也會開 run-docker-build"
+has "$CI"  'dockerfile: "src/Web.Api/Dockerfile"'  "ci.yml 帶入子資料夾 Dockerfile 路徑"
+has "$SEC" 'scan-docker-image: true'               "子資料夾 Dockerfile 也會開 scan-docker-image"
+has "$SEC" 'dockerfile: "src/Web.Api/Dockerfile"'  "security.yml 帶入子資料夾 Dockerfile 路徑"
+hasnt "$CI" 'docker-context'                       "context 維持預設（repo 根目錄），不寫進呼叫端"
+
+# 根目錄有 Dockerfile 時維持舊行為：不帶 dockerfile: input
+new_repo root-docker
+printf 'FROM alpine\n' > Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+hasnt "$CI" 'dockerfile:' "根目錄 Dockerfile 不寫 dockerfile:（用預設值，呼叫端保持乾淨）"
+
+# 多個 Dockerfile：不猜，關掉 Docker 檢查並列出清單
+new_repo multi-docker
+mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+has "$CI" 'run-docker-build: false' "多個 Dockerfile 時不自動開 Docker 檢查"
+hasnt "$CI" 'dockerfile:'           "多個 Dockerfile 時不猜路徑"
+case "$OUT" in
+  *"svc/a/Dockerfile"*"svc/b/Dockerfile"*) ok "多個 Dockerfile 時列出所有候選" ;;
+  *) bad "沒有列出候選 Dockerfile（實際輸出：${OUT}）" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════
 printf '\n───────────────────────────────\n'
 if [ "$SKIP" -gt 0 ]; then
   printf '通過 %d／失敗 %d／跳過 %d\n' "$PASS" "$FAIL" "$SKIP"

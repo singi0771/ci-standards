@@ -356,6 +356,8 @@ gh pr create
 | `severity` | string | `CRITICAL,HIGH` | Trivy 要擋下的嚴重度。可加 `MEDIUM` 收更嚴 |
 | `fail-on-findings` | boolean | `true` | `true`=掃到就擋 merge；`false`=只回報不擋（**導入初期過渡用**） |
 | `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，會多吃 2–3 分鐘 |
+| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄），例如 `src/Web.Api/Dockerfile`。Trivy image 掃描用它 build |
+| `docker-context` | string | `"."` | docker build 的 context 目錄 |
 | `run-zizmor` | boolean | `false` | 用 [zizmor](https://docs.zizmor.sh/) 檢查 `.github/workflows` 本身：把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、沒釘 SHA 的 action、權限給太大…。放行規則放專案的 `.github/zizmor.yml`（範本已附） |
 | `zizmor-min-severity` | string | `low` | zizmor 只回報這個等級以上：`low` / `medium` / `high` |
 | `semgrep-rules` | string | `p/owasp-top-ten p/security-audit p/secrets auto` | Semgrep 規則包，空白隔開。`auto` 會依語言自動挑（要連 Semgrep 規則庫、會回傳匿名使用統計；不想要就拿掉）。想加 `p/python`、`p/dockerfile` 就寫在這 |
@@ -372,6 +374,8 @@ gh pr create
 | `run-python` | boolean | `true` | 是否跑 ruff + pytest。**非 Python 專案設 `false`**，不必自己另寫一支 CI |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
 | `run-hadolint` | boolean | `false` | build 之前先用 [hadolint](https://github.com/hadolint/hadolint) 檢查 Dockerfile 寫法（沒釘版本的 apt 套件、`latest` tag、`RUN` 裡的 shell 問題…）。warning 以上才算失敗；要忽略某條規則放 `.hadolint.yaml`。放在 Docker build 那個 job 裡，不多花一個 job |
+| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄）。hadolint 與 Docker build 都用它；`adopt` 在根目錄找不到、子資料夾只有一個時會自動填入 |
+| `docker-context` | string | `"."` | docker build 的 context 目錄（Visual Studio / docker-compose 慣例是 repo 根目錄，通常不用改） |
 | `run-actionlint` | boolean | `false` | 檢查 GitHub Actions workflow 語法，會連 `run:` 區塊的 bash 一起用 shellcheck 檢查 |
 | `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
@@ -742,7 +746,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（57 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（67 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh

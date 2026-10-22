@@ -25,6 +25,14 @@ on:
         description: "build 之前是否先用 hadolint 檢查 Dockerfile 寫法（要 run-docker-build 開著、且專案有 Dockerfile 才有作用）"
         type: boolean
         default: false
+      dockerfile:
+        description: "Dockerfile 路徑（相對 repo 根目錄），例如 src/Web.Api/Dockerfile。hadolint 與 Docker build 都用它"
+        type: string
+        default: "Dockerfile"
+      docker-context:
+        description: "docker build 的 context 目錄（相對 repo 根目錄）"
+        type: string
+        default: "."
       run-actionlint:
         description: "是否檢查 GitHub Actions workflow 語法（會連 run: 區塊裡的 bash 一起用 shellcheck 檢查）"
         type: boolean
@@ -115,8 +123,13 @@ jobs:
       # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
       # hadolint 抓得更廣。放在 build 前面：Dockerfile 寫壞了不必等 build 跑完才知道。
       - name: Dockerfile lint (hadolint)
-        if: ${{ inputs.run-hadolint && hashFiles('Dockerfile') != '' }}
+        if: ${{ inputs.run-hadolint }}
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
         run: |
+          if [ ! -f "$DOCKERFILE" ]; then
+            echo "沒有 $DOCKERFILE，略過 hadolint"; exit 0
+          fi
           # 版本 + sha256 一起釘，升版時到 release 的 checksums.sha256 重抓：
           # https://github.com/hadolint/hadolint/releases
           VERSION="2.15.1"
@@ -127,16 +140,18 @@ jobs:
           chmod +x hadolint && sudo mv hadolint /usr/local/bin/hadolint
           hadolint --version
           # warning 以上才算失敗；info / style 只印出來。要忽略某條規則放 .hadolint.yaml 在專案根目錄。
-          hadolint --failure-threshold warning Dockerfile
+          hadolint --failure-threshold warning "$DOCKERFILE"
       - name: Build image (不推送，只驗證能 build)
         env:
           # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
           SHA: ${{ github.sha }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          DOCKER_CONTEXT: ${{ inputs.docker-context }}
         run: |
-          if [ -f Dockerfile ]; then
-            docker build -t "ci-check:$SHA" .
+          if [ -f "$DOCKERFILE" ]; then
+            docker build -f "$DOCKERFILE" -t "ci-check:$SHA" "$DOCKER_CONTEXT"
           else
-            echo "沒有 Dockerfile，略過"
+            echo "沒有 $DOCKERFILE，略過"
           fi
 
   # workflow 語法 + shell script 檢查，合在一個 job（見檔頭「省分鐘」說明）。

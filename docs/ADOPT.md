@@ -146,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 | 偵測 | 依據 | 影響的參數 |
 |---|---|---|
-| Dockerfile | 根目錄有 `Dockerfile` | `run-docker-build`、`run-hadolint`、`scan-docker-image` |
+| Dockerfile | 根目錄有 `Dockerfile`；沒有時往下找，子資料夾只有一個也算（並帶入 `dockerfile:` 路徑），多個則列出請使用者自己填 | `run-docker-build`、`run-hadolint`、`scan-docker-image`、`dockerfile` |
 | Python | `requirements.txt` / `pyproject.toml` / `setup.py` / 有 `.py` | `run-python` |
 | Python 版本 | `.python-version`，沒有就用 `3.12` | `python-version`（只有 `ci.yml`；`security.yml` 不再傳它，因為公版沒用到） |
 | shell script | 專案裡有 `.sh` | `run-shellcheck` |
