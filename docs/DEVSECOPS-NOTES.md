@@ -75,7 +75,7 @@
 ## 建議導入順序
 
 1. **第一階段（現在就有）**：gitleaks + Semgrep + OSV + Trivy FS + zizmor → PR 守門。
-2. **第二階段**：加 PR template + CODEOWNERS + 分支保護，把「非過不可」立起來（設不了分支保護的 repo 改靠團隊約定補位，見 README「沒辦法設分支保護時」）。
+2. **第二階段**：加 PR template + CODEOWNERS + 分支保護，把「非過不可」立起來（設不了分支保護的 repo 改靠團隊約定補位，見 README「無法設定分支保護時」）。
 3. **第三階段**：`scan-docker-image: true` 打開 image 掃描、`run-hadolint: true`、`generate-sbom: true`。
 4. **第四階段（可選）**：SonarQube 當 main 的品質儀表板（自己架，不當 gate）。
 5. **第五階段（成熟後）**：ZAP DAST + preview 環境 + SBOM 簽章（cosign）。

@@ -9,7 +9,7 @@
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
 | [只內建 Python 與 .NET 的 lint/test](#ci-reusable-只內建-python-與-net-的-linttest) | 其他語言、前端（React / Vue / Node） | 安全掃描照用；CI 的 lint/test 在呼叫端自己補一個 job |
-| [沒有分支保護時紅燈擋不住 merge](#沒有分支保護時紅燈擋不住-merge) | Free 方案的 private repo、公司統一管制的 repo | 照 README「沒辦法設分支保護時」補位 |
+| [沒有分支保護時紅燈擋不住 merge](#沒有分支保護時紅燈擋不住-merge) | Free 方案的 private repo、公司統一管制的 repo | 照 README「無法設定分支保護時」補位 |
 
 ---
 
@@ -43,7 +43,7 @@
 
 其餘語言目前沒有對應的 job。這些專案**仍然照用公版**：`actionlint` / `shellcheck` / `docker build` / `hadolint`
 都是語言無關的，安全掃描那邊（Semgrep / OSV / Trivy / gitleaks / zizmor）本來就自己認語言。
-要語言原生的 lint/test，見 [README — 專案不是 Python](../README.md#專案不是-python)。
+要語言原生的 lint/test，見 [README — 專案不是 Python](../README.md#非-python-專案)。
 
 ### 前端（React / Vue / Node）：安全掃描有、CI 沒有
 
@@ -55,7 +55,7 @@
 | eslint、`tsc`、vitest / jest、`npm run build` | ❌ 公版沒有 Node 的 job，一個都不會跑 |
 
 **現在的做法**：在專案自己的呼叫端 workflow 寫一個 job 跑 `npm ci` / lint / test / build，
-用不同的 job id（例如 `node`），範例見 [README — 前端](../README.md#前端react--vue--node)。
+用不同的 job id（例如 `node`），範例見 [README — 前端](../README.md#前端專案)。
 **下一個要補的**就是公版的 `ci-node` job（加進 `ci-gate` 的 `needs`，呼叫端用一個 `run-node` 打開）。
 
 > 推廣到更多專案之前，先盤點一次組織內的語言分布。
@@ -73,7 +73,7 @@ GitHub Free 方案的 **private** repo 不能用 ruleset（API 回 `403 Upgrade 
 
 這種 repo 一樣照常導入：Gate 照跑、照樣紅、push 到 main 之後也會再跑一輪，只是紅燈擋不住有寫入權限的人按 merge。
 補位做法（團隊約定、merge 後看 main 那一輪、限縮寫入權限、需要時升級方案）見
-[README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時)。
+[README — 無法設定分支保護時](../README.md#無法設定分支保護時)。
 
 ---
 
