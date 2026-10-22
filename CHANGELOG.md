@@ -1,6 +1,6 @@
 # Changelog
 
-本 repo 是**中央公版**：所有專案用 `uses: .../@v2` 呼叫它（1.x 時期是 `@v1`，已凍結在 1.3.1）。
+本 repo 是**中央公版**：所有專案用 `uses: .../@v2` 呼叫它（1.x 時期是 `@v1`，功能更新到 1.4.x 為止，之後只修 bug）。
 一次改動會同時影響所有專案，所以每次發佈都必須記在這裡。
 
 版本規則見 [README — 版本策略](README.md#版本策略)。每次發佈打兩個 tag：
@@ -12,13 +12,15 @@
 
 ## [2.0.0] — 未發佈
 
-**新主版本 `v2`。** 把 Copilot 自動修 / 自動審整組拿掉、公版只剩 CI 與 Security 兩條線；
-CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就能繞過來源分支政策」等一批洞。
+**新主版本 `v2`。** 包含下方 1.4.0 的全部內容（PR 來源分支政策、`dockerfile` / `docker-context`、
+分支保護腳本可指定分支），再加上幾個破壞性變更：把 Copilot 自動修 / 自動審整組拿掉、公版只剩 CI 與 Security 兩條線；
+CI 多了 .NET；Docker 檢查預設改成找全 repo；修掉「改 PR 的 base 就能繞過來源分支政策」等一批洞。
 
-原本規劃成 1.4.0、沿用 `v1` 發佈，但這一版有好幾個破壞性變更（移除 input、改預設值、移除 workflow），
-依[版本策略](README.md#版本策略)改開 `v2`：
+1.4.0 都是新增 input、留空行為不變，所以先沿用 `v1` 發佈；這一版有好幾個破壞性變更
+（移除 input、改預設值、移除 workflow），依[版本策略](README.md#版本策略)開 `v2`：
 
-- **`v1` 凍結在 `v1.3.1`，不再移動。** 還指向 `@v1` 的專案照常能跑，只是不會再收到更新。
+- **`v1` 的功能更新到 1.4.x 為止。** 1.4.0 是 `v1` 最後一個功能版，之後 `v1` 只修 bug、不再加功能。
+  還指向 `@v1` 的專案照常能跑。
 - 各專案要自己把 `@v1` 換成 `@v2`，步驟見 [README — 從 v1 升級到 v2](README.md#從-v1-升級到-v2)
   （重跑一次 `adopt.sh` / `adopt.ps1` 會處理大部分，`--ref` 預設已經是 `v2`）。
 
@@ -38,6 +40,9 @@ CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就�
   exit code 壓掉（Semgrep 不加 `--error`、Trivy 與 gitleaks 用 `exit-code 0`）；規則下載失敗、弱點資料庫下載失敗、
   工具當掉這類**掃描本身出錯**，現在會讓 job 變紅。舊寫法會把「沒掃成」也一起吞成綠燈。
   OSV-Scanner 異常結束（不是 0 / 1 / 128）不論 `fail-on-findings` 都是紅的。
+- **`dockerfile` 預設改成留空＝自動找全 repo、可列多個、`路徑:context`。** 1.4.0 的預設是 `"Dockerfile"`（只看根目錄）；
+  v2 留空時會找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`），每一個都 build / hadolint / 掃描。
+  以前沒被檢查到的子目錄 Dockerfile，升級後第一次可能多出紅燈。1.4.0 的單一路徑寫法照樣能用，見下方「Dockerfile 找全 repo」。
 - **Copilot 自動修 / 自動審整組移除。** 已導入的專案升級後，留在專案裡的 `copilot-*` 呼叫端 workflow
   會指向不存在的 reusable，每次 PR 直接 `startup_failure`。
   `adopt.sh` **不會**幫忙刪（它從不刪專案裡既有的檔案），必須各專案自己動手：
@@ -87,33 +92,29 @@ CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就�
 - `adopt.sh` / `adopt.ps1` 偵測 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj`（往下四層）寫入 `run-dotnet`，
   方案檔不只一個時提醒補 `dotnet-project`。
 
-### 新增 —— Dockerfile 找全 repo（ci-reusable、security-reusable）
-- 新 input `dockerfiles`（兩支都有，寫法相同）：留空＝自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`
-  （舊版只看根目錄，monorepo 子目錄的完全沒被檢查到）；也可以明確列，每一項 `路徑` 或 `路徑:build context`。
-- Docker build、hadolint、Trivy image 掃描都吃這份清單；列出的檔案不存在會直接紅。
+### 變更 —— Dockerfile 找全 repo（ci-reusable、security-reusable）
+- `dockerfile`（兩支都有，寫法相同）預設從 `"Dockerfile"` 改成 `""`：留空＝自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`
+  （略過 `node_modules`；1.4.0 以前只看根目錄或指定的那一個，monorepo 其他子目錄的完全沒被檢查到）。
+- 也可以明確列多個，空白隔開；每一項寫 `路徑` 或 `路徑:build context`。沒寫 `:context` 的用 `docker-context`
+  （預設 `.`＝repo 根目錄，跟 Visual Studio / docker-compose 的 .NET 慣例一致，也跟 1.4.0 相容）。
+  1.4.0 的單一路徑寫法（`dockerfile: "src/Web.Api/Dockerfile"`）照樣能用。
+- Docker build、hadolint、Trivy image 掃描都吃這份清單。明確列出的路徑不存在會直接紅；
+  只有 1.4.0 的字面預設值 `Dockerfile` 例外（呼叫端明寫 `dockerfile: "Dockerfile"`、根目錄卻沒有時，跟 1.4.0 一樣略過、不會變紅）。
 - `trivy-image` 改用 `setup-trivy` + trivy CLI `v0.70.0`（與 trivy-action v0.36.0 內部同一版）跑迴圈，
   因為 trivy-action 一次只能掃一個 image。
+- `adopt.sh` / `adopt.ps1` **不再寫 `dockerfile:`**（公版自己會找）；全 repo 任何一處有 Dockerfile 就打開
+  `run-docker-build` / `run-hadolint` / `scan-docker-image`，有好幾個也照開（公版會逐一 build）。
+  呼叫端原本寫好的 `dockerfile:` 是使用者的設定，升級時原樣保留。
 
-### 新增 —— PR 來源分支政策（ci-reusable）
-- 兩個選配 input：`restricted-base-branches`（要管制的 base，空白隔開、支援 glob）與
-  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**。
-- 新 job `PR source branch policy`，只在 `pull_request` 事件且 `restricted-base-branches`
-  有值時執行，結果收進 `ci / CI Gate` —— **專案端的 ruleset 一個字都不用改**。
-- 判定順序：base 不受管制→通過；受管制但沒列允許來源→失敗（視為漏填）；
-  來自 fork→失敗（fork 的分支名可以隨便取，叫 develop 不代表是你的 develop）；
-  head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
-- 比對前 `set -f`，`release/*` 這類樣式不會被當成檔名展開。
-- **公版不寫死任何分支名稱**，也不預設任何分支模型。要 main-only、main+develop
-  還是完整 GitFlow，由各專案用這兩個 input 與呼叫端的 `on.pull_request.branches` 決定。
+### PR 來源分支政策（ci-reusable）
+- 功能與 1.4.0 相同（`restricted-base-branches` / `allowed-head-branches`，見下方 1.4.0）。
 
 ### 修正 —— 改 PR 的 base 就能繞過來源分支政策
 - PR 先發到 `develop` 拿到綠燈、再到網頁上把 base 改成 `main`，預設的 `pull_request` 事件不會重跑，
   同一個 head SHA 上的綠燈直接滿足 required check。
-- 範本 `ci.yml` 的 `pull_request.types` 加上 `edited`；job 的 `if` 只放行 `github.event.changes.base` 有值的 edited
-  （改標題、改內文不重跑）；`concurrency` 把那種只改標題 / 內文的 edited 分到另一組（`noop`），
-  不會取消正在跑的那一輪。
-- `adopt.sh` / `adopt.ps1` 升級時，呼叫端若還是 v1 範本原樣，三行一起自動換掉；
-  改過的不動，只印出「請手動處理」的提醒。
+- 範本 `ci.yml` 的 `edited` 觸發、`if`、`concurrency` 跟 1.4.0 範本完全相同（見下方 1.4.0）。
+- 1.4.0 時已知「重跑 adopt 不會改到這段」；2.0.0 的 `adopt.sh` / `adopt.ps1` 升級時，呼叫端若還是 **v1 範本原樣**，
+  三行一起自動換成上面的寫法；1.4.0 範本的呼叫端本來就是新寫法，不會再動；改過的不動，只印出「請手動處理」的提醒。
 
 ### 變更 —— CI（ci-reusable）
 - Python job：只有 `pyproject.toml` 含 `[project]` 或 `[build-system]` 時才 `pip install -e .`
@@ -129,16 +130,13 @@ CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就�
   `ci.yml` 檔頭新增分支政策的用法說明。
 
 ### 變更 —— 分支保護腳本（setup-branch-protection.sh）
-- 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，
-  支援 fnmatch 樣式（`'release/*'`）。不給分支時維持舊行為（只保護 default branch），
-  ruleset 名稱也維持 `CI Standard - main protection`，既有 repo 重跑是更新而不是新增一份。
+- 包含 1.4.0 的全部改動（可指定分支、`CI Standard (branches: …)` 命名、`REQUIRED_CHECKS`、`--dry-run`，見下方 1.4.0）。
+  不給分支時維持舊行為（只保護 default branch、ruleset 名稱 `CI Standard - main protection`），既有 repo 重跑是更新而不是新增一份。
 - required check 綁定來源是 GitHub Actions（`integration_id: 15368`），擋掉有人用 commit status API
   貼一個同名綠燈。`CHECKS_INTEGRATION_ID` 可改綁，設空字串＝不綁。
 - 找既有 ruleset 時加 `--paginate`（超過 30 份也找得到）與 `includes_parents=false`（不把組織層的同名 ruleset 當成自己的）。
 - 檢查 `REQUIRED_APPROVALS`（非負整數）與 `STRICT_CHECKS`（`true` / `false`），打錯直接中止。
 - repo 不能用 ruleset 時（Free 方案的 private repo 回 403「Upgrade to GitHub Pro」）講清楚原因再結束；404 提示名稱或權限問題。
-- 新增 `REQUIRED_CHECKS` 環境變數，可自訂要求哪些 status check（例如本 repo 要多一個 `adopt regression gate`）。
-- 新增 `--dry-run`：只印出要送出的 ruleset、不呼叫任何 API。沒有 admin 權限時可以用它產出 payload，交給有權限的人執行。
 
 ### 變更 —— 導入腳本（adopt.sh / adopt.ps1）
 - `--ref` / `-Ref` 預設改成 `v2`。
@@ -161,7 +159,9 @@ CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就�
 ### 變更 —— 測試
 - `test-adopt.sh` 新增情境 A2（.NET、`.python-version` 帶 BOM、Dockerfile 在子目錄）、
   升級 fixture 加上 `with:` 裡的空行、註解、行尾空白、情境 G（v1 範本原樣的觸發條件修補 + CRLF + 重跑不再改動）、
-  情境 H（讀不到 inputs 時中止）、情境 I（深層偵測、分大小寫、相對路徑呼叫）、半套觸發條件；拿掉幾條恆真的 Copilot 斷言。共 72 項。
+  情境 H（讀不到 inputs 時中止）、情境 I（深層偵測、分大小寫、相對路徑呼叫、1.4.0 範本的觸發條件不再改動）、
+  情境 J（子資料夾 Dockerfile 不寫 `dockerfile:`、升級保留使用者的 `dockerfile:`、多個 Dockerfile 照開）、半套觸發條件；
+  拿掉幾條恆真的 Copilot 斷言。共 79 項。
 - `adopt-tests.yml` 的 Windows 對拍除了全新導入，再加一個刻意塞滿難搞寫法的升級 fixture，兩支都要 byte-identical；
   `push` 也在 `develop` 上跑。
 
@@ -181,8 +181,51 @@ CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就�
 - **job 名稱完全沒動**：`ci / CI Gate`、`security / Security Gate` 不變 —— 既有 ruleset 不必改
   （想補 `integration_id` 的話重跑一次 `setup-branch-protection.sh`）。
 - 新增的 input 都有預設值；**移除**的是 `security-reusable` 的 `python-version`、`upload-sarif`，
-  **改預設值**的是 `ci-reusable` 的 `run-python`（`true` → `false`）。
-- 還指向 `@v1` 的專案完全不受影響（`v1` 停在 1.3.1）。
+  **改預設值**的是 `ci-reusable` 的 `run-python`（`true` → `false`）與兩支的 `dockerfile`（`"Dockerfile"` → `""`）。
+- 還指向 `@v1` 的專案完全不受影響（`v1` 之後只收 1.4.x 的 bug 修正）。
+
+---
+
+## [1.4.0] — 未發佈
+
+**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變。**既有專案重跑 adopt 時，Dockerfile 在子資料夾的專案會補上缺少的 `dockerfile:`（ci.yml、security.yml 各一行），其他缺少的預設 input 也照舊補上；下面「呼叫端範本」的觸發條件變更**不會**自動套到既有專案，要用來源分支政策的專案請照該段手動修改。
+
+從 #36 拆出來先發：#36 其餘的「移除 Copilot 自動修 / 自動審」是破壞性變更，依[版本策略](README.md#版本策略)改走 `v2.0.0`。
+
+### 新增 —— PR 來源分支政策（ci-reusable）
+- 兩個選配 input：`restricted-base-branches`（要管制的 base，空白隔開、支援 glob）與
+  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**，既有呼叫端行為完全不變。
+- 新 job `PR source branch policy`，只在 `pull_request` 事件且 `restricted-base-branches`
+  有值時執行，結果收進 `ci / CI Gate` —— **專案端的 ruleset 一個字都不用改**。
+- 判定順序：base 不受管制→通過；受管制但沒列允許來源→失敗（視為漏填）；
+  來自 fork→失敗；head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
+- 公版不寫死任何分支名稱，也不預設任何分支模型。
+
+### 變更 —— 呼叫端範本（templates/consumer-repo）
+- `ci.yml` 的 `pull_request.types` 加上 `edited`，job 只在「改了目標分支」的 edited 才跑：
+  PR 從 develop 改發到 main 時來源分支政策會重跑，不會沿用舊的綠燈；改標題、內文不重跑。
+  **⚠️ 已導入的專案重跑 adopt 不會改到這段**（adopt 升級只合併 `with:`，不動 `on:`、`if:`、`concurrency:`）。
+  有設 `restricted-base-branches` 的專案要手動把 `.github/workflows/ci.yml` 改成和範本一致：
+  `pull_request.types` 加 `edited`、`jobs.ci.if` 與 `concurrency.group` 照範本改。
+  沒用來源分支政策的專案可以不改。
+- `ci.yml` 的 `concurrency.group`：改標題／內文的 edited 改用獨立 group，
+  不會把同一個 PR 正在跑的 CI 取消掉（否則該 commit 會沒有 CI Gate 結果）。
+
+### 新增 —— Dockerfile 路徑（ci-reusable、security-reusable）
+- 新 input `dockerfile`（預設 `Dockerfile`）與 `docker-context`（預設 `.`），
+  Docker build check、hadolint、Trivy image 掃描都改用它們。
+  特別指定的路徑找不到時直接失敗（避免打錯字讓檢查被靜靜略過）；預設值找不到維持「略過」。Dockerfile 放在子資料夾
+  （例如 `src/Web.Api/Dockerfile`）的專案不必再整組關掉。
+- `adopt.sh` / `adopt.ps1` 也會找子資料夾裡的 Dockerfile：只有一個時自動填入兩個 input，
+  多個時印出清單請使用者挑。
+
+### 變更 —— 分支保護腳本（setup-branch-protection.sh）
+- 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，支援 fnmatch 樣式。
+  不給分支時維持舊行為（只保護 default branch）。
+- 新增 `REQUIRED_CHECKS` 環境變數與 `--dry-run`。
+- 指定分支時 ruleset 名稱為 `CI Standard (branches: <排序後的分支清單>)`，與無參數模式的
+  `CI Standard - main protection` 不同名，不同分支清單也不會撞名而互相覆蓋；名稱放進查詢前會跳脫，
+  讀取 ruleset 清單失敗時中止，不再誤判「不存在」而重複建立。
 
 ---
 

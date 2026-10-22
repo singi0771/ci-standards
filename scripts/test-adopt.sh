@@ -279,7 +279,7 @@ OLD
 "$ADOPT" --std "$STD" >/dev/null
 has "$CI"  'ready_for_review, edited]'                                     "v1 範本的 types 補上 edited"
 has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "job if 一起改成「只有改 base 的 edited 才跑」"
-has "$CI"  "&& 'noop' || 'run' }}"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
+has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
 has "$CI"  'ci-reusable.yml@v2'                                            "uses: 改指向 @v2"
 has "$SEC" 'group: security-${{ github.event_name }}-${{ github.ref }}'    "security.yml 的 concurrency 依事件分組"
 if grep -q "$(printf '\r')" "$CI"; then bad "CRLF 呼叫端合併後應統一成 LF"; else ok "CRLF 呼叫端合併後統一成 LF（與 adopt.ps1 一致）"; fi
@@ -293,7 +293,7 @@ mkdir -p .github/workflows
 sed -e 's/ready_for_review\]/ready_for_review, edited]/' "$WORK/v1-ci.lf" > "$CI"
 "$ADOPT" --std "$STD" >/dev/null
 has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "只加了 edited 的半套狀態：job if 也補上"
-has "$CI"  "&& 'noop' || 'run' }}"                                         "只加了 edited 的半套狀態：concurrency 也補上"
+has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "只加了 edited 的半套狀態：concurrency 也補上"
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 I：偵測範圍要跟公版 reusable 實際檢查的範圍一致\n'
@@ -319,6 +319,38 @@ if ( cd "$STD" && ./scripts/adopt.sh --target "$TARGET_DIR" --dry-run >/dev/null
 else
   bad "相對路徑呼叫、不帶 --std 時找不到公版"
 fi
+
+# 1.4.0 範本（已經是 edited + 新 if / concurrency）升級到 v2：觸發條件視為已完成、不再改動
+new_repo v140-template
+mkdir -p .github/workflows
+cp "$STD/templates/consumer-repo/.github/workflows/ci.yml" "$CI"
+sed -i.bak 's|ci-reusable.yml@v2|ci-reusable.yml@v1|' "$CI" && rm -f "$CI.bak"
+grep -v -e 'ci-reusable.yml@' -e '^ *run-\|^ *python-version' "$CI" > "$WORK/v140-before"
+"$ADOPT" --std "$STD" >/dev/null
+grep -v -e 'ci-reusable.yml@' -e '^ *run-\|^ *python-version' "$CI" > "$WORK/v140-after"
+if cmp -s "$WORK/v140-before" "$WORK/v140-after"; then ok "1.4.0 範本的觸發條件已是 v2 寫法，不再改動"; else bad "1.4.0 範本的觸發條件被改動了"; fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 J：Dockerfile 不在根目錄（1.4.0 的 dockerfile: input）\n'
+# ═════════════════════════════════════════════════════════════
+# v2 的公版會自己找全 repo 的 Dockerfile，adopt 不必再寫 dockerfile:；
+# 但 1.4.0 時代呼叫端已經寫好的 dockerfile: 是使用者的設定，升級時必須原封不動。
+new_repo subdir-docker
+mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+has   "$CI"  'run-docker-build: true'   "子資料夾的 Dockerfile 也會開 run-docker-build"
+has   "$SEC" 'scan-docker-image: true'  "子資料夾的 Dockerfile 也會開 scan-docker-image"
+hasnt "$CI"  'dockerfile:'              "v2 不必寫 dockerfile:（公版自己找全 repo）"
+# awk 而不是 sed：BSD sed（macOS）的取代字串不認得 \n
+awk '{ print } /^    with:$/ { print "      dockerfile: \"deploy/Custom.Dockerfile\"" }' "$CI" > "$CI.tmp" && mv "$CI.tmp" "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has   "$CI"  'dockerfile: "deploy/Custom.Dockerfile"' "升級時保留使用者自訂的 dockerfile:"
+check "升級後仍只有一行 dockerfile:" "$(grep -c '^ *dockerfile:' "$CI")" "1"
+
+new_repo multi-docker
+mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: true' "多個 Dockerfile 也開 Docker 檢查（v2 的公版會逐一 build）"
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'

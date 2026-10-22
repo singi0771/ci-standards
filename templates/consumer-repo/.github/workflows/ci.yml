@@ -42,16 +42,17 @@ on:
 permissions:
   contents: read
 
-# 只改 PR 標題 / 內文的 edited 事件分到另一組 —— 否則它會把正在跑的那一輪 CI 取消掉
+# 改標題／內文的 edited 不跑任何 job，給它獨立的 group（每次都不同）：否則它會把同一個 PR
+# 正在跑的 CI 取消掉，而自己又什麼都不跑，這個 commit 就永遠沒有 CI Gate 結果。改 base 的 edited 照常共用 group。
 concurrency:
-  group: ci-${{ github.ref }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'noop' || 'run' }}
+  group: ${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
   ci:
     # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘；
     # edited 事件只有在 base 分支被改掉時才跑
-    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base)) }}
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
       # 語言相關的檢查預設都是關的，用到哪個開哪個（adopt.sh 會依偵測結果填好）

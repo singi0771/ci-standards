@@ -297,9 +297,9 @@ function Merge-WithBlock([string[]]$Lines, [string[]]$Known, [string[]]$Addition
 $V1Types   = '    types: [opened, synchronize, reopened, ready_for_review]'
 $V2Types   = '    types: [opened, synchronize, reopened, ready_for_review, edited]'
 $V1CiConc  = '  group: ci-${{ github.ref }}'
-$V2CiConc  = '  group: ci-${{ github.ref }}-${{ github.event.action == ''edited'' && !github.event.changes.base && ''noop'' || ''run'' }}'
+$V2CiConc  = '  group: ${{ github.event.action == ''edited'' && github.event.changes.base == null && format(''ci-edit-{0}'', github.run_id) || format(''ci-{0}'', github.ref) }}'
 $V1If      = '    if: ${{ github.event_name != ''pull_request'' || !github.event.pull_request.draft }}'
-$V2If      = '    if: ${{ github.event_name != ''pull_request'' || (!github.event.pull_request.draft && (github.event.action != ''edited'' || github.event.changes.base)) }}'
+$V2If      = '    if: ${{ github.event_name != ''pull_request'' || (!github.event.pull_request.draft && (github.event.action != ''edited'' || github.event.changes.base != null)) }}'
 $V1SecConc = '  group: security-${{ github.ref }}'
 $V2SecConc = '  group: security-${{ github.event_name }}-${{ github.ref }}'
 

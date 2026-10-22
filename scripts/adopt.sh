@@ -365,9 +365,9 @@ mkdir -p .github/workflows
 V1_TYPES='    types: [opened, synchronize, reopened, ready_for_review]'
 V2_TYPES='    types: [opened, synchronize, reopened, ready_for_review, edited]'
 V1_CI_CONC='  group: ci-${{ github.ref }}'
-V2_CI_CONC="  group: ci-\${{ github.ref }}-\${{ github.event.action == 'edited' && !github.event.changes.base && 'noop' || 'run' }}"
+V2_CI_CONC="  group: \${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}"
 V1_IF="    if: \${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
-V2_IF="    if: \${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base)) }}"
+V2_IF="    if: \${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}"
 # security.yml：排程重掃與 push 分開一組，免得同一分支上互相取消
 V1_SEC_CONC='  group: security-${{ github.ref }}'
 V2_SEC_CONC='  group: security-${{ github.event_name }}-${{ github.ref }}'

@@ -258,7 +258,8 @@ Gate 紅的話點進 Actions 看是哪一項掛掉。
 | `severity` | string | `CRITICAL,HIGH` | Trivy 要擋下的嚴重度。可加 `MEDIUM` 收更嚴 |
 | `fail-on-findings` | boolean | `true` | `true`=掃到問題 Gate 就紅；`false`=有找到問題也先不紅（**導入初期過渡用**）。⚠️ 2.0.0 起 `false` 只放行「有找到問題」：規則下載失敗、弱點資料庫下載失敗、工具當掉這類**掃描本身出錯**照樣紅 —— 沒掃成不能當成掃過。OSV-Scanner 異常結束不論這個值都是紅的 |
 | `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，每個 image 多吃 2–3 分鐘 |
-| `dockerfiles` | string | `""` | 要 build 來掃的 Dockerfile，空白隔開；每一項寫 `路徑` 或 `路徑:build context`（context 預設是 Dockerfile 所在目錄）。留空＝自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`。寫法同 `ci-reusable` 的同名參數 |
+| `dockerfile` | string | `""` | 要 build 來掃的 Dockerfile。寫法同 `ci-reusable` 的同名參數：留空＝自動找全 repo；可列多個、每一項 `路徑` 或 `路徑:build context` |
+| `docker-context` | string | `"."` | `dockerfile` 那一項沒寫 `:context` 時用的 build context（預設 repo 根目錄） |
 | `run-zizmor` | boolean | `false` | 用 [zizmor](https://docs.zizmor.sh/) 檢查 `.github/workflows` 本身：把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、沒釘 SHA 的 action、權限給太大…。放行規則放專案的 `.github/zizmor.yml`（範本已附） |
 | `zizmor-min-severity` | string | `low` | zizmor 只回報這個等級以上：`low` / `medium` / `high` |
 | `semgrep-rules` | string | `p/owasp-top-ten p/security-audit p/secrets auto` | Semgrep 規則包，空白隔開。`auto` 會依語言自動挑（要連 Semgrep 規則庫、會回傳匿名使用統計；不想要就拿掉）。想加 `p/python`、`p/dockerfile` 就寫在這 |
@@ -281,14 +282,15 @@ Gate 紅的話點進 Actions 看是哪一項掛掉。
 | `run-dotnet-format` | boolean | `true` | 用 `dotnet format --verify-no-changes` 檢查格式與 analyzer 規則（讀專案的 `.editorconfig`，等同 Python 那邊的 ruff）。舊專案第一次導入整片紅時先設 `false` 過渡，本機跑一次 `dotnet format` 整理完再打開 |
 | `dotnet-runner` | string | `ubuntu-latest` | .NET job 跑在哪種 runner。WPF / WinForms（`net*-windows`）、.NET Framework 這類只能在 Windows 建置的專案設 `windows-latest`（Windows runner 分鐘數算 2 倍） |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
-| `dockerfiles` | string | `""` | 要檢查的 Dockerfile，空白隔開；每一項寫 `路徑` 或 `路徑:build context`（context 預設是 Dockerfile 所在目錄）。留空＝自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（2.0.0 之前只看根目錄）。hadolint 與 build 都吃這份清單 |
+| `dockerfile` | string | `""` | 要檢查的 Dockerfile（相對 repo 根目錄）。⚠️ **2.0.0 起預設留空＝自動找全 repo** 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`；1.4.0 的預設是 `"Dockerfile"`、只看根目錄）。可列多個、空白隔開，每一項寫 `路徑` 或 `路徑:build context`。1.4.0 的單一路徑寫法（`src/Web.Api/Dockerfile`）照樣能用。明確列出的路徑不存在會紅。hadolint 與 build 都吃這份清單，見 [Dockerfile 不在根目錄、或不只一個](#dockerfile-不在根目錄或不只一個) |
+| `docker-context` | string | `"."` | `dockerfile` 那一項沒寫 `:context` 時用的 build context。預設 repo 根目錄（Visual Studio / docker-compose 的 .NET 慣例，通常不用改） |
 | `run-hadolint` | boolean | `false` | build 之前先用 [hadolint](https://github.com/hadolint/hadolint) 檢查 Dockerfile 寫法（沒釘版本的 apt 套件、`latest` tag、`RUN` 裡的 shell 問題…）。warning 以上才算失敗；要忽略某條規則放 `.hadolint.yaml`。放在 Docker build 那個 job 裡，不多花一個 job |
 | `run-actionlint` | boolean | `false` | 檢查 GitHub Actions workflow 語法，會連 `run:` 區塊的 bash 一起用 shellcheck 檢查 |
 | `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
 | `shellcheck-paths` | string | `""` | 要檢查的 `.sh` glob。空字串＝自動找全 repo（找不到就略過） |
 | `restricted-base-branches` | string | `""` | 要管制「誰可以 merge 進來」的 base 分支，空白隔開、支援 glob。留空＝不檢查。見[分支模型](#分支模型pr-要發到哪裡) |
-| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填 |
+| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填。樣式的 `*` 也會比對 `/`，`hotfix/*` 包含 `hotfix/a/b`。呼叫端的 `pull_request.types` 要含 `edited`（範本已含），PR 改目標分支時才會重跑 |
 | `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改程式的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
 
 > **`run-*` 全部關掉也不會卡住**：子 job 都可能因 input 而 `skipped`，Gate 只在「開了卻不是 success」才擋。
@@ -378,7 +380,12 @@ gh auth login                                        # 需有目標 repo 的 adm
 ./scripts/setup-branch-protection.sh <owner>/<repo>
 ```
 
+不給分支＝只保護 default branch；要保護別的分支就接在後面列出來（`main develop`、`'release/*'` 這類樣式也行），
+用法見[分支模型](#一個-develop-流程完整長什麼樣)。
+
 腳本可重複執行：偵測到同名 ruleset 會改用 `PUT` 更新，不會建出第二份（ruleset 超過 30 份也找得到；只比對這個 repo 自己的，不含組織層的）。
+ruleset 名稱：不給分支時是 `CI Standard - main protection`；有給分支時是 `CI Standard (branches: <排序後的分支清單>)`，
+不同的分支清單各自一份、不會互相覆蓋。repo 上同時有好幾份 CI Standard ruleset 時腳本會列出來提醒你 —— 它們的規則是疊加生效的。
 
 **required check 會綁定來源是 GitHub Actions**（`integration_id: 15368`）。不綁的話，任何有寫入權限的人
 （或外流的 token）都能用 commit status API 對同一個 SHA 貼一個叫 `ci / CI Gate` 的綠燈，騙過分支保護。
@@ -469,6 +476,7 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 ```yaml
 # 範本預設（ci.yml）：發到「任何分支」的 PR 都跑
+# edited：PR 改目標分支（base）時 GitHub 只送 edited，少了它來源分支政策不會重跑（見下一節）
 pull_request:
   types: [opened, synchronize, reopened, ready_for_review, edited]
 
@@ -478,10 +486,10 @@ pull_request:
   types: [opened, synchronize, reopened, ready_for_review, edited]
 ```
 
-> `edited` 是 2.0.0 加的（只有 `ci.yml` 需要）：PR **改了 base 分支**時要重跑來源分支政策，
+> `edited` 是 1.4.0 加的（只有 `ci.yml` 需要）：PR **改了 base 分支**時要重跑來源分支政策，
 > 否則先發到 `develop` 拿到綠燈、再到網頁上把 base 改成 `main`，綠燈會原封不動沿用。
-> 只改標題或內文也算 `edited`，那種不會重跑 —— job 的 `if` 只放行 `github.event.changes.base` 有值的 edited，
-> `concurrency` 也把它分到另一組（`noop`），不會把正在跑的那一輪取消掉。這三行範本都寫好了。
+> 只改標題或內文也算 `edited`，那種不會重跑、也不會把正在跑的那一輪取消掉 ——
+> 靠的是 job 的 `if` 與 `concurrency`，範本都寫好了，寫法見下一節。
 
 > ⚠️ 加了 `branches:` 篩選之後，**沒被列到的分支其 PR 不會有 `ci / CI Gate`**。
 > 那些分支就不能設成 required check，否則會永遠 pending。
@@ -505,6 +513,31 @@ jobs:
 
 意思是「`main` 只接受從 `develop` 或 `hotfix/*` 發來的 PR」，其他分支發到 `main` 會被擋下，
 Summary 會印出目標／來源／允許清單，並提示把 base 改成整合分支。
+
+**要搭配呼叫端的三處設定**（範本 `templates/consumer-repo/.github/workflows/ci.yml` 已全部寫好）：
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]   # 1. 改 base 時重跑
+
+concurrency:
+  # 2. 只改標題／內文的 edited 用獨立 group，不會把正在跑的 CI 取消掉
+  group: ${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # 3. 草稿不跑；edited 只有改 base 才跑
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
+```
+
+> ⚠️ 少了 `edited`，PR 從 `develop` 改發到 `main` 時會沿用舊的綠燈。已導入的專案升到 v2 時重跑 `adopt`：
+> - `ci.yml` 還是 **v1 範本原樣**（1.3.x 以前導入的）→ 三處一起自動換成上面的寫法
+> - 用 **1.4.0 範本**導入的 → 本來就是這個寫法，不會再動
+> - **改過**觸發條件的 → 不動、只印 ⚠️ 提醒，請手動照上面改（有設 `restricted-base-branches` 時一定要改）
+>
+> 樣式的 `*` 也會比對 `/`：`hotfix/*` 包含 `hotfix/a/b`。
 
 判定順序：
 
@@ -656,13 +689,21 @@ with:
 
 ### Dockerfile 不在根目錄、或不只一個
 
-2.0.0 起不用特別設：Docker build、hadolint、image 掃描都會自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`。
-只想檢查其中幾個、或 build context 不是 Dockerfile 所在目錄時，用 `dockerfiles` 明確列（`ci.yml` 與 `security.yml` 各自設）：
+2.0.0 起不用特別設：`dockerfile` 留空時，Docker build、hadolint、image 掃描都會自動找全 repo 的
+`Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`），有幾個就 build 幾個。
+build context 預設是 repo 根目錄（`docker-context: "."`，跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）。
+
+只想檢查其中幾個、或某個 Dockerfile 的 build context 不一樣時，用 `dockerfile` 明確列（`ci.yml` 與 `security.yml` 各自設）：
 
 ```yaml
 with:
-  dockerfiles: "api/Dockerfile web/Dockerfile:."   # 第二個用 repo 根目錄當 build context
+  dockerfile: "src/Web.Api/Dockerfile"                      # 1.4.0 的單一路徑寫法照樣能用
+  # dockerfile: "src/Web.Api/Dockerfile web/Dockerfile:web"  # 多個用空白隔開；:web ＝這一個用 web/ 當 build context
+  # docker-context: "."                                     # 沒寫 :context 的那幾個用它，預設 repo 根目錄
 ```
+
+明確列出的路徑不存在會直接紅（打錯字不會讓檢查安靜地被略過）。
+`adopt.sh` / `adopt.ps1` 2.0.0 起不再寫 `dockerfile:`（公版自己會找）；你原本寫好的 `dockerfile:` 升級時會原樣保留。
 
 ### 導入初期紅到不想活
 
@@ -732,13 +773,13 @@ git tag -f v2 && git push -f origin v2                 # 會移動的別名：�
 | 主版本 | 狀態 |
 |---|---|
 | `v2` | **目前版本**（2.0.0 起）。新導入一律用 `@v2`，`adopt.sh` / `adopt.ps1` 預設就是它 |
-| `v1` | **凍結在 `v1.3.1`，不會再移動**。還指向 `@v1` 的專案照常能跑，但不會再收到任何更新（含安全修補），請照下一節升到 `v2` |
+| `v1` | **功能更新到 1.4.x 為止**。1.4.0（來源分支政策、`dockerfile` / `docker-context`）是 `v1` 最後一個功能版，之後只修 bug、不再加功能。還指向 `@v1` 的專案照常能跑，新功能請照下一節升到 `v2`（`v2` 包含 1.4.0 的全部內容） |
 
 > ⚠️ **改完公版一定要移動目前的主版本 tag（`v2`）**，否則指向 `@v2` 的專案完全不會有感覺 —— main 領先 `v2` 好幾個 commit 卻沒人發現，是這套機制最容易出的事故。
 >
 > ⚠️ **只有會移動的 `v2` 是不夠的**。`v2` 移壞了就沒有「昨天的 v2」可退，所以每次都要留一個不可變的 `v2.x.y`。退回＝把 `v2` 指回上一個版本號。
 >
-> ⚠️ **不要再動 `v1`**。它是還沒升級的專案唯一的依靠，移了等於把破壞性變更硬塞給它們。
+> ⚠️ **`v1` 只能移到 1.4.x 的 bug 修正版**，絕不能指到 2.x 的 commit。它是還沒升級的專案唯一的依靠，移錯了等於把破壞性變更硬塞給它們。
 
 ### 從 v1 升級到 v2
 
@@ -747,6 +788,8 @@ git tag -f v2 && git push -f origin v2                 # 會移動的別名：�
 - `ci-reusable` 的 `run-python` 預設改成 `false`
 - `security-reusable` 移除了 `python-version` 與 `upload-sarif`（還在傳的話整支 workflow `invalid input`）
 - `fail-on-findings: false` 不再吞掉「掃描工具本身出錯」，那種情況會紅
+- `dockerfile` 預設從 `"Dockerfile"` 改成留空＝自動找全 repo，以前沒被檢查到的子目錄 Dockerfile 也會 build / 掃描
+  （1.4.0 明寫的 `dockerfile:` 照樣有效、升級時保留）
 - Copilot 自動修 / 自動審整組移除，留在專案裡的那幾支呼叫端每次 PR 都會 `startup_failure`
 
 升級步驟（每個已導入的專案各做一次）：
@@ -834,7 +877,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（72 項；在暫存目錄裡建測試 repo，不會動到本 repo）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（79 項；在暫存目錄裡建測試 repo，不會動到本 repo）
 ├── docs/
 │   ├── FLOW.md                        ← 流程圖：一個 PR 從打開到能 merge 發生什麼、由哪支檔案負責
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）

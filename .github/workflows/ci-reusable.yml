@@ -54,12 +54,17 @@ on:
         description: "是否驗證 Docker image 能建置"
         type: boolean
         default: true
-      dockerfiles:
+      dockerfile:
         description: >-
-          要檢查的 Dockerfile，空白隔開；每一項可寫成 <Dockerfile 路徑> 或 <Dockerfile 路徑>:<build context>
-          （context 預設是 Dockerfile 所在目錄）。留空＝自動找全 repo 的 Dockerfile、*.Dockerfile、Dockerfile.*
+          要檢查的 Dockerfile（相對 repo 根目錄），例如 src/Web.Api/Dockerfile；多個用空白隔開，
+          每一項也可以寫成 <路徑>:<build context>。留空＝自動找全 repo 的 Dockerfile、*.Dockerfile、Dockerfile.*。
+          1.4.0 的單一路徑寫法照樣能用。hadolint 與 Docker build 都用它
         type: string
         default: ""
+      docker-context:
+        description: "docker build 的 context 目錄（相對 repo 根目錄），dockerfile 那一項沒寫 :<context> 時用它"
+        type: string
+        default: "."
       run-hadolint:
         description: "build 之前是否先用 hadolint 檢查 Dockerfile 寫法（要 run-docker-build 開著才有作用）"
         type: boolean
@@ -255,7 +260,7 @@ jobs:
           persist-credentials: false
       - name: 找出要檢查的 Dockerfile
         env:
-          DOCKERFILES: ${{ inputs.dockerfiles }}
+          DOCKERFILES: ${{ inputs.dockerfile }}
         run: |
           LIST="$RUNNER_TEMP/dockerfiles.txt"
           if [ -n "$DOCKERFILES" ]; then
@@ -273,7 +278,12 @@ jobs:
           echo "要檢查的 Dockerfile："; sed 's/^/  /' "$LIST"
           while IFS= read -r entry; do
             f="${entry%%:*}"
-            if [ ! -f "$f" ]; then echo "::error::dockerfiles 裡的 $f 不存在"; exit 1; fi
+            if [ ! -f "$f" ]; then
+              # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為
+              if [ "$DOCKERFILES" = "Dockerfile" ]; then echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0; fi
+              # 其他明確指定的路徑找不到＝多半打錯字，要吵（不能讓檢查被靜靜略過）
+              echo "::error::dockerfile input 指定的 $f 不存在（路徑打錯？）"; exit 1
+            fi
           done < "$LIST"
       # hadolint：檢查 Dockerfile 的寫法（沒釘版本的 apt 套件、用 latest tag、
       # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
@@ -304,6 +314,7 @@ jobs:
         env:
           # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
           SHA: ${{ github.sha }}
+          DOCKER_CONTEXT: ${{ inputs.docker-context }}
         run: |
           LIST="$RUNNER_TEMP/dockerfiles.txt"
           if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
@@ -311,7 +322,9 @@ jobs:
           while IFS= read -r entry; do
             n=$((n+1))
             f="${entry%%:*}"
-            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$(dirname "$f")"; fi
+            # context：那一項有寫 :<context> 就用它，否則用 docker-context（預設 repo 根目錄，
+            # 跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）
+            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$DOCKER_CONTEXT"; fi
             echo "── docker build -f $f $ctx"
             docker build -f "$f" -t "ci-check-$n:$SHA" "$ctx"
           done < "$LIST"

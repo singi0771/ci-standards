@@ -3,7 +3,7 @@
 ## 專案概觀
 - 用途：團隊統一的 CI / 安全掃描「中央公版」。各專案用一行 `uses:` 呼叫，邏輯集中在此。
 - 這裡**沒有應用程式碼**：內容是 GitHub Actions workflow（YAML + 內嵌 bash）、shell / PowerShell script 與文件。
-- 使用端指向主版本 tag（2.0.0 起是 `@v2`；`v1` 凍結在 1.3.1、不要再動），所以**這個 repo 的每一次改動都會同時影響所有專案**。
+- 使用端指向主版本 tag（2.0.0 起是 `@v2`；`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補）），所以**這個 repo 的每一次改動都會同時影響所有專案**。
 
 ## 開發與測試指令（修完必須自己跑過）
 - Workflow 語法：`actionlint -color`（PATH 上有 shellcheck 的話會連 `run:` 區塊的 bash 一起檢查）；

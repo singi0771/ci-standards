@@ -23,12 +23,16 @@ on:
         description: "專案有 Dockerfile 時，是否 build 出 image 再掃它的弱點（每個 image 多花 2–3 分鐘）"
         type: boolean
         default: false
-      dockerfiles:
+      dockerfile:
         description: >-
-          scan-docker-image 要 build 哪些 Dockerfile，寫法同 ci-reusable 的 dockerfiles：
-          空白隔開，每一項 <Dockerfile 路徑> 或 <Dockerfile 路徑>:<build context>。留空＝自動找全 repo
+          scan-docker-image 要 build 哪些 Dockerfile，寫法同 ci-reusable 的 dockerfile：
+          空白隔開，每一項 <路徑> 或 <路徑>:<build context>。留空＝自動找全 repo（1.4.0 的單一路徑寫法照樣能用）
         type: string
         default: ""
+      docker-context:
+        description: "docker build 的 context 目錄（相對 repo 根目錄），dockerfile 那一項沒寫 :<context> 時用它"
+        type: string
+        default: "."
       semgrep-rules:
         description: "Semgrep 要載入的規則包，用空白隔開。auto 會依專案語言自動挑規則（需要連 Semgrep 規則庫，且會回傳匿名使用統計；不想要就把 auto 拿掉）"
         type: string
@@ -272,7 +276,7 @@ jobs:
           fi
 
   # 6) （可選）Docker image 弱點掃描：scan-docker-image=true 才跑；
-  #    舊版只 build 根目錄的 Dockerfile，2.0.0 起跟 ci-reusable 一樣找全 repo（或照 dockerfiles 指定）。
+  #    舊版只 build 根目錄的 Dockerfile，2.0.0 起跟 ci-reusable 一樣找全 repo（或照 dockerfile 指定）。
   #    trivy-action 一次只能掃一個 image，所以這裡直接裝 trivy 執行檔、用迴圈掃。
   trivy-image:
     name: Docker image (Trivy)
@@ -291,7 +295,8 @@ jobs:
       - name: Build + scan images
         env:
           SHA: ${{ github.sha }}
-          DOCKERFILES: ${{ inputs.dockerfiles }}
+          DOCKERFILES: ${{ inputs.dockerfile }}
+          DOCKER_CONTEXT: ${{ inputs.docker-context }}
           SEVERITY: ${{ inputs.severity }}
           VULN_EXIT_CODE: ${{ inputs.fail-on-findings && '1' || '0' }}
         run: |
@@ -312,8 +317,15 @@ jobs:
           while IFS= read -r entry; do
             n=$((n+1))
             f="${entry%%:*}"
-            if [ ! -f "$f" ]; then echo "::error::dockerfiles 裡的 $f 不存在"; exit 1; fi
-            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$(dirname "$f")"; fi
+            if [ ! -f "$f" ]; then
+              # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為
+              if [ "$DOCKERFILES" = "Dockerfile" ]; then echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0; fi
+              # 其他明確指定的路徑找不到＝多半打錯字，要吵（不能讓檢查被靜靜略過）
+              echo "::error::dockerfile input 指定的 $f 不存在（路徑打錯？）"; exit 1
+            fi
+            # context：那一項有寫 :<context> 就用它，否則用 docker-context（預設 repo 根目錄，
+            # 跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）
+            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$DOCKER_CONTEXT"; fi
             img="scan-target-$n:$SHA"
             echo "── build $f（context: $ctx）"
             docker build -f "$f" -t "$img" "$ctx"

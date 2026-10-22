@@ -83,7 +83,7 @@ flowchart TD
     N -->|true| NJ[.NET build + test<br/>restore → dotnet format → build Release → test<br/>ubuntu 或 windows runner]
     N -->|false| NS[skipped]
 
-    D -->|true| DJ[Docker build check<br/>找全 repo 的 Dockerfile 或照 dockerfiles<br/>hadolint 可選 → docker build，不推送]
+    D -->|true| DJ[Docker build check<br/>找全 repo 的 Dockerfile 或照 dockerfile<br/>hadolint 可選 → docker build，不推送]
     D -->|false| DS[skipped]
 
     L -->|true| LJ[Workflow + shell lint<br/>actionlint 1.7.12 + shellcheck<br/>兩個併成一個 job 省分鐘]
@@ -183,7 +183,7 @@ flowchart TD
 這是有意的取捨，`.github/zizmor.yml` 對公版的 `uses:` 只要求 ref-pin，其餘第三方 action 一律 hash-pin。
 
 唯一需要回頭改專案的情況是**破壞性變更**（input 改名或移除、改預設值、改 job 名稱）。那種改動開新的主版本，
-舊的主版本 tag 不動，既有專案不會被動到 —— 2.0.0 就是這樣：`v1` 停在 1.3.1，各專案自行改成 `@v2`。
+舊的主版本 tag 不會吃到破壞性變更，既有專案不會被動到 —— 2.0.0 就是這樣：`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補），各專案自行改成 `@v2`。
 見 README「版本策略」。
 
 ---

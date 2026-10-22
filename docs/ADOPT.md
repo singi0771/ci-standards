@@ -113,10 +113,12 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 #### v1 → v2 的觸發條件修補
 
-2.0.0 修了「PR 改 base 就能繞過來源分支政策」，`ci.yml` 要改三行：`pull_request.types` 加 `edited`、
+1.4.0 的範本修了「PR 改 base 就能繞過來源分支政策」，`ci.yml` 要改三行：`pull_request.types` 加 `edited`、
 job 的 `if` 與 `concurrency` 跟著改（只改標題 / 內文的 edited 不重跑、也不取消正在跑的那一輪）。
+1.4.0 的 adopt 不會幫既有專案改這三行；2.0.0 起升級時會處理：
 
 - 你的 `ci.yml` 這三行**還是 v1 範本原樣** → 腳本自動換掉，報告裡「觸發條件（v2）」那行會寫出來
+- 用 **1.4.0 範本**導入的 → 本來就是新寫法，不會再動
 - **改過**其中任何一行 → 不動，只印 ⚠️ 提醒，請照 `templates/consumer-repo/.github/workflows/ci.yml` 手動補
 
 三行要嘛一起換、要嘛都不動，不會只改一半。
@@ -144,7 +146,7 @@ job 的 `if` 與 `concurrency` 跟著改（只改標題 / 內文的 edited 不�
 
 | 偵測 | 依據 | 影響的參數 |
 |---|---|---|
-| Dockerfile | 全 repo 任何一層有 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`） | `run-docker-build`、`run-hadolint`、`scan-docker-image` |
+| Dockerfile | 全 repo 任何一層有 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`）；有好幾個也照開，公版會逐一 build | `run-docker-build`、`run-hadolint`、`scan-docker-image`（2.0.0 起**不寫 `dockerfile:`** —— 公版留空就會自己找全 repo；你原本寫好的 `dockerfile:` 升級時原樣保留） |
 | Python | `requirements.txt` / `pyproject.toml` / `setup.py` / 有 `.py` | `run-python`（2.0.0 起公版預設 `false`，所以一定會明確寫出 `true` 或 `false`） |
 | Python 版本 | `.python-version`（UTF-8 BOM 與 CRLF 會去掉），沒有就用 `3.12` | `python-version`（只有 `ci.yml`；`security-reusable` 2.0.0 起已沒有這個 input） |
 | .NET | 全 repo 任何一層有 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj` | `run-dotnet`。方案檔不只一個（或沒有方案檔、專案檔不只一個）時會提醒你補 `dotnet-project` |
@@ -164,7 +166,7 @@ Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋十個情境共 72 項檢查（沒裝 PyYAML 的機器會跳過「產生的 YAML 是否合法」那一項），改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋十一個情境共 79 項檢查（沒裝 PyYAML 的機器會跳過「產生的 YAML 是否合法」那一項），改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -179,7 +181,8 @@ Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1
 | G v1 範本升級 | v1 範本原樣的 `ci.yml` 三行觸發條件被換成 v2、`security.yml` 的 concurrency 依事件分組、`uses:` 改指向 `@v2`、CRLF 統一成 LF、再跑一次不會重複改 |
 | G' 半套觸發條件 | 使用者只手動加了 `edited`、`if` / concurrency 還是 v1 時，也會補齊 |
 | H 讀不到 inputs | 公版 reusable 的 inputs 讀不到時中止，使用者的 `with:` 設定原封不動 |
-| I 偵測範圍 | 深層目錄的 Dockerfile / `.sh` 偵測得到、`node_modules` 不算、小寫 `api.dockerfile` 不算、相對路徑呼叫不帶 `--std` 也找得到公版 |
+| I 偵測範圍 | 深層目錄的 Dockerfile / `.sh` 偵測得到、`node_modules` 不算、小寫 `api.dockerfile` 不算、相對路徑呼叫不帶 `--std` 也找得到公版、1.4.0 範本的觸發條件不再被改動 |
+| J Dockerfile 不在根目錄 | 子資料夾的 Dockerfile 也會開 Docker 檢查但不寫 `dockerfile:`、升級時保留使用者自己寫的 `dockerfile:`（不會重複一行）、多個 Dockerfile 也照開 |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |
 | F 巢狀結構 | 目標是外層資料夾時，提示往下一層找 |
