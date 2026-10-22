@@ -96,7 +96,7 @@ jobs:
         # 拿掉它的話後續步驟會被 GitHub 跳過 —— 變成「只有什麼都沒掃到才上傳報告」，
         # 最需要報告的時候反而不傳。（2026-08-09 PR #15 一度改錯成這樣。）
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -203,7 +203,7 @@ jobs:
           exit-code: "0"
       - name: Upload SBOM as artifact
         if: ${{ !cancelled() && inputs.generate-sbom }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
@@ -288,7 +288,7 @@ jobs:
         with:
           persist-credentials: false
       # 跟 trivy-action v0.36.0 內部用的是同一支 setup-trivy、同一版 trivy，兩邊結果才會一致
-      - uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.70.0
           cache: true
