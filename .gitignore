@@ -6,3 +6,7 @@ Icon?
 .idea/
 # 掃描產出
 *.sarif
+# Office 開檔時的鎖定檔、手動備份
+~$*
+*.bak
+*.bak[0-9]*

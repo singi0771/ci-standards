@@ -6,7 +6,7 @@
 #   ./adopt.sh --dry-run             # 只印計畫，不動任何檔案
 #   ./adopt.sh --target ../MyProj    # 指定目標
 #   ./adopt.sh --std ~/ci-standards  # 指定公版 clone 位置
-#   ./adopt.sh --ref v1.1.0          # 釘死特定版本（預設 v1）
+#   ./adopt.sh --ref v2.0.0          # 釘死特定版本（預設 v2）
 #   ./adopt.sh --uses-repo ORG/ci-standards   # 搬到組織後換掉 uses: 的 owner/repo
 #
 # 相依：只需要 git 與內建 shell（awk / find / cp）。
@@ -22,7 +22,7 @@ DEFAULT_USES_REPO="singi0771/ci-standards"
 
 TARGET="$PWD"
 STD=""
-REF="v1"
+REF="v2"
 USES_REPO="$DEFAULT_USES_REPO"
 DRY_RUN=false
 
@@ -43,6 +43,10 @@ while [ $# -gt 0 ]; do
 done
 
 command -v git >/dev/null 2>&1 || die "找不到 git。這是唯一的必要相依。"
+
+# 腳本自己的位置要在任何 cd 之前算好 —— $0 可能是相對路徑（./scripts/adopt.sh），
+# cd 到目標 repo 之後再 dirname 就會解到錯的地方（或根本進不去）。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # --std / --target 可能是相對路徑，而下面會 cd 到目標 repo 根目錄。
 # 先在使用者當初所在的目錄把 --std 解成絕對路徑。
@@ -89,8 +93,10 @@ fi
 
 # ── 公版範本 ─────────────────────────────────────────────────
 TMP_CLONE=""
+# trap 要在 clone 之前裝好：clone 失敗會走 die → exit，EXIT trap 才清得到暫存目錄
+cleanup_tmp() { if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi; }
+trap cleanup_tmp EXIT
 if [ -z "$STD" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   CANDS="$SCRIPT_DIR/.."
   # 只有 CODE_WORK 真的有值才加進候選 —— 否則 "${CODE_WORK:-}/ci-standards"
   # 會變成絕對路徑 /ci-standards，機器上剛好有同名目錄就會誤判成公版。
@@ -113,44 +119,53 @@ fi
 TPL="$STD/templates/consumer-repo/.github"
 [ -d "$TPL" ] || die "$STD 底下找不到 templates/consumer-repo/.github"
 
-cleanup_tmp() { if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi; }
-trap cleanup_tmp EXIT
-
 info "── 目標：$TARGET_ROOT"
 info "── 公版：${STD}（ref: ${REF}，uses: ${USES_REPO}）"
 info ""
 
 # ── 偵測用了哪些技術 ───────────────────────────────────────────────
-found_any() {
-  [ -n "$(find . -maxdepth "$1" -name "$2" -not -path './.git/*' -print -quit 2>/dev/null)" ]
+# 偵測範圍與檔名規則要跟公版 reusable「實際會檢查的範圍」一致：
+#   - 全 repo（不限深度），略過 .git 與 node_modules —— 跟 reusable 的 find 一樣。
+#     限深度的話，深層的 Dockerfile / .sh / .csproj 會被判成「沒有」，
+#     adopt 把開關明寫成 false，公版那邊的檢查就安靜地關掉了。
+#   - 檔名分大小寫（-name）—— reusable 的 find 也分。`api.dockerfile` 不分大小寫會被當成有，
+#     但 reusable 根本不會去 build 它。adopt.ps1 用 -cmatch，行為相同。
+# Python 例外：只看根目錄的相依清單與兩層內的 .py（沿用舊行為，避免把 vendored 的工具腳本當成 Python 專案）。
+#   count_files <maxdepth|""> <樣式>...   → 印出符合任一樣式的檔案數（maxdepth 空字串＝不限）
+count_files() {
+  _depth="$1"; shift
+  _first=true
+  for _pat in "$@"; do
+    if [ "$_first" = true ]; then set -- -name "$_pat"; _first=false
+    else set -- "$@" -o -name "$_pat"; fi
+  done
+  if [ -n "$_depth" ]; then set -- -maxdepth "$_depth" \( "$@" \); else set -- \( "$@" \); fi
+  # -maxdepth 要寫在最前面（GNU find 放在後面會警告），所以重組參數順序
+  find . \( -path ./.git -o -name node_modules \) -prune -o -type f "$@" -print 2>/dev/null | wc -l | tr -d ' '
 }
+found_any() { [ "$(count_files "$@")" -gt 0 ]; }
 
-# Dockerfile 不一定在根目錄（.NET 專案常放 src/<專案>/Dockerfile）。
-# 根目錄沒有時往下找：只有一個就用它，多個就列出來請使用者自己填 dockerfile input。
-# build context 維持預設 "."（Visual Studio / docker-compose 的慣例都是從 repo 根目錄 build）。
-DOCKERFILE_PATH=""
-DOCKERFILE_CANDIDATES=""
-if [ -f Dockerfile ]; then
-  DOCKERFILE_PATH="Dockerfile"
-else
-  # || true：碰到沒權限讀的子資料夾 find 會回 1，set -e 下不能讓整支腳本因此中止。
-  # -type f 不含符號連結、find 預設也不跟進目錄連結 —— adopt.ps1 照同樣規則略過連結。
-  DOCKERFILE_CANDIDATES="$(find . -maxdepth 4 -type f -name Dockerfile -not -path './.git/*' -not -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort || true)"
-  if [ -n "$DOCKERFILE_CANDIDATES" ] && [ "$(printf '%s\n' "$DOCKERFILE_CANDIDATES" | wc -l | tr -d ' ')" = 1 ]; then
-    DOCKERFILE_PATH="$DOCKERFILE_CANDIDATES"
-    DOCKERFILE_CANDIDATES=""
-  fi
-fi
+# Dockerfile：跟公版一樣找 Dockerfile / *.Dockerfile / Dockerfile.*（不含 *.dockerignore）
 HAS_DOCKERFILE=false
-if [ -n "$DOCKERFILE_PATH" ]; then HAS_DOCKERFILE=true; fi
+if [ -n "$(find . \( -path ./.git -o -name node_modules \) -prune -o -type f \( -name Dockerfile -o -name '*.Dockerfile' -o -name 'Dockerfile.*' \) ! -name '*.dockerignore' -print 2>/dev/null | head -1)" ]; then
+  HAS_DOCKERFILE=true
+fi
 HAS_PY=false
 if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || found_any 2 '*.py'; then
   HAS_PY=true
 fi
 HAS_SH=false
-if found_any 3 '*.sh'; then HAS_SH=true; fi
+if found_any "" '*.sh'; then HAS_SH=true; fi
+# .NET：方案檔（.sln / .slnx）或專案檔（.csproj / .fsproj / .vbproj）
+DOTNET_SLN="$(count_files "" '*.sln' '*.slnx')"
+DOTNET_PROJ="$(count_files "" '*.csproj' '*.fsproj' '*.vbproj')"
+HAS_DOTNET=false
+if [ "$DOTNET_SLN" -gt 0 ] || [ "$DOTNET_PROJ" -gt 0 ]; then HAS_DOTNET=true; fi
 PYVER="3.12"
-if [ -f .python-version ]; then PYVER="$(tr -d ' \r\n' < .python-version)"; fi
+# 連 UTF-8 BOM（EF BB BF）一起去掉：PowerShell 5.1 的 Set-Content -Encoding UTF8 會寫 BOM，
+# 留著的話 python-version 會變成「BOM + 3.11」，setup-python 直接失敗（adopt.ps1 讀檔時會自動去掉）
+# LC_ALL=C：macOS 的 BSD tr 在 UTF-8 locale 下按「字元」處理，\357 這種單一位元組刪不掉
+if [ -f .python-version ]; then PYVER="$(LC_ALL=C tr -d '\357\273\277 \r\n\t' < .python-version)"; fi
 
 # ── 判斷模式：全新安裝 vs 升級 ───────────────────────────────
 MODE="install"
@@ -160,13 +175,13 @@ fi
 
 info "偵測結果："
 info "  模式         : $MODE $( [ "$MODE" = upgrade ] && echo '（已有呼叫端，改用合併模式）' || echo '（全新導入）')"
-info "  Dockerfile   : $HAS_DOCKERFILE$( [ -n "$DOCKERFILE_PATH" ] && [ "$DOCKERFILE_PATH" != Dockerfile ] && echo "（$DOCKERFILE_PATH）")"
-if [ -n "$DOCKERFILE_CANDIDATES" ]; then
-  info "  ⚠ 找到多個 Dockerfile，不會自動開啟 Docker 相關檢查；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等設為 true："
-  printf '%s\n' "$DOCKERFILE_CANDIDATES" | while IFS= read -r f; do info "      $f"; done
-fi
+info "  Dockerfile   : $HAS_DOCKERFILE"
 info "  Python       : ${HAS_PY}（版本 ${PYVER}）"
 info "  shell script : $HAS_SH"
+info "  .NET         : ${HAS_DOTNET}（方案檔 ${DOTNET_SLN}、專案檔 ${DOTNET_PROJ}）"
+if [ "$DOTNET_SLN" -gt 1 ] || { [ "$DOTNET_SLN" -eq 0 ] && [ "$DOTNET_PROJ" -gt 1 ]; }; then
+  warn "找到不只一個 .NET 方案 / 專案檔，公版無法自動決定要建置哪一個 —— 導入後請在 ci.yml 的 with: 加上 dotnet-project: \"<路徑>\""
+fi
 info ""
 
 # ─────────────────────────────────────────────────────────────
@@ -190,9 +205,6 @@ reusable_for() {
   case "$1" in
     ci.yml)                        echo "$STD/.github/workflows/ci-reusable.yml" ;;
     security.yml)                  echo "$STD/.github/workflows/security-reusable.yml" ;;
-    copilot-autofix-ci-security.yml) echo "$STD/.github/workflows/copilot-autofix-reusable.yml" ;;
-    copilot-autofix-review.yml)    echo "$STD/.github/workflows/copilot-autofix-review-reusable.yml" ;;
-    copilot-autoreview-gate.yml)   echo "$STD/.github/workflows/copilot-autoreview-reusable.yml" ;;
     *) echo "" ;;
   esac
 }
@@ -200,15 +212,18 @@ reusable_for() {
 # 就地更新 uses: 那一行的 owner/repo 與 ref（不動檔案其他部分）。
 # 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（公版拿自己當第一個使用者），
 # 把它改成 owner/repo@ref 會讓 PR 上跑的不再是「這個 PR 的版本」。
+#
+# 只動指向公版那兩支 reusable 的 uses:（同一個檔案裡呼叫別的 reusable 不關我們的事），
+# 而且只換「owner/repo/.github/workflows/<檔名>@<ref>」那一段 ——
+# 行尾的空白與 `# 註解` 原樣保留。舊版用「最後一個非空白字串」去換，
+# 有行尾空白時什麼都沒換卻回報成功、有註解時還會把註解最後一個字蓋掉。
 patch_uses() {
   awk -v repo="$USES_REPO" -v ref="$REF" '
     /^[[:space:]]*uses:[[:space:]]*\.\// { print; next }
-    /^[[:space:]]*uses:[[:space:]]*[^ ]+\/\.github\/workflows\// {
-      n=split($0, a, "/.github/workflows/")
-      if (n==2) {
-        split(a[2], b, "@")
-        sub(/[^ ]+$/, repo "/.github/workflows/" b[1] "@" ref, $0)
-      }
+    /^[[:space:]]*uses:/ && match($0, /[^ \t]+\/\.github\/workflows\/(ci|security)-reusable\.ya?ml@[^ \t#]+/) {
+      s=substr($0, RSTART, RLENGTH)
+      file=s; sub(/^.*\/\.github\/workflows\//, "", file); sub(/@.*$/, "", file)
+      $0 = substr($0, 1, RSTART-1) repo "/.github/workflows/" file "@" ref substr($0, RSTART+RLENGTH)
     }
     { print }
   ' "$1" > "$1.tmp"
@@ -220,20 +235,36 @@ patch_uses() {
 #   - key 仍存在於公版 → 保留使用者現有的值（絕不覆寫他調過的設定）
 #   - key 已被公版移除 → 刪掉並回報（留著會讓 workflow 直接 invalid input 起不來）
 #   - 最後補上「公版有、但這個檔案沒有」的 key（只補偵測得出來的那幾個）
+#
+# 空行不代表區塊結束：先暫存起來，下一行還是區塊內容就照原樣吐回去；
+# 區塊真的結束了，就先補 key、再吐空行（空行留在區塊「後面」，不會把補上的 key 隔開）。
+# 舊版一碰到空行就當成區塊結束，空行後面的 key 既沒被過濾、還會被重複補一次。
+# 找不到 with: 區塊時寫一個 $f.nowith 旗標，讓外面回報「沒合併到」而不是安靜地說完成。
 filter_with_block() {
   f="$1"; known="$2"; additions="$3"
   # 多行的值走 ENVIRON，不能用 -v：BSD/macOS 內建的 awk 不接受 -v 的值裡有換行
   # （會噴 "awk: newline in string"），GNU awk 才容忍。
   ADOPT_KNOWN="$known" ADOPT_ADDITIONS="$additions" \
-  awk -v dropfile="$f.dropped" '
+  awk -v dropfile="$f.dropped" -v nowithfile="$f.nowith" '
+    function add_missing(   i, n, ak) {
+      n=split(additions, A, "\n")
+      for (i=1; i<=n; i++) {
+        if (A[i] == "") continue
+        ak=A[i]; sub(/:.*$/, "", ak)
+        if (!(ak in seen) && (ak in kn)) print "      " A[i]
+      }
+    }
     BEGIN {
       known=ENVIRON["ADOPT_KNOWN"]; additions=ENVIRON["ADOPT_ADDITIONS"]
       split(known, K, "\n"); for (i in K) if (K[i] != "") kn[K[i]]=1
+      pend=""
     }
-    /^    with:[[:space:]]*$/ { print; inblk=1; next }
+    !done && /^    with:[[:space:]]*(#.*)?$/ { print; inblk=1; done=1; next }
+    inblk && /^[[:space:]]*$/ { pend = pend $0 "\n"; next }
     inblk && /^      / {
+      if (pend != "") { printf "%s", pend; pend="" }
       line=$0
-      if (line ~ /^      #/ || line ~ /^[[:space:]]*$/) { print; next }
+      if (line ~ /^      #/) { print; next }
       if (match(line, /^      [A-Za-z0-9_-]+:/)) {
         k=line; sub(/^ +/, "", k); sub(/:.*$/, "", k)
         seen[k]=1
@@ -243,25 +274,15 @@ filter_with_block() {
       print; next
     }
     inblk {
-      # with: 區塊結束 —— 把缺的 key 補上
-      split(additions, A, "\n")
-      for (i=1; i<=length(A); i++) {
-        if (A[i] == "") continue
-        ak=A[i]; sub(/:.*$/, "", ak)
-        if (!(ak in seen) && (ak in kn)) print "      " A[i]
-      }
+      # with: 區塊結束 —— 把缺的 key 補上，再把暫存的空行吐回去
+      add_missing()
+      if (pend != "") { printf "%s", pend; pend="" }
       inblk=0
     }
     { print }
     END {
-      if (inblk) {
-        split(additions, A, "\n")
-        for (i=1; i<=length(A); i++) {
-          if (A[i] == "") continue
-          ak=A[i]; sub(/:.*$/, "", ak)
-          if (!(ak in seen) && (ak in kn)) print "      " A[i]
-        }
-      }
+      if (inblk) { add_missing(); if (pend != "") printf "%s", pend }
+      if (!done) print "no with: block" > nowithfile
     }
   ' "$f" > "$f.tmp"
   mv "$f.tmp" "$f"
@@ -271,110 +292,43 @@ filter_with_block() {
 replace_with_block() {
   f="$1"; blk="$2"
   # 同上：$blk 是多行區塊，必須走 ENVIRON
+  # $blk 來自命令替換，尾端換行已被吃掉，這裡要自己補 —— 否則 with: 區塊後面若還有內容，
+  # 會直接黏在最後一個 key 的同一行。
   ADOPT_BLK="$blk" awk '
     BEGIN { blk=ENVIRON["ADOPT_BLK"] }
-    /^    with:$/ && !seen { print; printf "%s", blk; inblk=1; seen=1; next }
+    /^    with:$/ && !seen { print; printf "%s\n", blk; inblk=1; seen=1; next }
     inblk && /^      / { next }
     { inblk=0; print }
   ' "$f" > "$f.tmp"
   mv "$f.tmp" "$f"
 }
 
-# 讀一個檔案 with: 區塊裡「真的有設定」的 key（被註解掉的不算）
-with_keys() {
-  awk '
-    /^    with:[[:space:]]*$/ { inblk=1; next }
-    inblk && /^      #/ { next }
-    inblk && match($0, /^      [A-Za-z0-9_-]+:/) {
-      k=$0; sub(/^ +/, "", k); sub(/:.*$/, "", k); print k; next
-    }
-    inblk && /^      / { next }
-    inblk && /^[[:space:]]*$/ { next }
-    inblk { inblk=0 }
-  ' "$1"
+CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""; NOWITH_REPORT=""; MISSING_TPL=""
+
+# 公版 reusable 宣告的 input 清單。讀不到（reusable 不見了、或 inputs: 的縮排變了）時一定要停 ——
+# 空清單會讓 filter_with_block 把使用者 with: 裡的每一個 key 都當成「已廢除」刪掉。
+known_for() {
+  _reu="$(reusable_for "$1")"
+  if [ -n "$_reu" ] && [ -f "$_reu" ]; then reusable_inputs "$_reu"; fi
 }
+for name in ci.yml security.yml; do
+  if [ -z "$(known_for "$name")" ]; then
+    die "讀不到 $(reusable_for "$name") 宣告的 inputs。
+    公版 clone 不完整，或 reusable 的格式變了 —— 繼續的話會把呼叫端 with: 的設定全部當成已廢除刪掉，所以中止。"
+  fi
+done
 
-# 呼叫端 workflow 換新版時，把使用者「自己打開的設定」從舊檔搬到新檔。
-#
-# 判準只有一條：舊檔有設、而新範本沒設。
-#   - 新範本自己就有的 key（head-branch / review-id 這種傳參數用的 key）→ 範本版本才是對的，
-#     使用者那份是舊約定，搬過去等於把 bug 一起搬過去
-#   - 公版 reusable 已經不認得的 key → 不搬並回報（留著 workflow 直接起不來）
-#   - 剩下的（max-attempts / max-review-requests 這種註解提示裡的設定）才是使用者的設定
-carry_knobs() {
-  _old="$1"; _new="$2"; _known="$3"; _carried="$4"; _dropped="$5"
-  : > "$_carried"; : > "$_dropped"
-  _tplk="$(with_keys "$_new")"
-  with_keys "$_old" | while IFS= read -r k; do
-    [ -n "$k" ] || continue
-    if printf '%s\n' "$_tplk" | grep -qx -- "$k"; then continue; fi
-    if ! printf '%s\n' "$_known" | grep -qx -- "$k"; then
-      printf '%s\n' "$k" >> "$_dropped"; continue
-    fi
-    # 整行搬過去（連值帶註解），不重新組字串
-    awk -v key="$k" '
-      /^    with:[[:space:]]*$/ { inblk=1; next }
-      inblk && index($0, "      " key ":") == 1 { print; exit }
-      inblk && /^      / { next }
-      inblk { exit }
-    ' "$_old" >> "$_carried"
-  done
-}
-
-# 把 carry_knobs 撈出來的那幾行放回新的呼叫端 workflow：
-# 範本裡有對應的註解提示（# max-attempts: "3"）就取代那一行，否則附在 with: 區塊尾巴。
-inject_knobs() {
-  f="$1"; carried="$2"
-  [ -s "$carried" ] || return 0
-  awk -v carriedfile="$carried" '
-    BEGIN {
-      n=0
-      while ((getline line < carriedfile) > 0) {
-        if (line == "") continue
-        k=line; sub(/^ +/, "", k); sub(/:.*$/, "", k)
-        C[k]=line; order[++n]=k
-      }
-    }
-    function flush(  i) {
-      for (i=1; i<=n; i++) if (!(order[i] in done)) { print C[order[i]]; done[order[i]]=1 }
-    }
-    /^    with:[[:space:]]*$/ { print; inblk=1; next }
-    inblk && match($0, /^      #[[:space:]]*[A-Za-z0-9_-]+:/) {
-      k=$0; sub(/^ +#[[:space:]]*/, "", k); sub(/:.*$/, "", k)
-      if (k in C) { print C[k]; done[k]=1; next }
-      print; next
-    }
-    inblk && /^      / { print; next }
-    inblk && /^[[:space:]]*$/ { print; next }
-    inblk { flush(); inblk=0 }
-    { print }
-    END { if (inblk) flush() }
-  ' "$f" > "$f.tmp"
-  mv "$f.tmp" "$f"
-}
-
-CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""
-REFRESHED=""; SHELL_SAME=""; CARRIED_REPORT=""
-
-# ── 三類檔案，三種策略 ───────────────────────────────────────
+# ── 兩類檔案，兩種策略 ───────────────────────────────────────
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
 CONFIGURED="ci.yml security.yml"
-# SHELL_FILES：只負責觸發的呼叫端 workflow。if: / with: 怎麼傳參數、secrets: 怎麼傳，都是公版規定的呼叫方式，
-#   使用者能調的只有註解裡標出來的那幾個設定。
-#   → 整份換成新範本，再把使用者打開過的設定搬回來。
-#
-#   為什麼不能跟 CONFIGURED 一樣就地合併：1.2.0 改的是 if: 條件與 secrets: 區塊
-#   （Copilot 的 COMMENTED review 要能進迴圈、@copilot 必須由真人 PAT 發出），
-#   而就地合併只碰 with:。舊 consumer 升級後會拿到新的 uses: 卻留著舊的 if:，
-#   結果是「版本號變了、自動修迴圈還是壞的」。
-SHELL_FILES="copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
 #   zizmor.yml 也算：使用者會在裡面放自己的放行規則。
-PROJECT_OWNED="workflows/copilot-setup-steps.yml copilot-instructions.md pull_request_template.md dependabot.yml zizmor.yml"
+PROJECT_OWNED="pull_request_template.md dependabot.yml zizmor.yml"
 
-CI_ADDITIONS="python-version: \"$PYVER\"
-run-python: $HAS_PY
+CI_ADDITIONS="run-python: $HAS_PY
+python-version: \"$PYVER\"
+run-dotnet: $HAS_DOTNET
 run-docker-build: $HAS_DOCKERFILE
 run-hadolint: $HAS_DOCKERFILE
 run-actionlint: true
@@ -385,23 +339,11 @@ run-shellcheck: $HAS_SH"
 SEC_ADDITIONS="scan-docker-image: $HAS_DOCKERFILE
 run-zizmor: true"
 
-# Dockerfile 在子資料夾時才帶 dockerfile:（在根目錄就用 input 預設值，呼叫端保持乾淨）
-if [ -n "$DOCKERFILE_PATH" ] && [ "$DOCKERFILE_PATH" != Dockerfile ]; then
-  CI_ADDITIONS="$CI_ADDITIONS
-dockerfile: \"$DOCKERFILE_PATH\""
-  SEC_ADDITIONS="$SEC_ADDITIONS
-dockerfile: \"$DOCKERFILE_PATH\""
-fi
-
 plan_line() { info "  $1"; }
 
 info "計畫："
 for name in $CONFIGURED; do
   if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
-  else plan_line "＋ 新增  .github/workflows/$name"; fi
-done
-for name in $SHELL_FILES; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "⟳ 換新  .github/workflows/${name}（以範本為準；只搬回你調過的設定，舊檔留 .bak）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -410,6 +352,26 @@ for rel in $PROJECT_OWNED; do
 done
 info ""
 
+# ── 1.x 留下的 Copilot 呼叫端 ────────────────────────────────
+# 2.0.0 移除了 Copilot 自動修 / 自動審，v2 已經沒有它們呼叫的 reusable。
+# 腳本照原則不刪專案既有的檔案，但一定要講出來 —— 有人把它們的 @v1 改成 @v2，
+# 或日後 v1 不再保留那幾支，它們每次 PR 都會直接 startup_failure。
+# 計畫階段先講一次（--dry-run 也看得到），報告最後再講一次。
+COPILOT_LEFTOVERS=""
+for f in .github/workflows/copilot-autofix-ci-security.yml .github/workflows/copilot-autofix-review.yml \
+         .github/workflows/copilot-autoreview-gate.yml .github/workflows/copilot-setup-steps.yml; do
+  if [ -f "$f" ]; then COPILOT_LEFTOVERS="$COPILOT_LEFTOVERS $f"; fi
+done
+warn_copilot_leftovers() {
+  [ -n "$COPILOT_LEFTOVERS" ] || return 0
+  warn "這個專案還留著 1.x 的 Copilot 呼叫端，2.0.0 已經沒有它們呼叫的 reusable，請刪掉："
+  for f in $COPILOT_LEFTOVERS; do info "      $f"; done
+  info "    git rm$COPILOT_LEFTOVERS"
+  info "    （repo secret COPILOT_TRIGGER_PAT 也可以一併刪除；.github/zizmor.yml 裡對它們的放行規則也拿掉）"
+  info ""
+}
+warn_copilot_leftovers
+
 if [ "$DRY_RUN" = true ]; then
   info "（--dry-run：到此為止，沒有動任何檔案）"
   exit 0
@@ -417,12 +379,68 @@ fi
 
 mkdir -p .github/workflows
 
+# ── v1 → v2：呼叫端觸發條件的修補 ────────────────────────────
+# 2.0.0 修了「PR 改 base 就能繞過來源分支政策」：ci.yml 的 pull_request 要多聽 edited，
+# 而且 job 的 if 與 concurrency 要一起改（否則改個 PR 標題就重跑整套、還會把正在跑的那輪取消掉）。
+# 三行要嘛一起換、要嘛都不動：只認 v1 範本原封不動的寫法，使用者改過的就回報請他手動處理。
+V1_TYPES='    types: [opened, synchronize, reopened, ready_for_review]'
+V2_TYPES='    types: [opened, synchronize, reopened, ready_for_review, edited]'
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
+V1_CI_CONC='  group: ci-${{ github.ref }}'
+V2_CI_CONC="  group: \${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}"
+V1_IF="    if: \${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
+V2_IF="    if: \${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}"
+# security.yml：排程重掃與 push 分開一組，免得同一分支上互相取消
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
+V1_SEC_CONC='  group: security-${{ github.ref }}'
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
+V2_SEC_CONC='  group: security-${{ github.event_name }}-${{ github.ref }}'
+
+# replace_lines <檔案> <舊行> <新行> [<舊行> <新行>]... → 整行完全相同才換
+replace_lines() {
+  _f="$1"; shift
+  ADOPT_PAIRS="$(printf '%s\n' "$@")" awk '
+    BEGIN { n=split(ENVIRON["ADOPT_PAIRS"], P, "\n"); for (i=1; i<n; i+=2) map[P[i]]=P[i+1] }
+    ($0 in map) { print map[$0]; next }
+    { print }
+  ' "$_f" > "$_f.tmp"
+  mv "$_f.tmp" "$_f"
+}
+has_line() { grep -qxF -- "$2" "$1"; }
+
+TRIGGER_REPORT=""
+patch_v2_triggers() {
+  f="$1"; name="$2"
+  case "$name" in
+    ci.yml)
+      # 三行各自要是「v1 原樣」或「已經是 v2」其中之一；全是 v2 就沒事可做。
+      # 不能只看 types 有沒有 edited 就收工 —— 使用者手動加了 edited、卻沒改 if 與 concurrency，
+      # 改個 PR 標題就會重跑整套、還把正在跑的那輪取消掉，這種半套的也要補齊。
+      if has_line "$f" "$V2_TYPES" && has_line "$f" "$V2_CI_CONC" && has_line "$f" "$V2_IF"; then return 0; fi
+      if { has_line "$f" "$V1_TYPES"   || has_line "$f" "$V2_TYPES"; } \
+         && { has_line "$f" "$V1_CI_CONC" || has_line "$f" "$V2_CI_CONC"; } \
+         && { has_line "$f" "$V1_IF"      || has_line "$f" "$V2_IF"; }; then
+        replace_lines "$f" "$V1_TYPES" "$V2_TYPES" "$V1_CI_CONC" "$V2_CI_CONC" "$V1_IF" "$V2_IF"
+        TRIGGER_REPORT="$TRIGGER_REPORT
+    ci.yml → pull_request 加上 edited（改 base 時重跑來源分支政策），job if 與 concurrency 一併更新"
+      else
+        TRIGGER_REPORT="$TRIGGER_REPORT
+    ci.yml → ⚠️ 觸發條件不是範本原樣，沒有自動改。請照公版範本手動加上 edited 與對應的 if / concurrency
+             （有設 restricted-base-branches 時一定要做，否則 PR 改 base 就能繞過來源分支政策）"
+      fi ;;
+    security.yml)
+      if has_line "$f" "$V1_SEC_CONC"; then
+        replace_lines "$f" "$V1_SEC_CONC" "$V2_SEC_CONC"
+        TRIGGER_REPORT="$TRIGGER_REPORT
+    security.yml → concurrency 依事件分組（排程重掃不再跟 push 互相取消）"
+      fi ;;
+  esac
+}
+
 # ── CONFIGURED：就地合併 ─────────────────────────────────────
 for name in $CONFIGURED; do
   dst=".github/workflows/$name"
-  reu="$(reusable_for "$name")"
-  known=""
-  if [ -n "$reu" ] && [ -f "$reu" ]; then known="$(reusable_inputs "$reu")"; fi
+  known="$(known_for "$name")"
 
   if [ ! -f "$dst" ]; then
     cp "$TPL/workflows/$name" "$dst"
@@ -433,67 +451,27 @@ for name in $CONFIGURED; do
     patch_uses "$dst"
     CREATED="$CREATED $name"
   else
-    rm -f "$dst.dropped"
+    rm -f "$dst.dropped" "$dst.nowith"
+    # CRLF → LF：adopt.ps1 讀檔時就把 CRLF 換掉、寫回 LF，這裡要一樣，兩支的產出才會相同；
+    # 留著 \r 的話，awk 會把它當成 ref 的一部分，換完的那一行就少了 \r、整份檔案行尾混雜。
+    tr -d '\r' < "$dst" > "$dst.tmp" && mv "$dst.tmp" "$dst"
     case "$name" in
       ci.yml)       filter_with_block "$dst" "$known" "$CI_ADDITIONS" ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
     esac
     patch_uses "$dst"
+    patch_v2_triggers "$dst" "$name"
     if [ -s "$dst.dropped" ]; then
       while IFS= read -r k; do
         DROPPED_REPORT="$DROPPED_REPORT
     $name → 移除已廢除的 input：$k"
       done < "$dst.dropped"
     fi
-    rm -f "$dst.dropped"
+    if [ -f "$dst.nowith" ]; then
+      NOWITH_REPORT="$NOWITH_REPORT $name"
+    fi
+    rm -f "$dst.dropped" "$dst.nowith"
     MERGED="$MERGED $name"
-  fi
-done
-
-# ── SHELL_FILES：整份換新，只搬回使用者的設定 ────────────────
-for name in $SHELL_FILES; do
-  dst=".github/workflows/$name"
-  src="$TPL/workflows/$name"
-  [ -f "$src" ] || continue
-  reu="$(reusable_for "$name")"
-  known=""
-  if [ -n "$reu" ] && [ -f "$reu" ]; then known="$(reusable_inputs "$reu")"; fi
-
-  if [ ! -f "$dst" ]; then
-    cp "$src" "$dst"
-    patch_uses "$dst"
-    CREATED="$CREATED $name"
-    continue
-  fi
-
-  cp "$dst" "$dst.prev"
-  cp "$src" "$dst"
-  carry_knobs "$dst.prev" "$dst" "$known" "$dst.carried" "$dst.dropped"
-  inject_knobs "$dst" "$dst.carried"
-  patch_uses "$dst"
-
-  if [ -s "$dst.carried" ]; then
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      CARRIED_REPORT="$CARRIED_REPORT
-    $name → 保留你調過的：$(printf '%s' "$line" | sed 's/^ *//')"
-    done < "$dst.carried"
-  fi
-  if [ -s "$dst.dropped" ]; then
-    while IFS= read -r k; do
-      DROPPED_REPORT="$DROPPED_REPORT
-    $name → 移除已廢除的 input：$k"
-    done < "$dst.dropped"
-  fi
-  rm -f "$dst.carried" "$dst.dropped"
-
-  # 內容真的變了才留 .bak —— 否則每次重跑都會生一堆垃圾（可重複執行）
-  if cmp -s "$dst.prev" "$dst"; then
-    rm -f "$dst.prev"
-    SHELL_SAME="$SHELL_SAME $name"
-  else
-    mv "$dst.prev" "$dst.bak"
-    REFRESHED="$REFRESHED $name"
   fi
 done
 
@@ -503,15 +481,23 @@ done
 # 只換那一個字串，使用者自己加的規則原樣保留；既有的檔案、新建的檔案、另存的 .new 都要換 ——
 # 搬家時最常見的情況正是「專案早就導入過、zizmor.yml 已經在那裡」。
 patch_zizmor_owner() {
-  ADOPT_OLD="\"$DEFAULT_USES_REPO/*\"" ADOPT_NEW="\"$USES_REPO/*\"" awk '
+  # 同一行出現好幾次就全部換（跟 adopt.ps1 的 .Replace() 一致）；行尾、編碼原樣保留。
+  # BINMODE=3：Git Bash 的 gawk 預設用文字模式讀寫，會把使用者檔案的 CRLF 悄悄變成 LF
+  # （adopt.ps1 不會），兩支產出就不一樣了。其他 awk 不認得這個變數，設了也無害。
+  ADOPT_OLD="\"$DEFAULT_USES_REPO/*\"" ADOPT_NEW="\"$USES_REPO/*\"" awk -v BINMODE=3 '
     BEGIN { old=ENVIRON["ADOPT_OLD"]; new=ENVIRON["ADOPT_NEW"] }
-    { i=index($0, old); if (i) $0 = substr($0, 1, i-1) new substr($0, i+length(old)); print }
+    {
+      out=""; rest=$0
+      while ((i=index(rest, old)) > 0) { out = out substr(rest, 1, i-1) new; rest = substr(rest, i+length(old)) }
+      print out rest
+    }
   ' "$1" > "$1.tmp"
   mv "$1.tmp" "$1"
 }
 for rel in $PROJECT_OWNED; do
   src="$TPL/$rel"; dst=".github/$rel"
-  [ -f "$src" ] || continue
+  # 範本不見了要講出來（多半是公版改了檔名），不能安靜跳過、還印「導入完成」
+  if [ ! -f "$src" ]; then MISSING_TPL="$MISSING_TPL $rel"; continue; fi
   mkdir -p "$(dirname "$dst")"
   migrate_zizmor=false
   if [ "$rel" = "zizmor.yml" ] && [ "$USES_REPO" != "$DEFAULT_USES_REPO" ]; then migrate_zizmor=true; fi
@@ -533,49 +519,28 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
-# ── 1.2.0 呼叫方式的最後檢查 ─────────────────────────────────────
-# 呼叫端 workflow 現在是整份換新的，正常情況這裡不會叫。會叫就代表 --std 指到的公版
-# 比 1.2.0 舊（或範本被改壞）—— 那就是「導完自動修迴圈還是不會動」，
-# 寧可吵也不要靜靜地過。
-PAT_WARN=""
-for name in copilot-autofix-review.yml copilot-autofix-ci-security.yml; do
-  dst=".github/workflows/$name"
-  [ -f "$dst" ] || continue
-  missing=""
-  if ! grep -q "copilot-trigger-pat" "$dst"; then
-    missing="secrets: copilot-trigger-pat"
-  fi
-  # review 那支呼叫端 workflow 還要有 COMMENTED 觸發條件 —— 只補 secret、留舊 if: 的話，
-  # Copilot 的意見一樣進不了迴圈（它永遠不送 changes_requested）
-  if [ "$name" = "copilot-autofix-review.yml" ] && ! grep -q "'commented'" "$dst"; then
-    if [ -n "$missing" ]; then missing="${missing}、COMMENTED 觸發條件"
-    else missing="COMMENTED 觸發條件"; fi
-  fi
-  if [ -n "$missing" ]; then
-    PAT_WARN="$PAT_WARN
-    $name → 缺 $missing"
-  fi
-done
-
 # ── 報告 ─────────────────────────────────────────────────────
 info "───────────────────────────────────────────────────────────"
 if [ -n "$CREATED" ];    then info "＋ 新增：$CREATED"; fi
 if [ -n "$MERGED" ];     then info "↻ 合併：$MERGED"; fi
-if [ -n "$REFRESHED" ];  then info "⟳ 換新（整份換成範本，舊檔留在 .bak）：$REFRESHED"; fi
-if [ -n "$SHELL_SAME" ]; then info "＝ 已是最新：$SHELL_SAME"; fi
 if [ -n "$KEPT" ];       then info "＝ 保留（未覆蓋，另存 .new）：$KEPT"; fi
-if [ -n "$CARRIED_REPORT" ]; then
-  info ""
-  info "呼叫端 workflow 換新版時搬回來的設定：$CARRIED_REPORT"
-fi
 if [ -n "$DROPPED_REPORT" ]; then
   info ""
   warn "以下 input 在新版公版已不存在，已從呼叫端移除（留著會讓 workflow 直接 invalid input 起不來）：$DROPPED_REPORT"
 fi
-if [ -n "$PAT_WARN" ]; then
+if [ -n "$TRIGGER_REPORT" ]; then
   info ""
-  warn "呼叫端 workflow 缺 1.2.0 的呼叫方式 —— 代表 --std 指到的公版比 1.2.0 舊，導進去自動修迴圈不會動工。請把公版更新到 v1.2.0 以上再跑一次：$PAT_WARN"
+  info "觸發條件（v2）：$TRIGGER_REPORT"
 fi
+if [ -n "$NOWITH_REPORT" ]; then
+  info ""
+  warn "這些檔案找不到「    with:」區塊，input 沒有合併（沒移除廢除的、也沒補新的），請手動對照範本：$NOWITH_REPORT"
+fi
+if [ -n "$MISSING_TPL" ]; then
+  info ""
+  warn "公版裡找不到這些範本，沒有導入：$MISSING_TPL（公版 clone 可能不完整）"
+fi
+if [ -n "$COPILOT_LEFTOVERS" ]; then info ""; warn_copilot_leftovers; fi
 info "───────────────────────────────────────────────────────────"
 
 cat <<'NEXT'
@@ -585,29 +550,19 @@ cat <<'NEXT'
  1. git diff  ← 先看清楚改了什麼，尤其是升級模式
 
  2. 若有 *.new 檔案：那是新版範本，跟你現有的比對後自行取捨，
-    處理完把 .new 刪掉。（copilot-instructions.md 這類是專案專屬內容，
+    處理完把 .new 刪掉。（zizmor.yml、dependabot.yml 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
-    若有 *.bak 檔案：那是被換掉的舊呼叫端 workflow。呼叫端 workflow 的 if:/with:/secrets: 屬於公版的呼叫方式，
-    升級時一律以範本為準，只把你調過的設定搬回來。確認過沒有你自己加的東西
-    （額外的 job、改過的 permissions）就把 .bak 刪掉。
-
- 3. ⚠️ 全新導入務必改 .github/copilot-instructions.md ——
-    把「專案概觀 / 開發與測試指令 / 程式碼慣例」換成本專案實況。
-    沒改是導入後最常見的失敗原因。
-
-    另外設好 repo secret COPILOT_TRIGGER_PAT（Settings → Secrets → Actions）——
-    沒設的話 CI 會過，但 Copilot 自動修迴圈不會動工（@copilot 必須由真人帳號
-    發出，github-actions[bot] 發的會被忽略）。設定方式見公版 README。
-
- 4. 送出（不需要 gh，PR 可以用瀏覽器開）
+ 3. 送出（不需要 gh，PR 可以用瀏覽器開）
       git checkout -b chore/adopt-ci-standards
       git add .github && git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
 
- 5. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+ 4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+    不是每個 repo 都設得了（例如 Free 方案的 private repo）—— 設不了時 Gate 照跑、
+    紅燈只能提醒、擋不住 merge，補位做法見 README「沒辦法設分支保護時」。
 
- 6. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
+ 5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github/zizmor.yml，寫法見公版 README。
 

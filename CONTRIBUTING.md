@@ -1,6 +1,6 @@
 # 參與這個 repo
 
-這裡是**中央公版**。改動一次會同時影響所有指向 `@v1` 的專案，
+這裡是**中央公版**。改動一次會同時影響所有指向 `@v2`（目前的主版本）的專案，
 所以流程比一般 repo 嚴格一點 —— 不是官僚，是因為改壞了會讓所有人的 PR 一起卡住。
 
 ---
@@ -68,9 +68,10 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
 
 這幾條每一條都對應過去真的踩過的雷：
 
-- [ ] **有沒有改到 input 名稱或 job 名稱？**
+- [ ] **有沒有改名／移除 input、改了會讓行為變的預設值、或改 job 名稱？**
       consumer 的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate` 這些字串，
-      改名會讓既有專案的 required check 永遠 pending。這種改動要開 `v2`，不能移 `v1`
+      改名會讓既有專案的 required check 永遠 pending；移除 input 會讓還在傳它的呼叫端 `invalid input` 起不來。
+      這種改動要開新的主版本（目前是 `v2`，下一個是 `v3`），不能移目前的主版本 tag
 - [ ] **新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？**
       沒加＝這個檢查不會擋 PR，形同虛設
 - [ ] **有 `if` 條件的新 job 有沒有被設成 required check？**
@@ -97,22 +98,24 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
 
 ### 4. 合併之後：一定要發佈
 
-⚠️ **合進 main 不等於生效。** 所有專案指向 `@v1`，沒有移動 tag 的話它們完全不會有感覺。
+⚠️ **合進 main 不等於生效。** 所有專案指向 `@v2`，沒有移動 tag 的話它們完全不會有感覺。
 
 ```bash
-git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變的還原點
-git tag -f v1 && git push -f origin v1                  # 大家指向的別名
+git tag -a v2.0.1 -m "說明" && git push origin v2.0.1   # 不可變的還原點
+git tag -f v2 && git push -f origin v2                  # 大家指向的別名
 ```
 
 並在 [CHANGELOG.md](CHANGELOG.md) 補上這一版。
 
-> 破壞性變更（改／移除 input、改 job 名稱）走 `v2`，並公告各專案自行把 `@v1` 改成 `@v2`。
+> 破壞性變更（改／移除 input、改預設值造成行為改變、改 job 名稱、移除 workflow）開新的主版本（`v3`），
+> 並公告各專案自行把 `@v2` 改成 `@v3`。舊的主版本 tag 之後只收 bug 修補、不再加功能 —— 2.0.0 就是這樣做的：`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補）。
+> 詳細步驟見 [`docs/HANDOFF.md`](docs/HANDOFF.md) §3「發佈流程」。
 
 ### 5. 高風險改動先試跑
 
-動到掃描邏輯、gate 判定、Copilot 迴圈時，先在一個真實專案用 `@main` 跑過一輪，
-再移動 `v1`。本 repo 自己的 CI 用 `./` 呼叫公版，PR 上就會用「這個 PR 的版本」跑，
-是第一道保險，但它涵蓋不到 Python / Docker / hadolint / image 掃描那幾條路徑。
+動到掃描邏輯或 gate 判定時，先在一個真實專案用 `@main` 跑過一輪，
+再移動 `v2`。本 repo 自己的 CI 用 `./` 呼叫公版，PR 上就會用「這個 PR 的版本」跑，
+是第一道保險，但它涵蓋不到 Python / .NET / Docker / hadolint / image 掃描那幾條路徑。
 
 ### 6. 升級某個掃描工具的版本
 
@@ -124,19 +127,20 @@ Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘�
 | zizmor | `security-reusable.yml` | 抓 `zizmor-x86_64-unknown-linux-gnu.tar.gz` 自己 `sha256sum` |
 | actionlint | `ci-reusable.yml` | release 的 `actionlint_<版本>_checksums.txt` |
 | hadolint | `ci-reusable.yml` | release 的 `checksums.sha256`，找 `linux-x86_64` |
+| trivy CLI（image 掃描） | `security-reusable.yml` 的 `trivy-image` job，`setup-trivy` 的 `version` | 跟 `trivy-action` 內部用的版本保持一致（目前 trivy-action v0.36.0 ↔ trivy v0.70.0），兩邊結果才一致 |
 | Semgrep image | `security-reusable.yml` 的 `container.image` | `docker buildx imagetools inspect semgrep/semgrep:<版本>` 的 digest |
 | gitleaks image | `security-reusable.yml` 的 `docker run` | `docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本>` 的 digest |
 | ruff | `ci-reusable.yml` 的 `ruff-version` 預設值 | 不用校驗碼（pip 有自己的 hash 機制），但要記得新版可能多規則 |
 
 原則：**剛發布的版本先等一週**（跟 Dependabot 的 7 天 cooldown 一樣），掃描器升版等於所有專案一起吃到新規則，
-先在本 repo 的 PR 上看一輪綠燈再移 `v1`。
+先在本 repo 的 PR 上看一輪綠燈再移 `v2`。
 
 ---
 
 ## Commit 訊息
 
 用 Conventional Commits：`feat:` / `fix:` / `docs:` / `refactor:` / `build(deps):`。
-影響範圍寫在 scope 裡會更好讀：`fix(security):`、`fix(copilot):`。
+影響範圍寫在 scope 裡會更好讀：`fix(security):`、`fix(ci):`。
 
 ## PR
 

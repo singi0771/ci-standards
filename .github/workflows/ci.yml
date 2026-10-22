@@ -12,8 +12,8 @@ on:
     paths-ignore: ["**/*.md", "docs/**"]
   # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。
-  # 多列 edited：PR 改目標分支（base）時 GitHub 只送 edited。少了它，分支政策不會重跑，
-  # 原本對 develop 的綠燈會被沿用到改成 main 之後（見下面 job 的 if：只有改 base 的 edited 才跑）。
+  # 多列 edited：PR 改 base 分支時要重跑來源分支政策，否則先發到 develop 拿綠燈、
+  # 再把 base 改成 main 就繞過去了。只改標題 / 內文的 edited 不跑（見 job 的 if）。
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
@@ -21,8 +21,8 @@ on:
 permissions:
   contents: read
 
-# 改標題／內文的 edited 不跑任何 job，給它獨立的 group：否則它會把同一個 PR 正在跑的 CI 取消掉，
-# 而自己又什麼都不跑，這個 commit 就永遠沒有 CI Gate 結果。改 base 的 edited 照常共用 group。
+# 改標題／內文的 edited 不跑任何 job，給它獨立的 group（每次都不同）：否則它會把同一個 PR
+# 正在跑的 CI 取消掉，而自己又什麼都不跑，這個 commit 就永遠沒有 CI Gate 結果。改 base 的 edited 照常共用 group。
 concurrency:
   group: ${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
@@ -30,7 +30,7 @@ concurrency:
 jobs:
   ci:
     # 草稿 PR 先不跑，反正草稿本來就不能 merge；標成 ready for review 會再觸發一次。
-    # edited 只在改了 base 時才跑（改標題、內文不重跑整套 CI）。
+    # edited 事件只有在 base 分支被改掉時才跑
     if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: ./.github/workflows/ci-reusable.yml
     with:

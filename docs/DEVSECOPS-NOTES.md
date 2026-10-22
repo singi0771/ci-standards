@@ -50,7 +50,7 @@
 ## 幾個技術上的取捨
 
 - **action 釘 commit SHA，不釘 tag。** tag 可以被移動，SHA 不行。這也是 zizmor `unpinned-uses` 預設要求的。
-  唯一的例外是指向本公版的 `@v1` —— 那是刻意讓所有專案自動跟版的設計，用 `.github/zizmor.yml` 放行，
+  唯一的例外是指向本公版的主版本 tag（目前是 `@v2`）—— 那是刻意讓所有專案自動跟版的設計，用 `.github/zizmor.yml` 放行，
   並用不可變的 `vX.Y.Z` 當還原點（見 SECURITY.md）。
 - **container image 釘 tag + digest。** `semgrep/semgrep:1.171.0@sha256:…`、`ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:…`。
   只釘 tag 的話上游重推同一個 tag 你不會知道。digest 查法：`docker buildx imagetools inspect <image>:<tag>`。
@@ -75,9 +75,9 @@
 ## 建議導入順序
 
 1. **第一階段（現在就有）**：gitleaks + Semgrep + OSV + Trivy FS + zizmor → PR 守門。
-2. **第二階段**：加 Copilot Code Review + Coding Agent 的修復流程 + PR template + instructions（已附）。
+2. **第二階段**：加 PR template + CODEOWNERS + 分支保護，把「非過不可」立起來（設不了分支保護的 repo 改靠團隊約定補位，見 README「沒辦法設分支保護時」）。
 3. **第三階段**：`scan-docker-image: true` 打開 image 掃描、`run-hadolint: true`、`generate-sbom: true`。
 4. **第四階段（可選）**：SonarQube 當 main 的品質儀表板（自己架，不當 gate）。
 5. **第五階段（成熟後）**：ZAP DAST + preview 環境 + SBOM 簽章（cosign）。
 
-> 一句話：先用 `gitleaks + Semgrep + OSV + Trivy + zizmor` 打好基礎，Copilot 接「修 + 審」，Sonar / ZAP 再視需要加，別第一天全上。
+> 一句話：先用 `gitleaks + Semgrep + OSV + Trivy + zizmor` 打好基礎，Sonar / ZAP 再視需要加，別第一天全上。

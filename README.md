@@ -1,15 +1,15 @@
 # ci-standards — 團隊統一 CI / 安全掃描中央公版
 
 這個 repo 是**中央公版**（所有專案共用的那一份 CI 設定）：安全掃描與 CI 的邏輯只寫在這裡一次，每個專案用**一行 `uses:`** 呼叫它。
-公版更新 → 移動 `v1` tag → 各專案下次跑 CI 就自動吃到新版，不必一個一個 repo 去改。
+公版更新 → 移動主版本 tag（目前是 `v2`）→ 各專案下次跑 CI 就自動吃到新版，不必一個一個 repo 去改。
 
 > 適用環境：私有 repo、全部是免費的開源工具，**不需要 GitHub Advanced Security**。
-> 有 Copilot Business 的話，可以再打開「掃到問題自動請 Copilot 修、全過自動請 Copilot 審」的流程。
 
 **白話版三句話：**
 
 1. 你開 PR → 公版自動跑一輪掃描（程式弱點、套件 CVE、密鑰外洩、Dockerfile 與 IaC 設定、workflow 本身的安全）。
-2. 全部過了才能 merge。哪一項紅了，Actions 的 Summary 會印一張表告訴你。
+2. 哪一項紅了，Actions 的 Summary 會印一張表告訴你。repo 有設分支保護的話，紅燈會直接擋住 merge；
+   設不了分支保護的 repo（例如 Free 方案的 private repo）紅燈只能提醒，做法見[沒辦法設分支保護時](#沒辦法設分支保護時)。
 3. 掃描規則、工具版本、要加什麼新檢查，全部改這個 repo 就好，專案那邊不用動。
 
 ---
@@ -17,17 +17,18 @@
 ## 目錄
 
 0. **[已知限制（導入前先看）](docs/KNOWN-LIMITATIONS.md)** —— 哪些功能實測過但還不能用
+0'. **[流程圖：這個 repo 到底在做什麼](docs/FLOW.md)** —— 讀 README 之前的地圖
 1. [運作原理（先看這個）](#運作原理先看這個)
 2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
-4. [自動修、自動審（選配，需 Copilot Business）](#自動修自動審選配需-copilot-business)
-5. [可調參數（inputs）](#可調參數inputs)
-6. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
-7. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
+4. [可調參數（inputs）](#可調參數inputs)
+5. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
+6. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
+7. [沒辦法設分支保護時](#沒辦法設分支保護時)
 8. [分支模型：PR 要發到哪裡](#分支模型pr-要發到哪裡)
-9. [常見情境客製](#常見情境客製)
+9. [常見情境客製](#常見情境客製)（Python 以外的專案：[.NET](#c--net-專案)、[前端](#前端react--vue--node)）
 10. [疑難排解](#疑難排解)
-11. [版本策略](#版本策略)
+11. [版本策略](#版本策略)（[從 v1 升級到 v2](#從-v1-升級到-v2)）
 12. [檔案地圖](#檔案地圖)
 13. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
 
@@ -40,7 +41,7 @@
 ─────────────────                      ────────────────────────
 .github/workflows/security.yml  ──呼叫──▶ security-reusable.yml
    jobs.security:                          ├─ SAST (Semgrep)                 程式裡的弱點寫法
-     uses: ...@v1                          ├─ Dependency vuln (OSV-Scanner)  套件有沒有已知 CVE
+     uses: ...@v2                          ├─ Dependency vuln (OSV-Scanner)  套件有沒有已知 CVE
      with: { ... }                         ├─ FS / IaC / Docker (Trivy)      Dockerfile / K8s / Terraform 設定，可選 SBOM
                                            ├─ Secret scan (gitleaks)         密鑰有沒有 commit 進去（含歷史）
                                            ├─ Workflow security (zizmor)     workflow 本身安不安全   ←可選
@@ -49,8 +50,10 @@
 
 .github/workflows/ci.yml        ──呼叫──▶ ci-reusable.yml
    jobs.ci:                                ├─ Python lint + test (ruff, pytest)               ←可選
-     uses: ...@v1                          ├─ Docker build check（可加 hadolint 檢查 Dockerfile） ←可選
-     with: { ... }                         ├─ Workflow + shell lint (actionlint, shellcheck)   ←可選
+     uses: ...@v2                          ├─ .NET build + test (dotnet format/build/test)    ←可選
+     with: { ... }                         ├─ Docker build check（可加 hadolint 檢查 Dockerfile） ←可選
+                                           ├─ Workflow + shell lint (actionlint, shellcheck)   ←可選
+                                           ├─ PR source branch policy 誰可以 merge 進哪裡     ←可選
                                            └─ 🧪 CI Gate ←總結，分支保護只認這個
 ```
 
@@ -69,30 +72,22 @@
 而 skipped 的 required check，GitHub 要嘛把它當通過（等於沒檢查）、要嘛一直 pending，兩種都不是你要的。
 Gate job 用 `if: always()` 執行、自己判斷「開了就得 success」，就沒有這個問題。
 
-### 完整的自動流程（有 Copilot Business 時）
+### 一個 PR 的完整流程
 
 ```
-免費掃描器「找」弱點 → 開 Issue → 指派 Copilot Coding Agent「修」並開 PR
-      → Copilot Code Review「審」→ Security Gate 擋下 → 你「決定」merge
+你開 PR ─▶ CI + Security 並行跑 ─▶ 兩個 Gate 都綠 ─▶ 你 review ─▶ merge
+                │
+                └─ 任一 Gate 紅 ─▶ 看 Summary 的表 ─▶ 自己修 ─▶ 再推一次
 ```
 
-免費掃描器負責找（不花 AI Credits），Copilot 負責修與審，你負責決定。
+掃描器負責「找」，你負責「修」與「決定」。公版不會替你改任何程式碼 ——
+它只在 PR 上把問題攤開；repo 有設分支保護的話，紅燈會擋住不該進 main 的東西。
 
-> ✅ **「bot 喚不醒 Agent」已在 1.2.0 解決**：`@copilot` mention 改由
-> **`COPILOT_TRIGGER_PAT`**（有 Copilot 授權的使用者的 PAT）以真人身分發出。
-> 佐證（2026-08-09，本 repo PR #12）：Agent 對真人發出的 mention 會實際動工 ——
-> 在**人類開的 PR** 上依 review 意見連推 3 個修正 commit；bot 身分的 mention 則從未喚醒過它。
-> 設定方式見[自動修、自動審](#自動修自動審選配需-copilot-business)；首次導入後建議實測一輪。
->
-> 🟡 **仍存在的一道人工關卡**（GitHub 硬性規定，改不掉）：
-> **Copilot 推的 commit，觸發的 CI/Security run 會卡在 `action_required`**，
-> 需要人在 PR 頁面按一次「Approve and run workflows」才會跑。
-> 每輪 Copilot 修正後按一次即可；不想按的替代法是自己推個空 commit
-> （`git commit --allow-empty`，人類 push 觸發的 run 不需核准）。
-
-> **Copilot 不會 approve PR。** Copilot Code Review 送出的是 COMMENT 類型的 review，
-> 它只留意見，不會（也不能）按 Approve。所以最後那個「決定 merge」一定是人，
-> 而分支保護的 required approvals 若設成 1，Copilot 是**湊不出**那一票的（見[分支保護](#分支保護讓流程非過不可)）。
+> ℹ️ 2.0.0 把「掃到問題自動請 Copilot 修、全過自動請 Copilot 審」那套整組拿掉了。
+> 原因：它要 Copilot Business 授權與一支真人 PAT，而且 Copilot 每推一次 commit，
+> 觸發的 CI/Security run 都會卡在 `action_required`、要人手動按一次
+> 「Approve and run workflows」（GitHub 硬性規定，沒有開關可調）。
+> 維護成本大於效益。已導入的專案要怎麼收尾見[從 v1 升級到 v2](#從-v1-升級到-v2)。
 
 ---
 
@@ -102,9 +97,10 @@ Gate job 用 `if: always()` 執行、自己判斷「開了就得 success」，�
 
 | 項目 | 要求 |
 |---|---|
-| 語言 | Python 開箱即用（ruff + pytest）。非 Python 設 `run-python: false` 即可，見[常見情境](#專案不是-python) |
+| 語言 | 安全掃描不分語言。CI 內建 Python（ruff + pytest）與 .NET（dotnet format / build / test），**都是預設關、用到才開**（`adopt.sh` 會依偵測結果填好）。其他語言見[常見情境](#專案不是-python) |
 | 本 repo 可見性 | 目前是 **public**，任何 repo 都能呼叫。若哪天改回 private，要到 Settings → Actions → General → Access 選 **Accessible from repositories in the organization** |
 | 目標 repo 權限 | 你要有 admin（才能設分支保護）；沒有的話第 5 步得請 owner 做 |
+| 分支保護 | **不是必要條件**。Free 方案的 private repo、或公司統一管制設定的 repo 設不了也照樣能導入，只是紅燈擋不住 merge，見[沒辦法設分支保護時](#沒辦法設分支保護時) |
 
 ### 步驟 1 — 複製呼叫端範本
 
@@ -139,32 +135,25 @@ cp -R /path/to/ci-standards/templates/consumer-repo/.github .
 |---|---|---|
 | `workflows/security.yml` | 呼叫安全公版 | ✅ 改 `uses:` 與 `with:` |
 | `workflows/ci.yml` | 呼叫 CI 公版 | ✅ 改 `uses:` |
-| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v1` 與兩支呼叫端 workflow 已放行） | 有誤判才加規則 |
-| `workflows/copilot-setup-steps.yml` | Copilot Coding Agent 動工前的環境準備 | 依專案相依調整 |
-| `workflows/copilot-autofix-ci-security.yml` | CI/Security 失敗 → 以 PAT `@copilot` 修，含重試上限與轉交人工 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
-| `workflows/copilot-autofix-review.yml` | review 帶意見（真人或 Copilot）→ 以 PAT `@copilot` 依意見修 | 不用改（需 Copilot Business + `COPILOT_TRIGGER_PAT`） |
-| `workflows/copilot-autoreview-gate.yml` | CI+Security 全過 → 透過 API 自動請 Copilot 審 | 不用改（需 Copilot Business） |
-| `dependabot.yml` | pip 每週、docker / actions 每月自動開更新 PR | 有前端再加 npm 區塊 |
-| `copilot-instructions.md` | Copilot 修碼與審查時的專案規範 | ⚠️ **一定要改**，前四段是待填的佔位符 |
+| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v2` 這類版本 tag 已放行） | 有誤判才加規則 |
+| `dependabot.yml` | pip 每週、docker / actions 每月自動開更新 PR | 用不到的段落刪掉；.NET / 前端照檔尾的註解補 `nuget` / `npm` 區塊 |
 | `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
 
-> 三支 `copilot-auto*` workflow 是**選配的自動化流程**，沒有 Copilot Business 也能複製過去（只是不會動）。
-> 這三支呼叫端 workflow 只有觸發條件加一行 `uses:`，邏輯都在公版。細節見[下方說明](#自動修自動審選配需-copilot-business)。
+> 總共只有五個檔案，**沒有任何邏輯**：兩支呼叫端 workflow 各二十幾行，其餘三個是設定與範本。
 
-### 步驟 2 — 改三個地方
+### 步驟 2 — 改兩個地方
 
 **① `security.yml` 的 `uses:` 與參數**
 
 ```yaml
 jobs:
   security:                                   # ← job id 是 security，會影響 check 名稱
-    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v2
     with:
       severity: "CRITICAL,HIGH"
       fail-on-findings: true
-      scan-docker-image: false   # 有 Dockerfile 才改 true（會多吃 2–3 分鐘）
+      scan-docker-image: false   # 有 Dockerfile 才改 true（每個 image 多吃 2–3 分鐘）
       run-zizmor: true           # workflow 本身的安全檢查，放行規則在 .github/zizmor.yml
-      upload-sarif: false        # 保持 false，見「已知限制」
 ```
 
 **② `ci.yml` 的 `uses:`**
@@ -172,17 +161,16 @@ jobs:
 ```yaml
 jobs:
   ci:                                         # ← job id 是 ci
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
+      run-python: true           # 2.0.0 起預設是 false，Python 專案要明確打開
       python-version: "3.12"
+      # run-dotnet: true         # C# / .NET 專案打開，見「C# / .NET 專案」
       run-docker-build: true     # 沒 Dockerfile 設 false
       run-hadolint: true         # 有 Dockerfile 時，build 前先檢查 Dockerfile 寫法
 ```
 
 > ⚠️ **job id（`security` / `ci`）不要亂改**。分支保護的 check 名稱是 `<job id> / <公版 job 名>`，改了名稱 ruleset 就對不上。
-
-**③ `copilot-instructions.md`**
-把「專案概觀 / 使用技術 / 進入點 / 開發測試指令」四段換成這個專案的實況。Copilot 修碼會照著跑測試，寫錯它就修不動。
 
 ### 步驟 3 — 推上去
 
@@ -209,10 +197,7 @@ gh run list -L 5
 
 這會建立 ruleset：必須開 PR + 對話解決 + 通過 `Security Gate` 與 `CI Gate` + 禁止 force push / 刪分支。
 ⚠️ 有方案限制、以及 required approvals 預設為何是 0，見[分支保護](#分支保護讓流程非過不可)。
-
-> 三支 `copilot-auto*` 的觸發器（`workflow_run` / `pull_request_review`）依 GitHub 規則
-> **只認 default branch 上的檔案**。所以「導入這件事」本身的那個 PR 不會有自動修 / 自動審，
-> 要等合併進 `main` 之後的下一個 PR 才會生效 —— 不是壞掉。
+設不了（403、或公司統一管制）也沒關係，前四步做完公版就已經在跑了，補位做法見[沒辦法設分支保護時](#沒辦法設分支保護時)。
 
 ---
 
@@ -227,8 +212,9 @@ git push -u origin feat/xxx
 gh pr create
 ```
 
-開 PR 後自動發生：CI（ruff + pytest + docker build + lint）→ 四到六項安全掃描 → 兩個 Gate 總結 → Copilot Code Review（若已啟用）。
-全綠才能 merge。Gate 紅的話點進 Actions 看是哪一項掛掉。
+開 PR 後自動發生：CI（你打開的那幾項：ruff + pytest、dotnet build + test、docker build、lint）→ 四到六項安全掃描 → 兩個 Gate 總結。
+有分支保護的 repo 要全綠才能 merge；沒有的話請照團隊約定，兩個 Gate 都綠才按 merge。
+Gate 紅的話點進 Actions 看是哪一項掛掉。
 
 > 還在寫、不想每推一次就跑一輪？**開成草稿 PR（Draft）**。範本的呼叫端遇到草稿會整個跳過，
 > 按下「Ready for review」那一刻才跑。草稿本來就不能 merge，沒有安全上的損失。
@@ -236,23 +222,18 @@ gh pr create
 ### 掃描結果去哪看
 
 - **Actions → 該 run → Summary**：Security Gate / CI Gate 會各印一張表，一眼看出哪項掛掉
-- **Artifact `semgrep-sarif`**：Semgrep 完整結果（`upload-sarif: false` 時走這裡）
+- **Artifact `semgrep-sarif`**：Semgrep 完整結果，下載後用 VS Code 的 SARIF Viewer 看（公版不上傳 Security 分頁，原因見 [CHANGELOG 2.0.0](CHANGELOG.md)）
 - **Artifact `sbom-cyclonedx`**：`generate-sbom: true` 時會多一份「這個 commit 用了哪些套件」的清單
-- `upload-sarif: true` 時才會進 Security 分頁（需 public repo 或 GHAS）
 
-### 掃到弱點 → 交給 Copilot 修
+### 掃到弱點怎麼處理
 
-> ✅ **這條路已實測可用**（2026-08-01）。「CI 紅了自動 @copilot」與「review 意見自動修」
-> 兩條自動路徑自 1.2.0 起也已經能用（需設定 `COPILOT_TRIGGER_PAT`，見
-> [自動修、自動審](#自動修自動審選配需-copilot-business)）；人工開 Issue 起頭仍然可用，
-> 適合處理排程掃描（非 PR 情境）發現的弱點。
+1. 先看 Gate 的 Summary 表，確定是哪一項掛掉
+2. 點進該 job 的 log 拿檔案、行號與掃描器訊息
+3. 判斷是真弱點還是誤判 —— 誤判的處理方式（各掃描器的忽略寫法）見[疑難排解](#疑難排解)
+4. 修好再推一次，Gate 會重跑
 
-1. 依掃描結果開 Issue，把弱點檔案、行號、掃描器訊息貼進去
-2. Issue 右側 Assignees **指派給 Copilot**
-3. Copilot 先跑 `copilot-setup-steps.yml` 準備環境 → 修碼 → 跑測試 → 開 PR
-4. PR 一樣要過 Security Gate；你 review 後 merge
-
-> 用量提醒：Coding Agent 與 Code Review 都會扣 AI Credits（1,900 / 人 / 月）+ Actions 分鐘。先從小型、明確的 Issue 開始。
+**不要為了讓它變綠就關掉檢查。** 真的要放行就放在該掃描器的忽略設定裡，
+留下一行註解寫清楚為什麼 —— 下一個人才知道那不是隨手關掉的。
 
 ### 定期會自動發生
 
@@ -261,89 +242,10 @@ gh pr create
 
 ### 公版更新了怎麼辦
 
-什麼都不用做。`uses: ...@v1` 且 `v1` tag 已移動 → 你下次跑 CI 就吃到新版。
+同一個主版本內什麼都不用做。`uses: ...@v2` 且 `v2` tag 已移動 → 你下次跑 CI 就吃到新版。
 新增的參數都有預設值，舊的呼叫端不會壞；想用新功能再跑一次 `adopt.sh`，它會把新參數補上、舊的保留。
 
----
-
-## 自動修、自動審（選配，需 Copilot Business）
-
-範本裡三支 `copilot-auto*` workflow 讓「修 + 審」完全自動化。**不裝 Copilot Business 也能複製過去，只是不會動**；有的話會形成這個流程：
-
-> **架構**：這三支放在專案裡的檔案只是**十幾行的呼叫端 workflow**（觸發器 + 一行 `uses:`），所有邏輯放在公版的三支 `*-reusable.yml`。改邏輯只要動公版、移 `v1`，**各專案下次觸發就自動跟著更新**，跟 ci/security 一樣不必逐一改。詳見[為什麼這樣設計](#為什麼呼叫端只放觸發條件不整包複製)。
-
-```
-             ┌───────────────────────────────────────────────────────────┐
-             ▼                                                           │
-  你開 PR ─▶ CI + Security ──失敗──▶ copilot-autofix-ci-security ──▶ @copilot 修 ─┤
-             │                        （最多 3 次，超過就轉交人工）              │
-             │全過                                                              │
-             ▼                                                                  │
-     copilot-autoreview-gate ──▶ 透過 API 請 Copilot 審                          │
-             │                                                                  │
-             ├── review 帶 inline 意見（Copilot COMMENTED 或真人 Request changes）│
-             ▼                                                                  │
-     copilot-autofix-review ──▶ 用 COPILOT_TRIGGER_PAT 發 @copilot ──▶ Agent 修 ─┘
-             │                   （最多 3 次；空 review 不觸發）
-             │  ⚠️ Agent 推的 commit 觸發的 CI 要人按一次 Approve and run
-             ▼
-        意見都處理完、全綠 → 你決定 Merge
-```
-
-> **注意這裡沒有「Copilot approve」這一格。** Copilot 只會留 COMMENT，不會 approve，
-> 最後的 Merge 一定是人。
->
-> **1.2.0 的兩個關鍵改變**（缺一不可，缺了迴圈就是死的）：
-> 1. `copilot-autofix-review` 現在**也吃 Copilot 的 COMMENTED review**（它永遠不會送
->    changes_requested）。空的「審完沒問題」review 由公版判斷跳過，迴圈靠 max-attempts 上限停下來，
->    不再靠「不接 commented」。
-> 2. `@copilot` mention 改由 **`COPILOT_TRIGGER_PAT` secret** 以真人身分發出 ——
->    實測證明 `github-actions[bot]` 發的 mention 會被 Agent 直接忽略，
->    舊版等於從來沒有真正觸發過自動修正。
-
-| 專案裡的呼叫端 workflow | 顯示名 | 呼叫的公版 | 觸發時機 → 做什麼 |
-|---|---|---|---|
-| `copilot-autofix-ci-security.yml` | Copilot Autofix — CI/Security | `copilot-autofix-reusable.yml` | PR 的 CI/Security 失敗 → 找 PR → `@copilot` 貼失敗 job 與 log，要求直接修碼 |
-| `copilot-autofix-review.yml` | Copilot Autofix — Review | `copilot-autofix-review-reusable.yml` | 真人 `changes_requested` **或 Copilot COMMENTED（帶 inline 意見）** → 以 PAT 發 `@copilot` 依意見修碼 |
-| `copilot-autoreview-gate.yml` | Copilot Auto Review | `copilot-autoreview-reusable.yml` | PR 的 CI/Security 完成 → 確認**兩條**都對同一 SHA 通過 → 透過 API 請 Copilot 審 |
-
-### 啟用自動修正必做：設定 `COPILOT_TRIGGER_PAT`
-
-沒有這個 secret，review → 修正那條路**不會動**（公版會在 run log 發 warning，留言照貼但 Agent 不理）。
-
-1. 用**有 Copilot 授權**的帳號到 GitHub → Settings → Developer settings →
-   Fine-grained personal access tokens → Generate new token
-2. Repository access：**只勾目標 repo**；權限給 **Issues: Read and write** 與
-   **Pull requests: Read and write**，其他一律不給
-3. 到目標 repo → Settings → Secrets and variables → Actions →
-   New repository secret，名稱 `COPILOT_TRIGGER_PAT`，貼上 token
-
-> 為什麼需要 PAT：GitHub 規定 Copilot coding agent 只回應「真人」的 `@copilot` mention，
-> `github-actions[bot]`（`GITHUB_TOKEN`）發的一律忽略（防 bot 互相觸發的無窮迴圈）。
-> 這是平台限制，不是本 repo 的設計選擇。
-
-**內建的保護措施（避免無限燒 Credits）：**
-
-- **空 review 不觸發**：Copilot「審完沒問題」也是送一則 COMMENTED review；公版會先數該
-  review 的 inline 意見數，0 則就跳過，不進修正迴圈、不吃 attempt 次數。
-- **修正次數上限**：`max-attempts`（預設 3），用 PR 留言裡的隱藏標記計數；達上限改貼 `needs-human-review` label 轉交人工，不再自動修。
-- **審查次數上限**：`max-review-requests`（預設 3）。Copilot 依意見 commit → 新 SHA → CI/Security 又全綠 → 又請審，**這條迴圈本身沒有終點**，靠這個上限停下來。
-- **轉交人工後就不再留言**：轉交人工的留言帶 `<!-- *-escalated -->` 標記，之後同一 PR 不再自動留言。想重啟自動修正就把那則留言刪掉。
-- **冷卻時間（cooldown）**：`copilot-autofix-ci-security` 對同一 commit 15 分鐘內只觸發一次（CI 與 Security 常在數秒內相繼失敗，避免重複）。
-- **同一個 SHA 不重複 + 排隊**：`copilot-autoreview-gate` 用 `concurrency` 把同一 SHA 的兩次呼叫排隊（CI 與 Security 幾乎同時完成時，兩邊會同時判定「該請審了」），後到的那次看到標記就跳過。
-- **跳過 Dependabot**：Dependabot PR 不進 autofix，**也不進 autoreview**（每個 Dependabot PR 各燒一次 review + agent 是純浪費）。
-- **兩邊都綠才放行**：`copilot-autoreview-gate` 會確認 CI 與 Security **都**對同一 SHA 成功才動作，不會只過一半就請審。
-- **只理 PR**：1.3.0 起兩支用 `workflow_run` 觸發的呼叫端 workflow 只在「PR 觸發的 run」完成時才起 job，推到 main 或排程掃描完成不會再白起一個 job。
-
-### 為什麼呼叫端只放觸發條件、不整包複製
-
-這三支的**觸發器**（`workflow_run` / `pull_request_review`）依 GitHub 規則**必須存在於 consumer repo 的 default branch**，無法純靠 `uses:` 繼承。但「觸發器要在本地」不代表「邏輯也要在本地」——
-
-- 專案端只留**觸發條件 + 一行 `uses: ...copilot-*-reusable.yml@v1`，把事件參數（PR、SHA、run-id…）當 `with:` 傳進去。
-- **所有 bash 邏輯集中在公版的 `*-reusable.yml`**。改邏輯（新的轉交人工規則、未來的測試涵蓋率門檻、資安擴充）只要動公版、移 `v1` → 各專案下次觸發自動吃到，**不必逐一改 repo**。
-- 這幾支呼叫端 workflow 只有在 **input 約定改變**時才需要重新複製，頻率極低（`adopt.sh` 升級時會整份換新、把你調過的設定搬回來）。
-
-> 要調重試次數，在呼叫端 workflow 的 `with:` 加 `max-attempts: "5"` 即可，不必改公版。
+換主版本（例如 `@v1` → `@v2`）才需要動專案，因為那代表有破壞性變更。步驟見[從 v1 升級到 v2](#從-v1-升級到-v2)。
 
 ---
 
@@ -354,28 +256,35 @@ gh pr create
 | 參數 | 型別 | 預設 | 說明 |
 |---|---|---|---|
 | `severity` | string | `CRITICAL,HIGH` | Trivy 要擋下的嚴重度。可加 `MEDIUM` 收更嚴 |
-| `fail-on-findings` | boolean | `true` | `true`=掃到就擋 merge；`false`=只回報不擋（**導入初期過渡用**） |
-| `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，會多吃 2–3 分鐘 |
-| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄），例如 `src/Web.Api/Dockerfile`。Trivy image 掃描用它 build |
-| `docker-context` | string | `"."` | docker build 的 context 目錄 |
+| `fail-on-findings` | boolean | `true` | `true`=掃到問題 Gate 就紅；`false`=有找到問題也先不紅（**導入初期過渡用**）。⚠️ 2.0.0 起 `false` 只放行「有找到問題」：規則下載失敗、弱點資料庫下載失敗、工具當掉這類**掃描本身出錯**照樣紅 —— 沒掃成不能當成掃過。OSV-Scanner 異常結束不論這個值都是紅的 |
+| `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，每個 image 多吃 2–3 分鐘 |
+| `dockerfile` | string | `""` | 要 build 來掃的 Dockerfile。寫法同 `ci-reusable` 的同名參數：留空＝自動找全 repo；可列多個、每一項 `路徑` 或 `路徑:build context` |
+| `docker-context` | string | `"."` | `dockerfile` 那一項沒寫 `:context` 時用的 build context（預設 repo 根目錄） |
 | `run-zizmor` | boolean | `false` | 用 [zizmor](https://docs.zizmor.sh/) 檢查 `.github/workflows` 本身：把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、沒釘 SHA 的 action、權限給太大…。放行規則放專案的 `.github/zizmor.yml`（範本已附） |
 | `zizmor-min-severity` | string | `low` | zizmor 只回報這個等級以上：`low` / `medium` / `high` |
 | `semgrep-rules` | string | `p/owasp-top-ten p/security-audit p/secrets auto` | Semgrep 規則包，空白隔開。`auto` 會依語言自動挑（要連 Semgrep 規則庫、會回傳匿名使用統計；不想要就拿掉）。想加 `p/python`、`p/dockerfile` 就寫在這 |
 | `trivy-scanners` | string | `vuln,misconfig` | Trivy 檔案系統掃描要開哪些：`vuln` / `misconfig` / `secret` / `license`。預設不含 `secret`，因為 gitleaks 已連 git 歷史一起掃了；要查授權條款加 `license` |
 | `generate-sbom` | boolean | `false` | 用 Trivy 產出 SBOM（CycloneDX JSON）存成 artifact `sbom-cyclonedx`。出事時（又一個 log4j）拿它秒查有沒有中 |
-| `upload-sarif` | boolean | `false` | 上傳到 Security 分頁。僅 public repo 或有 GHAS 可用。⚠️ **這條路徑尚未實測成功，請先維持 `false`** —— 詳見[已知限制](docs/KNOWN-LIMITATIONS.md#upload-sarif-true-尚未驗證可用) |
-| `python-version` | string | `3.12` | **目前沒有任何步驟用到**。留著只是讓還在傳它的舊呼叫端不會起不來，新導入的專案不用寫 |
+
+> **2.0.0 移除了 `upload-sarif` 與 `python-version`**。呼叫端還在傳的話 workflow 會直接 `invalid input` 起不來；
+> 重跑一次 `adopt.sh` / `adopt.ps1` 會自動拿掉。`upload-sarif` 從沒真正能用過：被呼叫的 reusable 只能縮減、不能擴張權限，
+> 要它能動，每一個呼叫端都得授予 `security-events: write`。Semgrep 結果一律存成 artifact `semgrep-sarif`。
 
 ### `ci-reusable.yml`
 
 | 參數 | 型別 | 預設 | 說明 |
 |---|---|---|---|
+| `run-python` | boolean | `false` | 是否跑 ruff + pytest。⚠️ **2.0.0 起預設關**，Python 專案要明確設 `true`（`adopt.sh` 會依偵測結果寫明）。有 `pyproject.toml` 且含 `[project]` 或 `[build-system]` 時才會 `pip install -e .`，裝不起來會紅 |
 | `python-version` | string | `3.12` | CI 的 Python 版本 |
-| `run-python` | boolean | `true` | 是否跑 ruff + pytest。**非 Python 專案設 `false`**，不必自己另寫一支 CI |
+| `run-dotnet` | boolean | `false` | 是否跑 .NET（C# / F# / VB）：restore → `dotnet format` → build（Release）→ test。見 [C# / .NET 專案](#c--net-專案) |
+| `dotnet-version` | string | `""` | .NET SDK 版本（例如 `8.0.x`），多個用換行隔開。留空＝有 `global.json` 就照它；沒有就依專案檔（`*.csproj` / `*.fsproj` / `*.vbproj` / `Directory.Build.props`）的 `TargetFramework(s)` 把用到的版本都裝起來（`net8.0` → `8.0.x`，測試才跑得起 8.0 runtime；`net48` 這類 .NET Framework 不算）；連那個都找不到才用 `10.0.x` |
+| `dotnet-project` | string | `""` | 要建置的 `.sln` / `.slnx` / `.csproj` 路徑。留空＝自動找：repo 裡只有一個方案檔就用它，沒有方案檔時只有一個專案檔就用它；**找到兩個以上會直接紅**，請明確指定 |
+| `run-dotnet-format` | boolean | `true` | 用 `dotnet format --verify-no-changes` 檢查格式與 analyzer 規則（讀專案的 `.editorconfig`，等同 Python 那邊的 ruff）。舊專案第一次導入整片紅時先設 `false` 過渡，本機跑一次 `dotnet format` 整理完再打開 |
+| `dotnet-runner` | string | `ubuntu-latest` | .NET job 跑在哪種 runner。WPF / WinForms（`net*-windows`）、.NET Framework 這類只能在 Windows 建置的專案設 `windows-latest`（Windows runner 分鐘數算 2 倍） |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
+| `dockerfile` | string | `""` | 要檢查的 Dockerfile（相對 repo 根目錄）。⚠️ **2.0.0 起預設留空＝自動找全 repo** 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`；1.4.0 的預設是 `"Dockerfile"`、只看根目錄）。可列多個、空白隔開，每一項寫 `路徑` 或 `路徑:build context`。1.4.0 的單一路徑寫法（`src/Web.Api/Dockerfile`）照樣能用。明確列出的路徑不存在會紅。hadolint 與 build 都吃這份清單，見 [Dockerfile 不在根目錄、或不只一個](#dockerfile-不在根目錄或不只一個) |
+| `docker-context` | string | `"."` | `dockerfile` 那一項沒寫 `:context` 時用的 build context。預設 repo 根目錄（Visual Studio / docker-compose 的 .NET 慣例，通常不用改） |
 | `run-hadolint` | boolean | `false` | build 之前先用 [hadolint](https://github.com/hadolint/hadolint) 檢查 Dockerfile 寫法（沒釘版本的 apt 套件、`latest` tag、`RUN` 裡的 shell 問題…）。warning 以上才算失敗；要忽略某條規則放 `.hadolint.yaml`。放在 Docker build 那個 job 裡，不多花一個 job |
-| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄）。hadolint 與 Docker build 都用它；`adopt` 在根目錄找不到、子資料夾只有一個時會自動填入 |
-| `docker-context` | string | `"."` | docker build 的 context 目錄（Visual Studio / docker-compose 慣例是 repo 根目錄，通常不用改） |
 | `run-actionlint` | boolean | `false` | 檢查 GitHub Actions workflow 語法，會連 `run:` 區塊的 bash 一起用 shellcheck 檢查 |
 | `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
@@ -394,13 +303,15 @@ gh pr create
 ```yaml
 jobs:
   ci:
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
       run-python: false
       run-docker-build: false
       run-actionlint: true
       run-shellcheck: true
 ```
+
+> `run-python` 2.0.0 起預設就是 `false`，這裡照樣寫出來 —— 明寫比靠預設值好懂，日後預設再變也不受影響。
 
 ---
 
@@ -417,7 +328,6 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 | hadolint 放在 Docker build job 裡當一個步驟 | 不另開 job |
 | actionlint 改抓 2 MB 執行檔，不再拉 docker image | 每次省 20–40 秒 |
 | Python job 不再 `pip install --upgrade pip` | runner 的 pip 已經夠新，省 5–10 秒 |
-| 兩支用 `workflow_run` 觸發的呼叫端 workflow 只理「PR 觸發」的 run | 每次合併進 main 少白起 2 個 job |
 | 草稿 PR 整個跳過（範本呼叫端） | 還在寫的 PR 每推一次省一整輪 |
 | Trivy 預設不再掃 secret（gitleaks 已掃過含歷史） | 大 repo 省數十秒 |
 | Dependabot：docker / actions 改每月 | 每個 Dependabot PR 都會跑整套，少開 PR 就少跑 |
@@ -431,7 +341,8 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 - 連續 push 會自動取消舊 run（範本已設 `concurrency` + `cancel-in-progress`）
 - Settings → Billing → Spending limit 設 **$0**，額度用完就停，不會爆帳單（代價：那天 CI 直接不跑，見 [`docs/HANDOFF.md`](docs/HANDOFF.md) 記的症狀）
 
-一個 Python + Docker 的 private 專案，每次 push 到 PR 大約是 **CI 4–5 分鐘 + Security 5–6 分鐘**（含 zizmor），合併進 main 再一輪、少了自動審的 2 分鐘。
+一個 Python + Docker 的 private 專案，每次 push 到 PR 大約是 **CI 4–5 分鐘 + Security 5–6 分鐘**（含 zizmor），合併進 main 再一輪。
+.NET 專案用 `dotnet-runner: windows-latest` 的話，那個 job 的分鐘數算 2 倍 —— 只有 WPF / WinForms / .NET Framework 這類非 Windows 不可的才這樣設。
 
 ---
 
@@ -446,15 +357,15 @@ GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一
 403 Upgrade to GitHub Pro or make this repository public to enable this feature.
 ```
 
-三個解法：把 repo 轉到有 Team 方案的 org（推薦，順便統一管 Copilot policy）／帳號升 Pro／repo 轉 public（多數情況不適合）。
+三個解法：把 repo 轉到有 Team 方案的 org（推薦，順便統一管組織層級的 ruleset）／帳號升 Pro／repo 轉 public（多數情況不適合）。
+三個都做不到的話，公版還是照用，見[沒辦法設分支保護時](#沒辦法設分支保護時)。`setup-branch-protection.sh` 遇到這種 repo 會直接說明原因後結束，不會只丟一個 403。
 
 ### ⚠️ required approvals 為什麼預設是 0
 
-腳本預設 `required_approving_review_count: 0`，這是刻意的。設 1 而團隊只有你一個人時，**PR 會永遠 merge 不了**，三件事疊在一起：
+腳本預設 `required_approving_review_count: 0`，這是刻意的。設 1 而團隊只有你一個人時，**PR 會永遠 merge 不了**，兩件事疊在一起：
 
 1. GitHub 不允許 PR 作者 approve 自己的 PR
-2. Copilot Code Review 送的是 COMMENT 類型 review，**它不會 approve**
-3. ruleset 預設沒有 `bypass_actors`，連 org admin 都繞不過（跟舊版 classic branch protection 不同）
+2. ruleset 預設沒有 `bypass_actors`，連 org admin 都繞不過（跟舊版 classic branch protection 不同）
 
 設 0 **不代表沒有守門**——「必須開 PR」和「必須通過 Security Gate / CI Gate」照樣強制，只是不強制人工按 Approve。等有第二位固定 reviewer 再改：
 
@@ -469,7 +380,17 @@ gh auth login                                        # 需有目標 repo 的 adm
 ./scripts/setup-branch-protection.sh <owner>/<repo>
 ```
 
-腳本可重複執行：偵測到同名 ruleset 會改用 `PUT` 更新，不會建出第二份。
+不給分支＝只保護 default branch；要保護別的分支就接在後面列出來（`main develop`、`'release/*'` 這類樣式也行），
+用法見[分支模型](#一個-develop-流程完整長什麼樣)。
+
+腳本可重複執行：偵測到同名 ruleset 會改用 `PUT` 更新，不會建出第二份（ruleset 超過 30 份也找得到；只比對這個 repo 自己的，不含組織層的）。
+ruleset 名稱：不給分支時是 `CI Standard - main protection`；有給分支時是 `CI Standard (branches: <排序後的分支清單>)`，
+不同的分支清單各自一份、不會互相覆蓋。repo 上同時有好幾份 CI Standard ruleset 時腳本會列出來提醒你 —— 它們的規則是疊加生效的。
+
+**required check 會綁定來源是 GitHub Actions**（`integration_id: 15368`）。不綁的話，任何有寫入權限的人
+（或外流的 token）都能用 commit status API 對同一個 SHA 貼一個叫 `ci / CI Gate` 的綠燈，騙過分支保護。
+要改綁別的 app 設 `CHECKS_INTEGRATION_ID=<id>`，設成空字串＝不綁（不建議）。
+`REQUIRED_APPROVALS` 必須是非負整數、`STRICT_CHECKS` 只能是 `true` / `false`，打錯會直接中止，不會送出一份壞掉的 ruleset。
 
 ### 手動設定
 
@@ -477,7 +398,7 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 - ✅ **Enforcement status** 設為 **Active**（預設是 Disabled，很容易漏）
 - ✅ **Require a pull request before merging**（approvals 先填 0、勾要求對話解決）
-- ✅ **Require status checks to pass**，加入：
+- ✅ **Require status checks to pass**，加入（來源選 **GitHub Actions**，不要選 any source）：
   - `security / Security Gate`
   - `ci / CI Gate`
 - ✅ **Block force pushes** / **Restrict deletions**
@@ -496,16 +417,51 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 （`push: main` 那邊保留 `paths-ignore` 沒問題，那不影響 required check。）
 
-### 另外要做的兩件事
+### 另外要做的一件事
 
-- **Copilot 政策**：Org → Settings → Copilot → Policies，開啟 **Copilot code review** 與 **Copilot coding agent**
 - **防止爆帳單**：Settings → Billing → Spending limit，Actions 設 **$0**
 
-這兩項是組織層級的一次性設定，細節見 [`docs/SETUP.md`](docs/SETUP.md)。
+這是組織層級的一次性設定，細節見 [`docs/SETUP.md`](docs/SETUP.md)。
 
 > 本 repo 目前在個人帳號底下。**private repo 的 ruleset 需要 Pro 以上方案**，
 > 而組織可以用「一條 org ruleset 管所有 repo」，不必逐個跑腳本。
 > 建議在導入第 3 個專案之前搬到組織，見 [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md)。
+
+---
+
+## 沒辦法設分支保護時
+
+**不是每個專案都設得了分支保護 / ruleset。** 常見的兩種：
+
+- GitHub **Free 方案的 private repo**：ruleset API 直接回 `403 Upgrade to GitHub Pro…`
+- **公司統一管理的 repo**：設定由管理者管，專案成員沒有 admin，或公司政策不讓各專案自己改
+
+這種 repo **照樣可以導入公版**。差別只有一個：
+
+> **Gate 照跑、照樣變紅，但紅燈擋不住 merge。** 有寫入權限的人看到紅燈還是按得下 merge，GitHub 不會攔。
+
+### 還是有用的部分
+
+| 機制 | 沒有分支保護時 |
+|---|---|
+| PR 上的 CI / Security | ✅ 照跑，PR 頁面看得到兩個 Gate 的紅綠燈與 Summary 表 |
+| push 到 main（或 develop）後再跑一輪 | ✅ 照跑 —— 就算有人直接 push、或硬 merge 了紅燈的 PR，main 上的那一輪也會紅，事後查得到 |
+| PR 來源分支政策（`restricted-base-branches`） | ✅ 照樣判定，發錯分支的 PR 會紅、Summary 會寫出該發到哪裡 —— 看得出誤操作，只是擋不住 |
+| 每週一排程重掃 | ✅ 照跑，新公布的 CVE 一樣抓得到 |
+
+### 補位做法
+
+1. **團隊約定：兩個 Gate 都綠才按 merge。** 寫進專案的 PR 範本（`pull_request_template.md`）與 `CONTRIBUTING.md`，
+   讓每個人開 PR 時都看得到。這是唯一真正會被每天看到的那道防線。
+2. **merge 之後看一眼 main 上那一輪**（Actions 篩 `branch:main`）。紅了就 `git revert` 那個 merge commit，
+   修好再重新發 PR —— 不要在 main 上直接補。
+3. **限縮誰能寫入、誰能 merge**：Settings → Collaborators 只給需要的人 Write，其他人給 Read / Triage。
+   能按 merge 的人越少，約定越容易守。
+4. **真的需要「非過不可」**：考慮 GitHub Team / Pro 方案、搬到有方案的組織，或（適合的話）把 repo 改成 public。
+   設好之後照[分支保護](#分支保護讓流程非過不可)跑一次腳本就好，呼叫端不必改。
+
+> 公版沒有、也做不到「替你擋 merge」的功能 —— 擋 merge 只能靠 GitHub 的分支保護。
+> 上面這些都是**讓問題看得見、有人負責收拾**，不是取代分支保護。
 
 ---
 
@@ -519,7 +475,7 @@ gh auth login                                        # 需有目標 repo 的 adm
 由呼叫端的 `on.pull_request` 決定，跟分支名稱無關：
 
 ```yaml
-# 範本預設：發到「任何分支」的 PR 都跑
+# 範本預設（ci.yml）：發到「任何分支」的 PR 都跑
 # edited：PR 改目標分支（base）時 GitHub 只送 edited，少了它來源分支政策不會重跑（見下一節）
 pull_request:
   types: [opened, synchronize, reopened, ready_for_review, edited]
@@ -529,6 +485,11 @@ pull_request:
   branches: [main, develop]
   types: [opened, synchronize, reopened, ready_for_review, edited]
 ```
+
+> `edited` 是 1.4.0 加的（只有 `ci.yml` 需要）：PR **改了 base 分支**時要重跑來源分支政策，
+> 否則先發到 `develop` 拿到綠燈、再到網頁上把 base 改成 `main`，綠燈會原封不動沿用。
+> 只改標題或內文也算 `edited`，那種不會重跑、也不會把正在跑的那一輪取消掉 ——
+> 靠的是 job 的 `if` 與 `concurrency`，範本都寫好了，寫法見下一節。
 
 > ⚠️ 加了 `branches:` 篩選之後，**沒被列到的分支其 PR 不會有 `ci / CI Gate`**。
 > 那些分支就不能設成 required check，否則會永遠 pending。
@@ -544,7 +505,7 @@ pull_request:
 ```yaml
 jobs:
   ci:
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
       restricted-base-branches: "main"              # 要管的 base，空白隔開，支援 glob
       allowed-head-branches: "develop hotfix/*"     # 允許的來源分支
@@ -571,8 +532,11 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
 ```
 
-> ⚠️ 1.4.0 以前導入的專案，重跑 `adopt` **不會**改這三處（adopt 升級只合併 `with:`），
-> 要用來源分支政策就手動照上面改。少了 `edited`，PR 從 `develop` 改發到 `main` 時會沿用舊的綠燈。
+> ⚠️ 少了 `edited`，PR 從 `develop` 改發到 `main` 時會沿用舊的綠燈。已導入的專案升到 v2 時重跑 `adopt`：
+> - `ci.yml` 還是 **v1 範本原樣**（1.3.x 以前導入的）→ 三處一起自動換成上面的寫法
+> - 用 **1.4.0 範本**導入的 → 本來就是這個寫法，不會再動
+> - **改過**觸發條件的 → 不動、只印 ⚠️ 提醒，請手動照上面改（有設 `restricted-base-branches` 時一定要改）
+>
 > 樣式的 `*` 也會比對 `/`：`hotfix/*` 包含 `hotfix/a/b`。
 
 判定順序：
@@ -586,7 +550,7 @@ jobs:
 
 > ⚠️ **這擋的是誤操作，不是惡意。** 它是一個 status check，沒有 ruleset 的話，
 > 有權限的人照樣可以直接 push 或用 admin 權限硬 merge。
-> 真正不讓人繞過的是下面這組設定 —— 兩者要一起用。
+> 真正不讓人繞過的是下面這組設定 —— 兩者要一起用。設不了分支保護的 repo 見[沒辦法設分支保護時](#沒辦法設分支保護時)。
 
 ### 一個 develop 流程完整長什麼樣
 
@@ -625,15 +589,47 @@ jobs:
 
 ## 常見情境客製
 
+### C# / .NET 專案
+
+2.0.0 起 `ci-reusable.yml` 內建 .NET（C# / F# / VB）。打開 `run-dotnet` 就好：
+
+```yaml
+with:
+  run-python: false
+  run-dotnet: true
+  # dotnet-project: "src/App.sln"      # repo 裡有兩個以上方案檔 / 專案檔時必填
+  # dotnet-version: "8.0.x"            # 留空：global.json → 專案檔的 TargetFramework → 10.0.x
+  # run-dotnet-format: false           # 舊專案導入初期格式整片紅時先關，整理完再開
+  # dotnet-runner: windows-latest      # WPF / WinForms（net*-windows）/ .NET Framework 才需要
+```
+
+跑的順序是 `dotnet restore` → `dotnet format --verify-no-changes`（讀 `.editorconfig`）→ `dotnet build -c Release` → `dotnet test`。
+方案裡沒有測試專案時 `dotnet test` 什麼都不做、不會紅（跟 Python 沒測試時一樣不擋）。
+
+- **SDK 版本**：留空時，有 `global.json` 就照它；沒有就讀 `*.csproj` / `*.fsproj` / `*.vbproj` / `Directory.Build.props` 的
+  `TargetFramework(s)`，把用到的版本全部裝起來（`net8.0` → `8.0.x`，測試才跑得起 8.0 的 runtime；`net48` 這類 .NET Framework 不算）；
+  都找不到才用 `10.0.x`。要自己指定就填 `dotnet-version`，多個版本用換行隔開。
+- **建置哪一個**：留空時自動找，只有一個方案檔（`.sln` / `.slnx`）就用它；沒有方案檔時只有一個專案檔就用它。
+  **找到兩個以上不會亂猜**，直接紅並列出候選，請填 `dotnet-project`。
+- **Windows 限定的專案**：目標是 `net*-windows`（WPF / WinForms）或 .NET Framework 的，在 Linux 上建不起來，
+  設 `dotnet-runner: windows-latest`（分鐘數算 2 倍）。
+- **快取**：專案有 `packages.lock.json` 才會開 NuGet 快取。
+
+`adopt.sh` / `adopt.ps1` 偵測到 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj`（往下找四層）就會寫 `run-dotnet: true`；
+方案檔不只一個時會提醒你補 `dotnet-project`。
+安全掃描那邊不必改：Semgrep 有 C# 規則、OSV-Scanner 與 Trivy 讀 `packages.lock.json` 等 NuGet 相依檔。
+Dependabot 要更新 NuGet 套件的話，照範本 `dependabot.yml` 檔尾的註解補一段 `nuget`。
+
 ### 專案不是 Python
 
 `security-reusable.yml` 是語言無關的（Semgrep / Trivy / gitleaks / OSV / zizmor 都自己認語言），**照用即可**。
 
-`ci-reusable.yml` 也**照用**，只要把 Python 那段關掉：
+`ci-reusable.yml` 也**照用**。語言相關的 job（`run-python`、`run-dotnet`）2.0.0 起都是預設關，
+用到哪個開哪個；剩下的都是語言無關的檢查：
 
 ```yaml
 with:
-  run-python: false        # 不跑 ruff / pytest
+  run-python: false        # 預設就是 false，寫出來比較清楚
   run-docker-build: true   # 有 Dockerfile 就留著
   run-hadolint: true       # Dockerfile 寫法
   run-actionlint: true     # workflow 語法 + run: 區塊的 bash
@@ -642,21 +638,78 @@ with:
 
 這樣仍然會產出 `ci / CI Gate` 這個 check，分支保護的 ruleset 不必為了語言不同而各寫一套。
 
-**還需要語言原生的 lint / test（Node 的 eslint + jest、Go 的 go vet + go test…）時**，目前公版還沒有對應的 reusable。兩條路：
+**還需要公版沒內建的語言原生 lint / test（Node 的 eslint + vitest、Go 的 go vet + go test…）時**，兩條路：
 
-1. 在該專案自己加一支 `ci-lang.yml`，**用不同的 job id**（例如 `node`），再把 `node / <job 名>` 一起加進 ruleset 的 required checks。
-2. 到本 repo 開 Issue 提需求，補一支 `ci-node-reusable.yml`（見 [CONTRIBUTING](CONTRIBUTING.md)）。
+1. 在該專案自己加一支 workflow（或在 `ci.yml` 裡加一個 job），**用不同的 job id**（例如 `node`），
+   能設分支保護的話再把 `node / <job 名>` 一起加進 ruleset 的 required checks。
+2. 到本 repo 開 Issue 提需求（見 [CONTRIBUTING](CONTRIBUTING.md)）。
 
 > 走第 1 條時**不要**把 `ci.yml` 的 job id 也改掉 —— `ci / CI Gate` 是所有專案共用的 check 名稱，改了 ruleset 就要逐一客製，公版的意義就沒了。
+
+### 前端（React / Vue / Node）
+
+老實說，目前**安全掃描有涵蓋、CI 沒有**：
+
+| | 前端專案現在的狀況 |
+|---|---|
+| Semgrep | ✅ `auto` 規則包會依語言挑 JS / TS 規則。⚠️ Semgrep 對 `.vue` 單檔元件的支援有限，`<script>` 裡的程式可能只掃到一部分 |
+| OSV-Scanner | ✅ 讀 `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` |
+| Trivy（檔案系統） | ✅ 掃同樣那幾個 lock 檔 |
+| gitleaks | ✅ 不分語言 |
+| CI 的 lint / 型別檢查 / 測試 / build | ❌ **公版還沒有 Node 的 job**：不會跑 eslint、`tsc`、vitest / jest、`npm run build` |
+
+在公版補上之前，CI 那一半請在專案自己的呼叫端 workflow 寫一個 job（用不同的 job id，見上一節第 1 條），例如：
+
+```yaml
+  node:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<釘 commit SHA>
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@<釘 commit SHA>
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm test --if-present
+      - run: npm run build --if-present
+```
+
+> action 一樣要釘 commit SHA，不然 zizmor 會紅。公版下一個要補的就是 `ci-node` 這個 job（見 [已知限制](docs/KNOWN-LIMITATIONS.md)）。
+> Dependabot 要更新 npm 套件的話，照範本 `dependabot.yml` 檔尾的註解補一段 `npm`。
 
 ### 沒有 Dockerfile
 
 `security.yml` 設 `scan-docker-image: false`、`ci.yml` 設 `run-docker-build: false`。
-（公版有 `if [ -f Dockerfile ]` 保護，不設也不會爆，但會白花 runner 時間。）
+（公版找不到任何 Dockerfile 時會自己略過，不設也不會爆，但會白開一個 job、白花 runner 時間。）
+
+### Dockerfile 不在根目錄、或不只一個
+
+2.0.0 起不用特別設：`dockerfile` 留空時，Docker build、hadolint、image 掃描都會自動找全 repo 的
+`Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`），有幾個就 build 幾個。
+build context 預設是 repo 根目錄（`docker-context: "."`，跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）。
+
+只想檢查其中幾個、或某個 Dockerfile 的 build context 不一樣時，用 `dockerfile` 明確列（`ci.yml` 與 `security.yml` 各自設）：
+
+```yaml
+with:
+  dockerfile: "src/Web.Api/Dockerfile"                      # 1.4.0 的單一路徑寫法照樣能用
+  # dockerfile: "src/Web.Api/Dockerfile web/Dockerfile:web"  # 多個用空白隔開；:web ＝這一個用 web/ 當 build context
+  # docker-context: "."                                     # 沒寫 :context 的那幾個用它，預設 repo 根目錄
+```
+
+明確列出的路徑不存在會直接紅（打錯字不會讓檢查安靜地被略過）。
+`adopt.sh` / `adopt.ps1` 2.0.0 起不再寫 `dockerfile:`（公版自己會找）；你原本寫好的 `dockerfile:` 升級時會原樣保留。
 
 ### 導入初期紅到不想活
 
-先設 `fail-on-findings: false` 讓它只回報不擋 → 分批清乾淨 → 再改回 `true` 並開分支保護。
+先設 `fail-on-findings: false` 讓它只回報不擋 → 分批清乾淨 → 再改回 `true`（能設分支保護的話，這時候再開）。
+注意 `false` 只放行「有找到問題」，掃描工具本身出錯（規則或弱點資料庫下載失敗、當掉）照樣紅 ——
+那種紅要看 log 處理，不是改參數能解決的。
 **不要**直接刪掉 workflow。
 
 ### 抑制誤判
@@ -668,7 +721,7 @@ with:
 | Semgrep | `.semgrepignore` | 一行一個路徑 glob |
 | gitleaks | `.gitleaksignore` | 一行一個 `commit:path:rule:line` fingerprint（失敗訊息裡會印） |
 | Trivy | `.trivyignore` | 一行一個 CVE / GHSA ID |
-| zizmor | `.github/zizmor.yml` | `rules.<規則名>.ignore` 列檔名（範本已放行公版的 `@v1` 與兩支呼叫端 workflow），寫法見 [zizmor 文件](https://docs.zizmor.sh/configuration/) |
+| zizmor | `.github/zizmor.yml` | `rules.<規則名>.ignore` 列檔名（範本已放行指向公版的 `@v2` 這類版本 tag），寫法見 [zizmor 文件](https://docs.zizmor.sh/configuration/) |
 | hadolint | `.hadolint.yaml` | `ignored: [DL3008]` 這種列規則代碼 |
 
 > 每一條 ignore 都應該在 PR 說明「為什麼這是誤判」。要抑制的是誤判，不是真弱點。
@@ -691,38 +744,99 @@ with:
 | zizmor 紅：`dangerous-triggers` | 你自己的 workflow 用了 `pull_request_target` / `workflow_run` | 確定它不會執行 PR 的程式碼才放行；否則改用 `pull_request` |
 | zizmor 紅：`excessive-permissions` | workflow 沒宣告 `permissions:` | 加 `permissions: contents: read`，需要什麼再加什麼 |
 | 執行檔下載那一步紅：`sha256sum: WARNING: 1 computed checksum did NOT match` | 上游 release 檔案被換掉，或公版升版時校驗碼沒跟著改 | 到工具的 release 頁面重新對校驗碼；對不上就先別升、開 Issue |
-| `upload-sarif: true` 報權限錯誤 | 公版預設不要求 `security-events: write` | 呼叫端 job 自行加 `permissions:`，且 repo 要有 GHAS 或為 public |
+| 改成 `@v2` 後整支 workflow 起不來：`Invalid input, upload-sarif is not defined`（或 `python-version`） | 2.0.0 移除了 `security-reusable` 的這兩個 input | 從 `security.yml` 的 `with:` 刪掉，或重跑一次 `adopt.sh` / `adopt.ps1`（會自動拿掉） |
+| 升到 `@v2` 後 Python 的 lint / test 不見了 | 2.0.0 起 `run-python` 預設是 `false` | `ci.yml` 的 `with:` 加 `run-python: true` |
+| `.NET build + test` 紅：「找到 N 個方案 / 專案檔，無法自動決定」 | repo 裡有兩個以上方案檔（或沒有方案檔、但有多個專案檔） | 在 `ci.yml` 設 `dotnet-project: "<路徑>"` |
+| `.NET build + test` 的 format 步驟紅 | 程式碼不符合 `.editorconfig` 的格式或 analyzer 規則 | 本機跑 `dotnet format` 再 commit；舊專案過渡期可先 `run-dotnet-format: false` |
+| `.NET build + test` 在 ubuntu 上建不起來（找不到 WindowsDesktop SDK 之類） | 專案目標是 `net*-windows`（WPF / WinForms）或 .NET Framework | 設 `dotnet-runner: windows-latest` |
+| `fail-on-findings: false` 了卻還是紅 | 掃描工具本身出錯（規則／弱點資料庫下載失敗、當掉），或 OSV-Scanner 異常結束 —— 2.0.0 起這些不再被吞成綠燈 | 看該 job 的 log；多半是暫時性的網路問題，重跑一次 |
+| `setup-branch-protection.sh` 回 403、提到 Upgrade to GitHub Pro | Free 方案的 private repo 不能用 ruleset | 見[沒辦法設分支保護時](#沒辦法設分支保護時) |
 | Actions 分鐘燒很快 | image 掃描、每週排程、Dependabot PR 多 | 見[省 Actions 分鐘](#省-actions-分鐘這套怎麼省你還能怎麼省) |
 
 ---
 
 ## 版本策略
 
-每次發佈都要打**兩個** tag：一個不可變的版本號、一個會移動的別名。
+每次發佈都要打**兩個** tag：一個不可變的版本號、一個會移動的主版本別名。**目前的主版本是 `v2`**。
 
 ```bash
-git tag -a v1.3.0 -m "..." && git push origin v1.3.0   # 不可變：出事時的還原點
-git tag -f v1 && git push -f origin v1                 # 會移動的別名：所有專案自動跟進
+git tag -a v2.0.1 -m "..." && git push origin v2.0.1   # 不可變：出事時的還原點
+git tag -f v2 && git push -f origin v2                 # 會移動的別名：所有指向 @v2 的專案自動跟進
 ```
 
 | 情況 | 做法 |
 |---|---|
-| 修 bug、加掃描規則、升 action 版本、**新增有預設值的 input** | 打 `v1.x.y` + 移動 `v1` |
-| 改 input 名稱 / 移除 input / 改 job 名稱 | 打 `v2.0.0` + 開 `v2`，公告後各專案自行改 `@v1` → `@v2` |
+| 修 bug、加掃描規則、升 action 版本、**新增有預設值的 input** | 打 `v2.x.y` + 移動 `v2` |
+| 改 input 名稱 / 移除 input / 改 input 預設值造成行為改變 / 改 job 名稱 / 移除 workflow | 打 `v3.0.0` + 開 `v3`（`git tag -a v3.0.0 -m ...` 加 `git tag v3`），公告後各專案自行改 `@v2` → `@v3` |
 | 想吃最新未打 tag 的版本 | 呼叫端寫 `@main`（不建議用在正式專案） |
 
-> ⚠️ **改完公版一定要移動 `v1`**，否則指向 `@v1` 的專案完全不會有感覺 —— main 領先 `v1` 好幾個 commit 卻沒人發現，是這套機制最容易出的事故。
+| 主版本 | 狀態 |
+|---|---|
+| `v2` | **目前版本**（2.0.0 起）。新導入一律用 `@v2`，`adopt.sh` / `adopt.ps1` 預設就是它 |
+| `v1` | **功能更新到 1.4.x 為止**。1.4.0（來源分支政策、`dockerfile` / `docker-context`）是 `v1` 最後一個功能版，之後只修 bug、不再加功能。還指向 `@v1` 的專案照常能跑，新功能請照下一節升到 `v2`（`v2` 包含 1.4.0 的全部內容） |
+
+> ⚠️ **改完公版一定要移動目前的主版本 tag（`v2`）**，否則指向 `@v2` 的專案完全不會有感覺 —— main 領先 `v2` 好幾個 commit 卻沒人發現，是這套機制最容易出的事故。
 >
-> ⚠️ **只有會移動的 `v1` 是不夠的**。`v1` 移壞了就沒有「昨天的 v1」可退，所以每次都要留一個不可變的 `v1.x.y`。退回＝把 `v1` 指回上一個版本號。
+> ⚠️ **只有會移動的 `v2` 是不夠的**。`v2` 移壞了就沒有「昨天的 v2」可退，所以每次都要留一個不可變的 `v2.x.y`。退回＝把 `v2` 指回上一個版本號。
+>
+> ⚠️ **`v1` 只能移到 1.4.x 的 bug 修正版**，絕不能指到 2.x 的 commit。它是還沒升級的專案唯一的依靠，移錯了等於把破壞性變更硬塞給它們。
+
+### 從 v1 升級到 v2
+
+2.0.0 有幾個**破壞性變更**（完整清單見 [CHANGELOG 2.0.0](CHANGELOG.md)）：
+
+- `ci-reusable` 的 `run-python` 預設改成 `false`
+- `security-reusable` 移除了 `python-version` 與 `upload-sarif`（還在傳的話整支 workflow `invalid input`）
+- `fail-on-findings: false` 不再吞掉「掃描工具本身出錯」，那種情況會紅
+- `dockerfile` 預設從 `"Dockerfile"` 改成留空＝自動找全 repo，以前沒被檢查到的子目錄 Dockerfile 也會 build / 掃描
+  （1.4.0 明寫的 `dockerfile:` 照樣有效、升級時保留）
+- Copilot 自動修 / 自動審整組移除，留在專案裡的那幾支呼叫端每次 PR 都會 `startup_failure`
+
+升級步驟（每個已導入的專案各做一次）：
+
+1. **刪掉 Copilot 呼叫端**（導入腳本不會幫你刪 —— 它從不刪專案裡既有的檔案）：
+
+   ```bash
+   git rm .github/workflows/copilot-autofix-ci-security.yml \
+          .github/workflows/copilot-autofix-review.yml \
+          .github/workflows/copilot-autoreview-gate.yml \
+          .github/workflows/copilot-setup-steps.yml
+   ```
+
+   `.github/copilot-instructions.md` 可以留著（Copilot 在 IDE 裡仍會讀它），
+   repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可以一併刪掉。
+   `.github/zizmor.yml` 裡若還有指向那幾支 copilot workflow 的放行（例如 `dangerous-triggers`），一起拿掉。
+
+2. **用預設的 ref 重跑一次導入腳本**（預設就是 `v2`，不必加 `--ref`）：
+
+   ```bash
+   /path/to/ci-standards/scripts/adopt.sh            # 或 adopt.ps1
+   ```
+
+   它會把 `uses:` 改成 `@v2`、拿掉 `python-version` / `upload-sarif`、補上新 input（含依偵測結果寫明的 `run-python` / `run-dotnet`），
+   你調過的參數原樣保留。
+
+3. **看腳本最後印的「觸發條件（v2）」那一行**：
+   - 你的 `ci.yml` 還是 v1 範本原樣 → 腳本已經自動把 `pull_request` 加上 `edited`、並更新 job 的 `if` 與 `concurrency`（修「改 base 繞過分支政策」的洞）
+   - 印出 ⚠️「沒有自動改」→ 你改過觸發條件，請照公版範本 `templates/consumer-repo/.github/workflows/ci.yml` 手動補那三行
+     （有設 `restricted-base-branches` 時一定要補）
+   - `security.yml` 的 `concurrency` 還是 v1 範本原樣的話，也會一併改成依事件分組（排程重掃不再跟 push 互相取消）
+
+4. **確認 `run-python`**：Python 專案要是 `true`。腳本會依偵測結果寫，但偵測不到（例如 Python 檔藏得很深）時請自己改。
+
+5. `git diff` 看過、開 PR，等兩個 Gate 都綠再 merge。
+
+**分支保護不必改**：job 名稱沒變，`ci / CI Gate`、`security / Security Gate` 照舊。
+想順便補上 2.0.0 的「required check 只認 GitHub Actions 發的」（`integration_id`），重跑一次 `setup-branch-protection.sh` 即可（同名 ruleset 會更新，不會多一份）。
 
 發佈過哪些版本、每版改了什麼，記在 [CHANGELOG.md](CHANGELOG.md)。
 
 發佈的實際操作（tag 釘完整 SHA 而不是 HEAD、用 `git ls-remote` 驗收、tag 只能在本機推）
 寫在 [`docs/HANDOFF.md`](docs/HANDOFF.md) §3「發佈流程」。
-想知道 `v1` 現在落後 `main` 什麼，跑這行就夠：
+想知道 `v2` 現在落後 `main` 什麼，跑這行就夠：
 
 ```bash
-git log --oneline v1..main -- .github/workflows templates scripts
+git log --oneline v2..main -- .github/workflows templates scripts
 ```
 
 有輸出＝有還沒發佈的實質變更；只有 `docs/` 在動的話可以不發版。
@@ -743,23 +857,17 @@ ci-standards/
 │   ├── workflows/
 │   │   │  ── ① 公版本體（給別人 uses: 呼叫的）──
 │   │   ├── security-reusable.yml          ← 安全公版（Semgrep+OSV+Trivy+gitleaks+zizmor+Security Gate）
-│   │   ├── ci-reusable.yml                ← CI 公版（Python + Docker/hadolint + actionlint/shellcheck）
-│   │   ├── copilot-autofix-reusable.yml        ← Copilot 自動修（CI/Security 失敗）邏輯
-│   │   ├── copilot-autofix-review-reusable.yml ← Copilot 自動修（依 review 意見）邏輯
-│   │   ├── copilot-autoreview-reusable.yml     ← Copilot 自動審（兩個 Gate 都綠才請審）邏輯
+│   │   ├── ci-reusable.yml                ← CI 公版（Python + .NET + Docker/hadolint + actionlint/shellcheck + 分支政策）
 │   │   │
 │   │   │  ── ② 本 repo 自己的呼叫端（公版拿自己當第一個使用者，用 ./ 呼叫上面那些）──
 │   │   ├── ci.yml                         ← 自己跑 actionlint + shellcheck
 │   │   ├── security.yml                   ← 自己跑全部安全掃描（含 zizmor）
-│   │   ├── copilot-autofix-ci-security.yml
-│   │   ├── copilot-autofix-review.yml
-│   │   ├── copilot-autoreview-gate.yml
 │   │   │
 │   │   │  ── ③ 本 repo 自己的工具測試（不是公版，consumer 不會有這支）──
 │   │   └── adopt-tests.yml                ← 跑 scripts/test-adopt.sh，ubuntu / macOS / Windows 三平台；只動文件時整個跳過
 │   ├── zizmor.yml                     ← 本 repo 的 zizmor 放行規則（連 templates/ 一起管）
 │   ├── ISSUE_TEMPLATE/                ← bug / feature 兩種 Issue 表單
-│   ├── copilot-instructions.md        ← 本 repo 自己的 Copilot 規範
+│   ├── copilot-instructions.md        ← 給 AI 助理看的「改這個 repo 的鐵則」
 │   ├── pull_request_template.md       ← 本 repo 自己的 PR 檢查清單
 │   ├── CODEOWNERS
 │   └── dependabot.yml                 ← 本 repo 只有 github-actions 相依，每月
@@ -769,28 +877,24 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（71 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（84 項；在暫存目錄裡建測試 repo，不會動到本 repo）
 ├── docs/
+│   ├── FLOW.md                        ← 流程圖：一個 PR 從打開到能 merge 發生什麼、由哪支檔案負責
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh
-│   ├── SETUP.md                       ← 管理者用：公版發佈、Copilot 啟用、方案/額度
+│   ├── SETUP.md                       ← 管理者用：公版發佈、方案/額度
 │   ├── KNOWN-LIMITATIONS.md           ← ⚠️ 實測過但「還不能用」的東西，導入前必看
 │   ├── MIGRATION-TO-ORG.md            ← 把本 repo 搬到組織底下的 checklist
 │   ├── DEVSECOPS-NOTES.md             ← 工具怎麼選：為什麼是這幾套、哪些評估過但沒放進來
 │   └── openspec-dev-standards-report-2026-08-29.md
 │                                      ← 跨專案開發規範盤點與下一階段（OpenSpec／多 Agent）規劃，不是公版本體
 └── templates/consumer-repo/.github/   ← 各專案要複製過去的「呼叫端」範本
-    ├── zizmor.yml                     ← zizmor 放行規則（公版 @v1、兩支用 workflow_run 觸發的呼叫端 workflow）
-    ├── dependabot.yml
-    ├── copilot-instructions.md
+    ├── zizmor.yml                     ← zizmor 放行規則（公版 @v2 只要求釘 tag）
+    ├── dependabot.yml                 ← pip / docker / actions；nuget / npm 寫在檔尾註解，要用再打開
     ├── pull_request_template.md
     └── workflows/
         ├── security.yml               ← 呼叫安全公版
-        ├── ci.yml                     ← 呼叫 CI 公版
-        ├── copilot-setup-steps.yml        ← Copilot agent 環境準備
-        ├── copilot-autofix-ci-security.yml ← 選配：CI/Security 失敗 → 自動 @copilot 修
-        ├── copilot-autofix-review.yml     ← 選配：review 要求變更 → 自動 @copilot 修
-        └── copilot-autoreview-gate.yml    ← 選配：全過 → 自動請 Copilot 審
+        └── ci.yml                     ← 呼叫 CI 公版
 ```
 
 ---
@@ -808,7 +912,7 @@ ci-standards/
 | workflow 本身的安全 | zizmor（可選，建議開） | 腳本注入、危險觸發器、沒釘 SHA 的 action、權限過大、checkout 留下 token | workflow 呼叫的外部工具本身的漏洞 |
 | Container image CVE | Trivy image（可選） | build 出來的 image 裡 OS 套件與語言套件的 CVE | 上游還沒修的 CVE（預設 ignore-unfixed） |
 | Dockerfile 寫法 | hadolint（可選） | 沒釘版本的 apt、`latest`、`RUN` 裡的 shell 問題 | 不是安全問題的效能寫法 |
-| 程式碼品質 | ruff + pytest；actionlint + shellcheck | lint、測試、workflow 語法、shell 語法 | 測試本身寫得好不好 |
+| 程式碼品質 | ruff + pytest（Python）；dotnet format + build + test（.NET）；actionlint + shellcheck | lint、建置、測試、workflow 語法、shell 語法 | 測試本身寫得好不好；**前端（Node）的 lint / 測試 / build 公版還沒有**，見[前端](#前端react--vue--node) |
 
 **不涵蓋**：WAF、EDR、SIEM、CSPM、runtime 偵測、滲透測試、DAST（ZAP）、SBOM 簽章（cosign）。
 把它當「把明顯的炸彈擋在 main 之外」的第一道防線，很稱職；但它不是完整資安防護。
@@ -835,13 +939,14 @@ ci-standards/
 
 | 文件 | 給誰看 |
 |---|---|
+| [`docs/FLOW.md`](docs/FLOW.md) | 讀 README 之前的地圖 —— 一個 PR 從打開到能 merge，中間發生什麼、由哪支檔案負責 |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | **接手的人（含 AI）先讀這份** —— 現況快照、下一步做什麼、踩過哪些雷 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 一鍵導入 —— Windows / macOS、內網與離線做法、`gh` 是不是必要 |
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | **導入前必看** —— 實測過但還不能用的功能，含查問題的步驟 |
-| [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、Copilot 啟用、方案與額度 |
+| [`docs/SETUP.md`](docs/SETUP.md) | 管理者 —— 公版發佈、方案與額度 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 管理者 —— 搬到組織底下的 checklist |
 | [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md) | 想知道工具怎麼選、哪些評估過但沒放進來的人 |
 | [`docs/openspec-dev-standards-report-2026-08-29.md`](docs/openspec-dev-standards-report-2026-08-29.md) | 想知道「下一階段」怎麼規劃的人 —— 跨專案開發規範盤點、CLAUDE.md／rules／hooks 分層、OpenSpec 與多 Agent 工作流評估 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 要改公版、要提需求的人 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 想知道 `v1` 現在是什麼的人 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 想知道 `v2` 現在是什麼、從 `v1` 升上來改了什麼的人 |
 | [`SECURITY.md`](SECURITY.md) | 要回報弱點的人 |

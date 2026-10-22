@@ -1,10 +1,14 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-09-15　**已發佈版本 1.3.1**（發佈基準 `386c990`＝PR #34 的合併 commit，
+> **最後更新**：2026-10-22　**已發佈版本 1.4.0**（發佈基準 `ff5a781`＝PR #40 的合併 commit，`v1` 與 `v1.4.0^{}` 都指向它，已用 `git ls-remote` 驗過）。以下 1.3.1 的說明保留作紀錄（發佈基準 `386c990`＝PR #34 的合併 commit，
 > `v1` 與 `v1.3.1^{}` 都指向它，已用 `git ls-remote` 驗過）。1.3.1 只改用詞，行為跟 1.3.0 一樣。
 > **1.3.0 是一次大整理**：多了 zizmor（workflow 安全）、hadolint、SBOM 三個可選檢查，
 > 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支用 `workflow_run` 觸發的呼叫端 workflow 只理 PR，
 > 文件全面改成台灣口語。細節見 `CHANGELOG.md` 的 1.3.0 段。
+> **🚧 2.0.0 已寫好、還沒發佈**（新主版本 `v2`；在 develop 上的 1.4.0 要**先**發在 `v1`，2.0.0 包含 1.4.0 的全部內容）：
+> Copilot 自動修 / 自動審整組移除、`run-python` 預設改 `false`、`security-reusable` 拿掉 `python-version` / `upload-sarif`、
+> 新增 .NET 與「Dockerfile 找全 repo」、修掉改 PR base 繞過分支政策的洞。**`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補）。**
+> 發佈步驟見 §3 ⑪。
 > **2026-08-13 起是「兩台機器並存」** —— Windows 成為主要開發機（1.2.3 在那裡發佈），
 > macOS 那台仍在服役（跑 llmstack／geearning／MLX server），同日搬出了 OneDrive。
 > §4 整節改寫過。作廢的**只有 OneDrive 底下的舊 macOS 路徑**，不是 macOS 本身。
@@ -18,9 +22,9 @@
 > 歷史細節請看 `CHANGELOG.md`，這裡只寫**現在是什麼狀態、下一步做什麼**。
 >
 > ⚠️ **開始動手前先驗一次快照**（`git log --oneline -1`、
-> `git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'`）。
+> `git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'`）。
 > 這份文件可能是幾天前寫的 —— 照著過期的快照做，最糟的情況是重複
-> force-push `v1`。**實際狀態永遠以指令輸出為準，不是以這份文件為準。**
+> force-push 主版本 tag，或誤把 `v1` 移到 2.x。**實際狀態永遠以指令輸出為準，不是以這份文件為準。**
 
 ---
 
@@ -36,7 +40,7 @@
 | 3 | `CHANGELOG.md` 的 1.1.0 / 1.2.0 / 1.2.1 / 1.2.2 / 1.2.3 五段 | **每一版都在修「上一版以為修好、其實沒有」的東西**，這五段是全部的教訓來源 |
 | 4 | `docs/KNOWN-LIMITATIONS.md` | 哪些問題已知無解，別再花時間 |
 | 5 | `CONTRIBUTING.md` | 改公版的規矩（尤其「什麼情況要開 v2」） |
-| 6 | `docs/ADOPT.md` | 導入腳本的三類檔案策略 |
+| 6 | `docs/ADOPT.md` | 導入腳本的兩類檔案策略 |
 
 再跑一次 `git log --oneline -20` 與 `gh pr list --state merged --limit 10`
 （或用瀏覽器看 PR #8～#18），commit message 與 PR 內文寫得很細，是主要的決策紀錄。
@@ -49,24 +53,21 @@
 ## 1. 這個 repo 是什麼
 
 `singi0771/ci-standards` 是**中央公版**：一組 reusable workflow，各專案用一行
-`uses: singi0771/ci-standards/.github/workflows/xxx.yml@v1` 呼叫。
-改公版一次、**把 `v1` 移到新的 commit**，所有專案下次觸發就同步 ——
+`uses: singi0771/ci-standards/.github/workflows/xxx.yml@v2` 呼叫（2.0.0 之前是 `@v1`；`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補））。
+改公版一次、**把目前的主版本 tag（`v2`）移到新的 commit**，所有專案下次觸發就同步 ——
 這是它存在的全部理由。
 
-⚠️ **合併進 `main` 不等於發佈。** 使用端釘的是 `@v1`，`v1` 沒移動的話，
+⚠️ **合併進 `main` 不等於發佈。** 使用端釘的是主版本 tag，tag 沒移動的話，
 改再多它們完全不會有感覺。發佈永遠是兩步：合併 → 移 tag（見 §3 的發佈流程）。
 
-三條主線：
+兩條主線（2.0.0 起；之前還有第三條 Copilot 自動迴圈，已整組移除）：
 
-1. **CI**（`ci-reusable.yml`）：Python lint/test、Docker build（可加 hadolint）、actionlint + shellcheck（同一個 job）
+1. **CI**（`ci-reusable.yml`）：Python lint/test、.NET format/build/test（2.0.0 起）、Docker build（可加 hadolint）、actionlint + shellcheck（同一個 job）、PR 來源分支政策
 2. **Security**（`security-reusable.yml`）：Semgrep、Trivy（可加 SBOM / license）、OSV-Scanner、gitleaks、zizmor（可選）
-3. **Copilot 自動迴圈**：CI/Security 失敗 → 請 Copilot 修；兩條都過 → 請 Copilot 審；
-   審有意見 → 再請 Copilot 修
 
-**CI 與 Security 各有一個 Gate job**（`ci / CI Gate`、`security / Security Gate`），
-那兩個才是唯一該設為 required status check 的東西。
-Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 `if` 條件，
-被 skip 的 check 永遠不會回報，PR 會直接卡死。
+**兩條各有一個 Gate job**（`ci / CI Gate`、`security / Security Gate`），
+那兩個才是唯一該設為 required status check 的東西 ——
+子 job 都有 `if` 條件，被 skip 的 required check 永遠不會回報，PR 會直接卡死。
 
 ---
 
@@ -74,19 +75,24 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `386c990`（1.3.1，2026-09-15）。`main` 之後會領先它若干個純文件 commit，屬正常；要確認有沒有實質變更沒發請跑 `git log --oneline v1..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **1.3.1** |
-| `v1` tag | ✅ 已移到 `386c990`（1.3.1 已發佈，各專案下次觸發就會吃到） |
-| 最新版本 tag | ✅ `v1.3.1`（`v1.3.1^{}` → `386c990`，已驗證與 `v1` 同一 SHA） |
+| 發佈基準 | `ff5a781`（1.4.0，2026-10-22；前一版 1.3.1 在 `386c990`）。`main` 之後會領先它若干個純文件 commit，屬正常；要確認有沒有實質變更沒發請跑 `git log --oneline v1..main -- .github/workflows templates scripts`（`v2` 建立後改成 `v2..main`），有輸出才需要發版。2.0.0 發佈後這格要換成新的基準 |
+| CHANGELOG | 已寫到 **2.0.0（未發佈）**；最後一個已發佈的是 1.4.0（2026-10-22） |
+| `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
+| `v2` / `v2.0.0` tag | ⏳ **還沒建立**（見 §3 ⑪） |
+| 最新版本 tag | ✅ `v1.4.0`（`v1.4.0^{}` → `ff5a781`，已驗證與 `v1` 同一 SHA） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
-| 本 repo 的 `COPILOT_TRIGGER_PAT` | ❌ **沒設**（2026-09-14 用 `gh secret list` 查證是空的）。所以本 repo 自己的 PR 上，autofix 會貼留言但 Agent 不會動工。要不要設看你 —— 公版 PR 多半是人自己改，未必需要 |
+| Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 的呼叫方式**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 57 項回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過） |
+| adopt.sh | ✅ 回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過）。2.0.0 增為 72 項（本機 Windows Git Bash 跑過：65 過、1 項因沒裝 PyYAML 跳過）；三平台要等 PR 上的 `adopt-tests.yml` 跑完才算驗過 |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
-### 1.2.1 修了什麼（為什麼 AdminAutoTools 一定要重跑 adopt）
+### 1.2.1 修了什麼（歷史，2.0.0 後已無對象）
+
+> ⚠️ 這一段講的是 Copilot 呼叫端 workflow，**那三支在 2.0.0 已經整組移除**。
+> 保留是因為「就地合併只碰 `with:`，改 `if:` / `secrets:` 就必須整份換新」這個教訓還在，
+> 未來若再出現同類的呼叫端 workflow，會踩到一模一樣的坑。
 
 1.2.0 修好了 Copilot 自動修迴圈，改的是三支 `copilot-*` 呼叫端 workflow 的 **`if:` 條件**與
 **`secrets:` 區塊**。但當時的 `adopt.sh` 升級模式是「就地合併」，而**就地合併只碰 `with:`**。
@@ -107,8 +113,89 @@ Copilot 那三支沒有 Gate，**也絕不能設成 required** —— 它們有 
 > **① ② ③ ⑥ ⑦ ⑧ 都已完成**（劃掉保留，是為了留住「為什麼」與驗收方式）。
 > AdminAutoTools 的 CI／Security 在 Dependabot PR 上仍是真的紅（ruff／pytest、Semgrep、OSV）——
 > 那是 AdminAutoTools 自己的問題，要在那個 repo 處理，不是公版的事。
-> 本 repo 剩下的：④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）、
-> ⑨（AdminAutoTools 重跑一次 `adopt.sh` 吃到 1.3.0 的呼叫端 workflow 與 `zizmor.yml`）。
+> 本 repo 剩下的，依序：**⑪ 發佈 2.0.0** → ⑨（AdminAutoTools 改用 `@v2`）、
+> ⑩（套用 develop 流程的分支保護，**需 owner 帳號**）、④（GitHub 網頁設定，含把 `adopt regression gate` 設成 required）。
+>
+> **2.0.0 是新主版本 `v2`，不是移 `v1`。** 這一版有破壞性變更（移除 input、`run-python` 改預設值、
+> 移除 Copilot workflow），照[版本策略](../README.md#版本策略)開 `v2`。
+> 好處是還指向 `@v1` 的專案（目前只有 AdminAutoTools）完全不會被動到，不必先清乾淨才能發佈 ——
+> 它們之後各自改成 `@v2`（見 ⑨）。
+
+### ⑪ 發佈 2.0.0（下一步）
+
+> **⚠️ 順序：先發 1.4.0，再合併 2.0.0。** develop 上已經有 1.4.0（PR #37、#38，非破壞性，發在 `v1`）。
+> 2.0.0（PR #36）一旦合進 develop，develop → main 就只能整包一起上，1.4.0 再也無法單獨發在 `v1`。所以：
+> 1. ~~先開 develop → main 的 PR，合併後在 main 打 `v1.4.0` 並把 `v1` 移過去~~ ✅ 2026-10-22 完成（#39、#40；`v1` → `ff5a781`）。
+> 2. 之後才合併 PR #36 進 develop，再開 develop → main，合併後打 `v2.0.0` 與 `v2`（`v1` 不動）。
+
+程式與文件已在 `feat/drop-copilot-focus-ci-security` 分支上。本 repo 走 develop 流程，**一律開 PR**：
+
+1. **功能分支 → `develop`**：開 PR，等 `ci / CI Gate`、`security / Security Gate`、`adopt regression gate` 都綠
+   （`adopt regression gate` 這次一定會跑 —— 動到了 scripts / templates / workflow；Windows job 會實跑 PowerShell 5.1 對拍）。merge。
+2. **`develop` → `main`**：再開一個 PR，同樣等全綠再 merge。
+3. **在 `main` 上打 tag**（一定在本機做，雲端 session 推不了 tag）：
+
+   ```bash
+   git fetch origin --prune
+   git checkout main && git pull
+   git log --oneline -1                      # 確認是 develop → main 的那個 merge commit，記下完整 SHA
+
+   git tag -a v2.0.0 -m "2.0.0：移除 Copilot 自動修/審、新增 .NET、Dockerfile 找全 repo、修改 base 繞過分支政策" <完整 SHA>
+   git tag v2 <同一個完整 SHA>               # 新的主版本別名，第一次建立，不需要 -f
+   git push origin v2.0.0 v2
+
+   git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
+   ```
+
+   **驗收**：`refs/tags/v2` 與 `refs/tags/v2.0.0^{}` 指向同一個 SHA；`refs/tags/v1` **仍然是 `ff5a781`**（1.4.0）。
+
+4. ⛔ **不要動 `v1`**：不要 `git tag -f v1`、不要 `git push -f origin v1`。
+   `v1` 是還沒升級的專案唯一的依靠，移過去等於把破壞性變更硬塞給它們。
+5. 回到本檔把 §2 的快照改掉（`v2` 已建立、發佈基準換成新的 SHA），CHANGELOG 的 `[2.0.0] — 未發佈` 改成日期。
+6. 接著做 ⑨：AdminAutoTools 用 `@v2` 重新導入。
+
+> 本 repo 自己的呼叫端用 `uses: ./` 呼叫公版，不受 tag 影響，發佈前後都不用改。
+
+### ⑩ 套用 develop 流程的分支保護（**需要 repo owner 帳號**）
+
+`develop` 分支已建立（從 `main` 開出，同一個 commit）。剩下的都要 **admin 權限**，
+而 `joshisman12` / `joshisman0925` 兩個帳號對本 repo 都是 `admin: false` ——
+下面這幾步必須用 `singi0771` 本人的帳號做：
+
+1. **Settings → General → Default branch 改成 `develop`**
+   新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
+
+2. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
+
+   ```bash
+   REQUIRED_CHECKS="ci / CI Gate,security / Security Gate,adopt regression gate" \
+     ./scripts/setup-branch-protection.sh singi0771/ci-standards main develop
+   ```
+
+   這一行同時做掉四件事：必須開 PR（禁止直接 push）、三個 check 必須綠才能 merge、
+   禁止 force push、禁止刪分支。ruleset 沒有 `bypass_actors`，**admin 也繞不過**。
+
+   建出來的名稱是 `CI Standard - main+develop protection`，而本 repo 目前已經有一份
+   舊的 `CI Standard - main protection`（id `19769630`）。**兩份會疊加生效**，
+   腳本跑完會警告並印出刪除指令，照著刪掉舊的那份：
+
+   ```bash
+   gh api -X DELETE repos/singi0771/ci-standards/rulesets/19769630
+   ```
+
+   > 沒有 admin 權限的人可以先跑 `--dry-run` 把 payload 印出來交給有權限的人。
+
+3. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
+   `develop`。**已經開著的 PR #31 是發到 `main` 的**，要嘛把它的 base 改成 `develop`、
+   要嘛關掉讓 Dependabot 重開一份。留著不動的話，等政策生效後它會被 branch-policy 擋住。
+
+4. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
+   `ci / CI Gate` 應該紅，Summary 會說「不能直接合併進 main，允許的來源只有 develop」。
+   把 base 改成 `develop` 之後應該轉綠。（這一步到目前為止**還沒實證過** ——
+   失敗路徑只在本機用抽出來的判定邏輯跑過七種情境，沒有在真的 PR 上驗收。）
+
+> ⚠️ 第 2 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
+> 做了這步就不必再另外手動加。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）
 
@@ -187,32 +274,44 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\adopt.ps1 -Target 
 原本只是 Dependabot #27 那個 codeql-action 升版要發，結果 1.3.0 一次做完（見 CHANGELOG），
 版號直接跳 1.3.0（有新 input、有行為變更）。
 
-### ⑨ AdminAutoTools 重跑一次 adopt（吃到 1.3.0）
+### ⑨ AdminAutoTools 改用 `@v2`：重跑一次 adopt 並刪掉 Copilot 呼叫端（⑪ 發佈之後）
 
-1.3.0 改了三支呼叫端 workflow 的 `if:`（只理 PR 觸發的 run）、多了 `zizmor.yml`、`ci.yml` / `security.yml`
-多了 `run-hadolint` / `run-zizmor`。光移 `v1` 只會讓 reusable 生效，**呼叫端 workflow 跟新參數要重跑 `adopt.sh` 才會進去**：
+**一定要等 ⑪ 的 `v2` tag 推上去再做** —— adopt 預設寫 `@v2`，tag 還不存在的話那個 repo 的 CI 會直接找不到 workflow。
+
+**先刪 Copilot 那幾支，再跑 adopt。** 反過來也行，但別漏掉刪那一步 ——
+adopt 只改指向 `ci-reusable` / `security-reusable` 的 `uses:`，Copilot 那三支會原封不動留著、繼續指向 `@v1`。
+`v1`（1.4.x）裡那幾支 reusable 還在，所以不會立刻壞；但流程已不再維護、`v1` 也不會再有修補，
+而且誰哪天順手把它們改成 `@v2` 就會 `startup_failure`。一起刪掉最乾淨。
 
 ```bash
 cd /d/3_CodingProject/AdminAutoTools/AdminAutoTools
+git rm .github/workflows/copilot-autofix-ci-security.yml \
+       .github/workflows/copilot-autofix-review.yml \
+       .github/workflows/copilot-autoreview-gate.yml \
+       .github/workflows/copilot-setup-steps.yml
 /d/3_CodingProject/ci-standards/scripts/adopt.sh --dry-run    # 先看計畫
 /d/3_CodingProject/ci-standards/scripts/adopt.sh
 git diff --stat
 ```
 
-驗收：`git diff` 裡三支 `copilot-*` 呼叫端 workflow 的 `if:` 有 `workflow_run.event == 'pull_request'`，
-`.github/zizmor.yml` 存在，`security.yml` 有 `run-zizmor: true`。
+（`--ref` 不用加，預設就是 `v2`。）
+
+驗收：`.github/workflows/` 底下只剩 `ci.yml` 與 `security.yml`（加上那個 repo 自己寫的），
+兩支的 `uses:` 都是 `@v2`；`security.yml` 沒有 `python-version` / `upload-sarif`、有 `run-zizmor: true`；
+`ci.yml` 有 `run-python: true`（AdminAutoTools 是 Python 專案）。
+`.github/zizmor.yml` 存在且沒有指向已刪 workflow 的 `dangerous-triggers` 放行。順手把 repo secret `COPILOT_TRIGGER_PAT` 刪掉。
+看 adopt 報告的「觸發條件（v2）」那行：`ci.yml` 若被印 ⚠️「沒有自動改」，照範本手動補 `edited` 與對應的 `if` / `concurrency`。
 第一次跑 Security Scan 時 zizmor 可能會挑 AdminAutoTools 自己寫的 workflow（若有）的毛病，那是真的該修。
-另外那個 repo 的 `on: pull_request` 若想要「草稿 PR 不跑」，要照範本手動改（升級模式不動 `on:`）。
+另外那個 repo 的 `on: pull_request` 若想要「草稿 PR 不跑」，要照範本手動改（升級模式只自動修補 v1 範本原樣的那幾行）。
+分支保護的 ruleset 不必改（check 名稱沒變）；想補上 `integration_id` 就重跑一次 `setup-branch-protection.sh`。
 
 ### ④ 使用者端設定（GitHub 網頁，非程式）
 
-- [ ] **關掉 GitHub 原生的「自動請 Copilot code review」**。它會在 CI 之前就審，
-      違反「先讓免費掃描器擋掉明顯問題、確定值得看了才花 AI credits」的設計順序，
-      而且會審 Dependabot 的純版本更新（公版的 gate 刻意跳過那類）。
-      只留公版 `copilot-autoreview-gate` 驅動的那條。詳見 `docs/SETUP.md`。
-      **2026-09-14 觀察：本 repo 這個還開著** —— PR #32 一開、CI 還沒跑完就被 Copilot 審了
-      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。那次的 7 條意見倒是有 4 條真的該修，
-      所以不急著關；但 Dependabot PR 也會被審這件事還是在燒 credits。
+- [ ] **決定 GitHub 原生的「自動請 Copilot code review」要不要留**。2.0.0 拿掉了公版那條
+      gate 驅動的請審，所以現在只剩原生這一條，不再有「兩個來源互相打架」的問題。
+      它會在 CI 跑完之前就審（包含 Dependabot 的純版本更新），要省 credits 就關掉、
+      改成需要時在 PR 頁面手動 Reviewers → Copilot。本 repo 目前**還開著**
+      （run 名稱 `Running Copilot Code Review`，event 是 `dynamic`）。
 - [ ] 確認 ruleset 的 `required_review_thread_resolution: true`
 - [ ] **把 adopt 回歸測試加進本 repo 的 ruleset**（Settings → Rules → 編輯 ruleset →
       Require status checks to pass，加入這**一個** context）：
@@ -336,7 +435,9 @@ copilot-autoreview-reusable.yml@main
 
 ### 發佈流程（公版每次有實質變更就要做一次）
 
-**合併進 `main` 不是發佈。** 使用端釘 `@v1`，`v1` 沒移動 = 沒有任何專案會有感覺。
+**合併進 `main` 不是發佈。** 使用端釘主版本 tag（2.0.0 起是 `@v2`），tag 沒移動 = 沒有任何專案會有感覺。
+以下以 2.x 的一般發佈為例（`vX.Y.Z` 填 `v2.0.1` 這種）；**開新主版本**（例如 2.0.0 本身）的做法見 ⑪：
+建立新的 `vN` 而不是 `-f` 移動，舊的主版本 tag 不動。
 
 ```bash
 cd "$CODE_WORK/ci-standards"
@@ -347,22 +448,23 @@ git log --oneline -1        # 記下這個 SHA，下面用它
 git tag -a vX.Y.Z -m "一句話說明這版改了什麼" <上面那個完整 SHA>
 git push origin vX.Y.Z
 
-git tag -f v1 <同一個完整 SHA>
-git push -f origin v1
+git tag -f v2 <同一個完整 SHA>
+git push -f origin v2
 
-git ls-remote --tags origin | grep -E 'refs/tags/v1($|\.)'
+git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
 ```
 
-**驗收**：最後一行的輸出裡 `refs/tags/v1` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA。
+**驗收**：最後一行的輸出裡 `refs/tags/v2` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA，`refs/tags/v1` 沒變。
 （annotated tag 自己的物件 SHA 不同是正常的，要看 `^{}` 那一行。）
 
 幾個容易出錯的地方：
 
 - **tag 釘死完整 SHA，不要用 HEAD** —— 本機 `main` 若落後，用 HEAD 會打到錯的 commit。
-- **`v1` 是會移動的別名**，各專案的 `uses: ...@v1` 在**觸發當下**才解析，沒有 lockfile。
+- **`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補）；2.0.0 的任何改動都不要移 `v1`。**
+- **`v2` 是會移動的別名**，各專案的 `uses: ...@v2` 在**觸發當下**才解析，沒有 lockfile。
   `vX.Y.Z` 則是不可變的還原點，出事時各專案可以臨時改釘那個。
-- **破壞性變更不能移 `v1`** —— 改 input 名、改 job 名（consumer 的 ruleset 綁著
-  `ci / CI Gate`、`security / Security Gate`）都算，那要開 `v2`。判準見 `CONTRIBUTING.md`。
+- **破壞性變更不能移目前的主版本 tag** —— 改／移除 input、改會讓行為變的預設值、改 job 名（consumer 的 ruleset 綁著
+  `ci / CI Gate`、`security / Security Gate`）都算，那要開下一個主版本（`v3`）。判準見 `CONTRIBUTING.md`。
 - **純文件變更可以不發版**，等下次有實質變更再一起發。
 - **雲端 session 推不了 tag**（policy gateway 對 tag ref 回 403），這一步一律在本機做。
 
@@ -439,7 +541,7 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 ⚠️ **這台機器測不到 1.2.2 修的那兩個 bug**（bash 3.2 + BSD awk 是 macOS 專屬）。
 守住那條路徑的有兩個地方：**macOS 那台**（仍在服役，見下表）與 `adopt-tests.yml`
-的 `macos-latest`。**在 Windows 上 57 項全過，不代表 macOS 會過。**
+的 `macos-latest`。**在 Windows 上全過，不代表 macOS 會過。**
 
 - **公司 Windows 上的 curl 會被憑證撤銷檢查擋住**（`CRYPT_E_NO_REVOCATION_CHECK`），
   `gh` 沒事（它用 Go 自己的 TLS）。本機要用 curl 抓 release 檔或查 registry digest 時加
@@ -623,7 +725,10 @@ Git Bash 這台機器上的版本（`adopt.sh` 實際跑在這裡）：
 
 </details>
 
-### 關於 Copilot
+### 關於 Copilot（歷史；2.0.0 已移除自動修 / 自動審）
+
+> 前兩條講的是已移除的迴圈判定，保留是因為「Copilot 的 review 類型」這個事實沒變，
+> 將來若有人想重做類似的東西，這是第一個會踩的坑。第三條現在仍然適用。
 
 - **Copilot code review 永遠送 `COMMENTED`，不送 `changes_requested`。**
   呼叫端 workflow 只認 `changes_requested` 的話，它的意見永遠進不了自動修迴圈。

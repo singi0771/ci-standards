@@ -8,6 +8,11 @@
 #
 # 需求：已安裝並登入 GitHub CLI（gh auth login），且對目標 repo 有 **admin** 權限
 #
+# ⚠️ 不是每個 repo 都設得了：GitHub Free 方案的 **private** repo 不能用 ruleset / 分支保護
+#    （要 Pro / Team / Enterprise，或 repo 是 public）；公司 GHES 也可能由管理者統一管制。
+#    設不了的 repo 一樣可以導入公版 —— Gate 照跑、照樣紅，只是紅燈擋不住 merge。
+#    那種情況怎麼補位見 README「沒辦法設分支保護時」。
+#
 # 用法：./scripts/setup-branch-protection.sh <owner>/<repo> [分支...]
 #   ./scripts/setup-branch-protection.sh acme/app                 # 只保護 default branch
 #   ./scripts/setup-branch-protection.sh acme/app main develop    # 兩條長壽分支一起保護
@@ -77,6 +82,12 @@ RULESET_NAME="${RULESET_NAME:-$DEFAULT_RULESET_NAME}"
 #   ci.yml       的 job id 是 ci      ；公版彙總 job 名是 CI Gate
 REQUIRED_CHECKS="${REQUIRED_CHECKS:-security / Security Gate,ci / CI Gate}"
 
+# required check 要由哪個 GitHub App 回報才算數。預設 15368 = GitHub Actions。
+# 不鎖的話，任何對 repo 有 write 權限的人都能用 statuses API 自己發一個
+# 名叫「ci / CI Gate」的 success，騙過 required check。
+# 設成空字串＝不鎖（只有在 check 真的由別的 CI 系統回報時才這樣做）。
+CHECKS_INTEGRATION_ID="${CHECKS_INTEGRATION_ID-15368}"
+
 # 需要幾個人 approve 才能 merge。
 #
 # 預設 0，這是刻意的 —— 設 1 而團隊只有你一個人時，PR 會永遠 merge 不了：
@@ -91,12 +102,26 @@ REQUIRED_APPROVALS="${REQUIRED_APPROVALS:-0}"
 # 導入初期非常擾人。流程穩定後再改成 true。
 STRICT_CHECKS="${STRICT_CHECKS:-false}"
 
+# 數字 / 布林值會原樣塞進 JSON，先驗格式 —— 打錯字的結果是 gh 回一個看不懂的 parse error
+case "$REQUIRED_APPROVALS" in
+  ''|*[!0-9]*) echo "❌ REQUIRED_APPROVALS 必須是非負整數，收到：$REQUIRED_APPROVALS" >&2; exit 1 ;;
+esac
+case "$STRICT_CHECKS" in
+  true|false) ;;
+  *) echo "❌ STRICT_CHECKS 只能是 true 或 false，收到：$STRICT_CHECKS" >&2; exit 1 ;;
+esac
+case "$CHECKS_INTEGRATION_ID" in
+  '') ;;
+  *[!0-9]*) echo "❌ CHECKS_INTEGRATION_ID 必須是數字（或空字串＝不鎖），收到：$CHECKS_INTEGRATION_ID" >&2; exit 1 ;;
+esac
+
 echo "→ 目標 repo：$REPO"
 echo "  ruleset 名稱：$RULESET_NAME"
 echo "  保護的分支：${BRANCHES[*]}"
 echo "  required checks：$REQUIRED_CHECKS"
 echo "  required approvals：$REQUIRED_APPROVALS"
 echo "  strict status checks：$STRICT_CHECKS"
+echo "  check 來源 app：${CHECKS_INTEGRATION_ID:-<不鎖>}"
 
 # ── 組 JSON：分支條件 ────────────────────────────────────────
 # ruleset 的 include 只認 refs/heads/<樣式> 或 ~DEFAULT_BRANCH / ~ALL 這兩個保留字。
@@ -132,7 +157,11 @@ while IFS= read -r c; do
   c="${c%"${c##*[![:space:]]}"}"
   [ -n "$c" ] || continue
   if [ -n "$CHECKS" ]; then CHECKS="$CHECKS, "; fi
-  CHECKS="$CHECKS{ \"context\": \"$(json_escape "$c")\" }"
+  if [ -n "$CHECKS_INTEGRATION_ID" ]; then
+    CHECKS="$CHECKS{ \"context\": \"$(json_escape "$c")\", \"integration_id\": $CHECKS_INTEGRATION_ID }"
+  else
+    CHECKS="$CHECKS{ \"context\": \"$(json_escape "$c")\" }"
+  fi
 done <<EOF
 $(printf '%s' "$REQUIRED_CHECKS" | tr ',' '
 ')
@@ -187,9 +216,29 @@ fi
 # 名稱放進 jq 前一定要跳脫：jq 字串字面值與 JSON 相同，用 json_escape 包成 "…"。
 # 沒跳脫的話名稱含 " 時 filter 語法錯誤，又被 || true 吞掉 → 每次都誤判「不存在」而 POST 新的一份。
 NAME_JQ="\"$(json_escape "$RULESET_NAME")\""
+#
+# 先確認這個 repo 設得了 ruleset：Free 方案的 private repo 會回 403（訊息提到 Upgrade to GitHub Pro），
+# 沒權限或打錯名稱是 404。這兩種都要講清楚，不能直接去 POST、再噴一個更看不懂的錯。
+#
+# --paginate：ruleset 一頁只回 30 筆，超過就會找不到既有的那份而重複建立。
+# includes_parents=false：只看這個 repo 自己的 ruleset —— 組織層的同名 ruleset 用 repos/... 的 PUT 改不到。
+RULESETS_API="repos/$REPO/rulesets?includes_parents=false"
+if ! PROBE=$(gh api "$RULESETS_API" 2>&1 >/dev/null); then
+  echo "❌ 讀不到 $REPO 的 ruleset：" >&2
+  printf '%s
+' "$PROBE" | sed 's/^/     /' >&2
+  case "$PROBE" in
+    *[Uu]pgrade*|*403*)
+      echo "   這個 repo 不能用分支保護（多半是 Free 方案的 private repo）。" >&2
+      echo "   公版照樣能用，只是 Gate 紅燈擋不住 merge —— 見 README「沒辦法設分支保護時」。" >&2 ;;
+    *404*)
+      echo "   repo 名稱打錯，或你的帳號對它沒有 admin 權限。" >&2 ;;
+  esac
+  exit 1
+fi
 # 先把 gh 的輸出整份收下再取第一筆：直接 `| head -1` 在有多筆同名時會提早關掉管線，
 # gh 收到 SIGPIPE，pipefail 下就被誤判成「讀取失敗」—— 偏偏是最需要處理重複的時候。
-if ! _matches=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == $NAME_JQ) | .id"); then
+if ! _matches=$(gh api --paginate "$RULESETS_API" --jq ".[] | select(.name == $NAME_JQ) | .id"); then
   echo "❌ 讀取 $REPO 的 ruleset 清單失敗（權限不足或 repo 名稱錯誤？），中止以免重複建立" >&2
   exit 1
 fi
@@ -212,7 +261,7 @@ fi
 # 用 id 排除剛剛更新／建立的那一份，而不是用名稱：同名的重複 ruleset 也要列出來提醒清掉。
 # 名稱只認本腳本產生的兩種格式，不把使用者自己取名 "CI Standards for X" 之類的也抓進來。
 SELF_ID="${EXISTING_ID:-$NEW_ID}"
-OTHERS=$(gh api "repos/$REPO/rulesets" \
+OTHERS=$(gh api --paginate "$RULESETS_API" \
   --jq ".[] | select(.id != ${SELF_ID:-0}) | select(.name | test(\"^CI Standard( - | \\\\(branches: )\")) | \"\(.id)\t\(.name)\"" 2>/dev/null || true)
 
 echo

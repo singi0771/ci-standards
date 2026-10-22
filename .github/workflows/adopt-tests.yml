@@ -41,7 +41,7 @@ jobs:
   # 便宜的第一步：算出這次到底有沒有動到「會影響 adopt 的檔案」。
   # 只有 docs/、根目錄與 .github/ 底下的 .md、Issue 表單、LICENSE 算「純文件」；
   # 其他任何檔案都算會影響 —— adopt.sh 會讀 reusable 的 inputs 宣告，
-  # 而 templates/ 底下連 .md（copilot-instructions.md、PR 範本）都會被原樣複製到 consumer，
+  # 而 templates/ 底下連 .md（PR 範本）都會被原樣複製到 consumer，
   # 所以 templates/ 裡的 .md 不能排除。
   changes:
     name: adopt regression (changes?)
@@ -152,39 +152,61 @@ jobs:
           Write-Host "UTF-8 BOM 在，5.1 載入正常 ✅"
 
       # adopt.ps1 跟 adopt.sh 是同一套邏輯的兩個實作，docs/ADOPT.md 承諾兩者產出 byte-identical。
-      # 這裡真的跑一次 5.1 的 adopt.ps1 跟 adopt.sh，對同一個範例專案（含 --uses-repo）比對整個 .github/。
+      # 這裡真的跑一次 5.1 的 adopt.ps1 跟 adopt.sh，對同樣的範例專案（含 --uses-repo）比對整個 .github/。
       # 只 parse 不執行的話，兩支哪天各改各的、行為分岔，CI 不會知道。
+      #
+      # 兩種情境都要比：全新導入、以及升級 —— 升級那個故意塞了最容易分岔的寫法
+      # （CRLF、with: 裡的空行、uses: 行尾的註解與空白、with: 後面的註解、v1 範本的觸發條件、
+      # 沒有結尾換行、既有 zizmor.yml 要換 owner、帶 BOM 的 .python-version、大小寫不同的副檔名）。
       - name: adopt.sh 與 adopt.ps1 的產出必須 byte-identical
         if: ${{ runner.os == 'Windows' }}
         run: |
           P="$(mktemp -d)"
-          # 範例專案：root＝根目錄 Dockerfile；sub＝只在子資料夾（.NET 慣例）；multi＝多個子資料夾。
-          # sub 再跑第二次 adopt，比對升級模式（dockerfile: 只補一次、不重複）。
-          setup() {  # $1=情境 $2=sh|ps
-            d="$P/$1/$2"; mkdir -p "$d"
-            ( cd "$d" && git init -q . && git commit -q --allow-empty -m init \
-              && printf 'flask\n' > requirements.txt \
-              && mkdir -p bin && printf '#!/bin/sh\ntrue\n' > bin/x.sh
-              case "$1" in
-                root)  printf 'FROM python:3.12\n' > Dockerfile ;;
-                sub)   mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile ;;
-                multi) mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile ;;
-              esac )
+          mk_fresh() {
+            ( cd "$1" && git init -q . && git commit -q --allow-empty -m init \
+              && printf 'FROM python:3.12\n' > Dockerfile && printf 'flask\n' > requirements.txt \
+              && mkdir -p bin src/App && printf '#!/bin/sh\ntrue\n' > bin/x.SH \
+              && printf '<Project/>\n' > src/App/App.csproj \
+              && printf '\357\273\2773.11\r\n' > .python-version )
           }
-          run_both() {  # $1=情境
-            ./scripts/adopt.sh --std . --target "$P/$1/sh" --uses-repo ACME/ci-standards >/dev/null
+          # ⚠️ 下面的 "$''{{" / "$""{{" 是刻意拆開的：run: 裡只要出現連在一起的錢字號加兩個大括號，
+          #    GitHub 會先把它當運算式代換掉，fixture 就不是 v1 範本的原文了。
+          mk_upgrade() {
+            ( cd "$1" && git init -q . && git commit -q --allow-empty -m init \
+              && mkdir -p .github/workflows \
+              && printf '%s\r\n' 'name: CI' 'on:' '  pull_request:' \
+                   '    types: [opened, synchronize, reopened, ready_for_review]' \
+                   'concurrency:' '  group: ci-$''{{ github.ref }}' '  cancel-in-progress: true' \
+                   'jobs:' '  ci:' \
+                   "    if: \$""{{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}" \
+                   '    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1   # 公版' \
+                   '    with:   # 調過' '      python-version: "3.9"' '' '      legacy: true' \
+                   '      restricted-base-branches: "main"' '' > .github/workflows/ci.yml \
+              && printf 'jobs:\n  security:\n    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1  \n    with:\n      upload-sarif: false\n      severity: "HIGH"' \
+                   > .github/workflows/security.yml \
+              && printf '%s\r\n' 'rules:' '  unpinned-uses:' '    config:' '      policies:' \
+                   '        "singi0771/ci-standards/*": ref-pin' > .github/zizmor.yml )
+          }
+          FAIL=0
+          for kind in fresh upgrade; do
+            for v in sh ps; do
+              mkdir -p "$P/$kind-$v"
+              # 明寫 case 而不是 "mk_$kind"：shellcheck 看不出間接呼叫，會報 SC2329
+              case "$kind" in
+                fresh)   mk_fresh   "$P/$kind-$v" ;;
+                upgrade) mk_upgrade "$P/$kind-$v" ;;
+              esac
+            done
+            ./scripts/adopt.sh --std . --target "$P/$kind-sh" --uses-repo ACME/ci-standards >/dev/null
             powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
-              -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$1/ps")" -UsesRepo ACME/ci-standards >/dev/null
-          }
-          for s in root sub multi; do
-            setup "$s" sh; setup "$s" ps; run_both "$s"
-            diff -r "$P/$s/sh/.github" "$P/$s/ps/.github"
-            echo "情境 $s：byte-identical ✅"
+              -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$kind-ps")" -UsesRepo ACME/ci-standards >/dev/null
+            if diff -r "$P/$kind-sh/.github" "$P/$kind-ps/.github"; then
+              echo "$kind：adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
+            else
+              echo "::error::$kind：adopt.sh 與 adopt.ps1 的產出不一樣"; FAIL=1
+            fi
           done
-          run_both sub
-          diff -r "$P/sub/sh/.github" "$P/sub/ps/.github"
-          echo "情境 sub 升級：byte-identical ✅"
-          echo "adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
+          exit "$FAIL"
 
       # 呼應 docs/HANDOFF.md §5：測試曾經污染過本 repo 的 .github/，
       # 而「git status 乾淨」不等於沒事 —— 被改的檔案若被 commit 了也會乾淨。
