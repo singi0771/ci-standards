@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ### `upgrade` —— 目標已經有舊版呼叫端
 
-這是最容易出事的路徑，所以規則寫死。**檔案分三類，各有各的策略**：
+這是最容易出事的路徑，所以規則寫死。**檔案分兩類，各有各的策略**：
 
 | 類別 | 檔案 | 策略 |
 |---|---|---|
@@ -92,7 +92,8 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 > 2.0.0 之前還有第三類「只負責觸發的呼叫端 workflow」（三支 `copilot-*`），
 > 升級時整份換新。Copilot 流程移除後那一類已經沒有成員，腳本裡對應的程式碼也一併刪了。
 > **已導入的專案要自己 `git rm` 那三支**（加上 `copilot-setup-steps.yml`）——
-> 導入腳本從不刪專案裡既有的檔案，留著會指向不存在的 reusable、每次 PR 直接 `startup_failure`。
+> 導入腳本從不刪專案裡既有的檔案，但偵測到它們時會在「計畫」與最後的報告各印一次警告，附上要跑的 `git rm`。
+> 留著的話，一旦有人把它們改指 `@v2`（v2 沒有那幾支 reusable），每次 PR 都會直接 `startup_failure`。
 
 #### 1. 帶專案設定的：就地合併
 
@@ -166,7 +167,7 @@ Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋十一個情境共 79 項檢查（沒裝 PyYAML 的機器會跳過「產生的 YAML 是否合法」那一項），改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋十二個情境共 84 項檢查（沒裝 PyYAML 的機器會跳過「產生的 YAML 是否合法」那一項），改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -183,6 +184,7 @@ Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1
 | H 讀不到 inputs | 公版 reusable 的 inputs 讀不到時中止，使用者的 `with:` 設定原封不動 |
 | I 偵測範圍 | 深層目錄的 Dockerfile / `.sh` 偵測得到、`node_modules` 不算、小寫 `api.dockerfile` 不算、相對路徑呼叫不帶 `--std` 也找得到公版、1.4.0 範本的觸發條件不再被改動 |
 | J Dockerfile 不在根目錄 | 子資料夾的 Dockerfile 也會開 Docker 檢查但不寫 `dockerfile:`、升級時保留使用者自己寫的 `dockerfile:`（不會重複一行）、多個 Dockerfile 也照開 |
+| K Copilot 舊檔 | 專案裡還留著 1.x 的 `copilot-*` 呼叫端時，`--dry-run` 計畫與報告都會點名並給 `git rm` 指令；檔案本身不刪、維持 `@v1`；沒有時不出現警告 |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |
 | F 巢狀結構 | 目標是外層資料夾時，提示往下一層找 |

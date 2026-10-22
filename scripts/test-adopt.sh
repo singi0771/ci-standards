@@ -354,6 +354,33 @@ mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FRO
 has "$CI" 'run-docker-build: true' "多個 Dockerfile 也開 Docker 檢查（v2 的公版會逐一 build）"
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 K：1.x 留下的 Copilot 呼叫端要被明確點名（不刪，但警告不能漏）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo copilot-leftovers
+mkdir -p .github/workflows
+for f in copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml copilot-setup-steps.yml; do
+  printf 'jobs:\n  x:\n    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-reusable.yml@v1\n' > ".github/workflows/$f"
+done
+OUT_DRY="$("$ADOPT" --std "$STD" --dry-run 2>&1)"
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+case "$OUT_DRY" in
+  *"Copilot 呼叫端"*"copilot-autofix-ci-security.yml"*) ok "--dry-run 的計畫就會點名舊的 Copilot 呼叫端" ;;
+  *) bad "--dry-run 沒有點名舊的 Copilot 呼叫端" ;;
+esac
+case "$OUT" in
+  *"git rm"*"copilot-autofix-review.yml"*"copilot-autoreview-gate.yml"*"copilot-setup-steps.yml"*) ok "報告列出要 git rm 的四支 Copilot 檔案" ;;
+  *) bad "報告沒有列出要 git rm 的 Copilot 檔案（實際輸出：${OUT}）" ;;
+esac
+if [ -f .github/workflows/copilot-autofix-review.yml ]; then ok "照原則不刪專案既有的檔案"; else bad "不該自動刪掉使用者的檔案"; fi
+has ".github/workflows/copilot-autofix-review.yml" '@v1' "Copilot 呼叫端維持 @v1（不會被改成 v2 不存在的 reusable）"
+new_repo no-copilot
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+case "$OUT" in
+  *"Copilot 呼叫端"*) bad "沒有 Copilot 檔案時不該出現這段警告" ;;
+  *) ok "沒有 Copilot 檔案時不出現警告" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'
 # ═════════════════════════════════════════════════════════════
 FAKE_STD="$WORK/fake-std"

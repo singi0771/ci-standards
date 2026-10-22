@@ -877,7 +877,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（79 項；在暫存目錄裡建測試 repo，不會動到本 repo）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（84 項；在暫存目錄裡建測試 repo，不會動到本 repo）
 ├── docs/
 │   ├── FLOW.md                        ← 流程圖：一個 PR 從打開到能 merge 發生什麼、由哪支檔案負責
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）

@@ -393,6 +393,23 @@ foreach ($r in $ProjectOwned) {
 }
 Write-Host ""
 
+# ── 1.x 留下的 Copilot 呼叫端（與 adopt.sh 一致）──────────────
+# 2.0.0 移除了 Copilot 自動修 / 自動審，v2 已經沒有它們呼叫的 reusable。
+# 腳本照原則不刪專案既有的檔案，但一定要講出來：計畫階段一次（-DryRun 也看得到）、報告最後一次。
+$CopilotLeftovers = @(
+  '.github/workflows/copilot-autofix-ci-security.yml', '.github/workflows/copilot-autofix-review.yml',
+  '.github/workflows/copilot-autoreview-gate.yml', '.github/workflows/copilot-setup-steps.yml'
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+function Show-CopilotLeftovers {
+  if (-not $CopilotLeftovers) { return }
+  Warn "這個專案還留著 1.x 的 Copilot 呼叫端，2.0.0 已經沒有它們呼叫的 reusable，請刪掉："
+  foreach ($f in $CopilotLeftovers) { Write-Host "      $f" }
+  Write-Host ("    git rm " + ($CopilotLeftovers -join ' '))
+  Write-Host "    （repo secret COPILOT_TRIGGER_PAT 也可以一併刪除；.github/zizmor.yml 裡對它們的放行規則也拿掉）"
+  Write-Host ""
+}
+Show-CopilotLeftovers
+
 if ($DryRun) { Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"; Remove-TmpClone; exit 0 }
 
 New-Item -ItemType Directory -Force -Path '.github\workflows' | Out-Null
@@ -488,6 +505,7 @@ if ($MissingTpl.Count) {
   Write-Host ""
   Warn ("公版裡找不到這些範本，沒有導入: " + ($MissingTpl -join ' ') + "（公版 clone 可能不完整）")
 }
+if ($CopilotLeftovers) { Write-Host ""; Show-CopilotLeftovers }
 Write-Host "-----------------------------------------------------------"
 
 @'

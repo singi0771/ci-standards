@@ -148,6 +148,7 @@ CI 多了 .NET；Docker 檢查預設改成找全 repo；修掉「改 PR 的 base
 - 修正 `uses:` 行尾有空白或註解時沒被更新；而且只動指向 `ci-reusable` / `security-reusable` 的 `uses:`。
 - 讀不到公版 reusable 宣告的 inputs 時**中止**。之前會把呼叫端 `with:` 的設定全部當成已廢除刪掉。
 - 範本缺檔時回報，不再安靜略過；暫存 clone 在失敗時也會清掉。
+- 偵測到 1.x 留下的 `copilot-*` 呼叫端時，在計畫與報告各印一次警告並附上 `git rm` 指令（照原則不自動刪）。
 - `adopt.sh`：`.python-version` 的 UTF-8 BOM 與 CRLF 會去掉（PowerShell 5.1 寫的檔常帶 BOM，留著 setup-python 會失敗）；
   `adopt.sh` 改在任何 `cd` 之前算出腳本位置（相對路徑呼叫、不帶 `--std` 時以前會找不到公版）。
 - 偵測範圍改成跟公版 reusable 一致：全 repo、不限深度、略過 `node_modules`、檔名分大小寫（以前只看前幾層，深層的 Dockerfile / `.sh` 會被判成沒有、把檢查安靜關掉）。
@@ -161,7 +162,7 @@ CI 多了 .NET；Docker 檢查預設改成找全 repo；修掉「改 PR 的 base
   升級 fixture 加上 `with:` 裡的空行、註解、行尾空白、情境 G（v1 範本原樣的觸發條件修補 + CRLF + 重跑不再改動）、
   情境 H（讀不到 inputs 時中止）、情境 I（深層偵測、分大小寫、相對路徑呼叫、1.4.0 範本的觸發條件不再改動）、
   情境 J（子資料夾 Dockerfile 不寫 `dockerfile:`、升級保留使用者的 `dockerfile:`、多個 Dockerfile 照開）、半套觸發條件；
-  拿掉幾條恆真的 Copilot 斷言。共 79 項。
+  拿掉幾條恆真的 Copilot 斷言，改成情境 K（1.x 留下的 Copilot 呼叫端要被點名）。共 84 項。
 - `adopt-tests.yml` 的 Windows 對拍除了全新導入，再加一個刻意塞滿難搞寫法的升級 fixture，兩支都要 byte-identical；
   `push` 也在 `develop` 上跑。
 

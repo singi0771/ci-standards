@@ -352,6 +352,26 @@ for rel in $PROJECT_OWNED; do
 done
 info ""
 
+# ── 1.x 留下的 Copilot 呼叫端 ────────────────────────────────
+# 2.0.0 移除了 Copilot 自動修 / 自動審，v2 已經沒有它們呼叫的 reusable。
+# 腳本照原則不刪專案既有的檔案，但一定要講出來 —— 有人把它們的 @v1 改成 @v2，
+# 或日後 v1 不再保留那幾支，它們每次 PR 都會直接 startup_failure。
+# 計畫階段先講一次（--dry-run 也看得到），報告最後再講一次。
+COPILOT_LEFTOVERS=""
+for f in .github/workflows/copilot-autofix-ci-security.yml .github/workflows/copilot-autofix-review.yml \
+         .github/workflows/copilot-autoreview-gate.yml .github/workflows/copilot-setup-steps.yml; do
+  if [ -f "$f" ]; then COPILOT_LEFTOVERS="$COPILOT_LEFTOVERS $f"; fi
+done
+warn_copilot_leftovers() {
+  [ -n "$COPILOT_LEFTOVERS" ] || return 0
+  warn "這個專案還留著 1.x 的 Copilot 呼叫端，2.0.0 已經沒有它們呼叫的 reusable，請刪掉："
+  for f in $COPILOT_LEFTOVERS; do info "      $f"; done
+  info "    git rm$COPILOT_LEFTOVERS"
+  info "    （repo secret COPILOT_TRIGGER_PAT 也可以一併刪除；.github/zizmor.yml 裡對它們的放行規則也拿掉）"
+  info ""
+}
+warn_copilot_leftovers
+
 if [ "$DRY_RUN" = true ]; then
   info "（--dry-run：到此為止，沒有動任何檔案）"
   exit 0
@@ -520,6 +540,7 @@ if [ -n "$MISSING_TPL" ]; then
   info ""
   warn "公版裡找不到這些範本，沒有導入：$MISSING_TPL（公版 clone 可能不完整）"
 fi
+if [ -n "$COPILOT_LEFTOVERS" ]; then info ""; warn_copilot_leftovers; fi
 info "───────────────────────────────────────────────────────────"
 
 cat <<'NEXT'
