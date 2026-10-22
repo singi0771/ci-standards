@@ -99,6 +99,8 @@ jobs:
     with:
       python-version: "3.9"
       run-docker-build: false
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop hotfix/*"
       legacy-option: true
 OLD
 
@@ -184,6 +186,11 @@ has "$SEC" 'cron: "30 19 * * 3"'                "保留使用者自訂的 cron�
 # ── 公版已廢除的 input 必須移除 ──
 hasnt "$CI"  'legacy-option'  "移除公版已不存在的 legacy-option"
 hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
+
+# ── 選配的分支政策設定：公版認得，升級時必須原封不動 ──
+# 分支名稱是專案自己的決定，adopt 不能替它改或刪掉。
+has "$CI" 'restricted-base-branches: "main"'            "保留使用者設定的 restricted-base-branches"
+has "$CI" 'allowed-head-branches: "develop hotfix/*"'   "保留使用者設定的 allowed-head-branches"
 
 # ── 公版新增的 input 要補上 ──
 has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"
@@ -342,6 +349,47 @@ OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"請先 git init 或 clone"*) ok "沒有子 repo 時維持原訊息" ;;
   *) bad "沒有子 repo 時訊息不對（實際輸出：${OUT}）" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 G：Dockerfile 不在根目錄（.NET 常見的 src/<專案>/Dockerfile）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo subdir-docker
+mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+CI=".github/workflows/ci.yml"; SEC=".github/workflows/security.yml"
+has "$CI"  'run-docker-build: true'                "子資料夾唯一的 Dockerfile 也會開 run-docker-build"
+has "$CI"  'dockerfile: "src/Web.Api/Dockerfile"'  "ci.yml 帶入子資料夾 Dockerfile 路徑"
+has "$SEC" 'scan-docker-image: true'               "子資料夾 Dockerfile 也會開 scan-docker-image"
+has "$SEC" 'dockerfile: "src/Web.Api/Dockerfile"'  "security.yml 帶入子資料夾 Dockerfile 路徑"
+hasnt "$CI" 'docker-context:'                      "context 維持預設（repo 根目錄），不寫進呼叫端"
+
+# 升級：再跑一次，dockerfile: 只能有一行（不重複補）
+"$ADOPT" --std "$STD" >/dev/null
+check "升級後 ci.yml 的 dockerfile: 只有一行"       "$(grep -c '^ *dockerfile:' "$CI")"  "1"
+check "升級後 security.yml 的 dockerfile: 只有一行" "$(grep -c '^ *dockerfile:' "$SEC")" "1"
+
+# 升級：使用者自己改過的 dockerfile: 不被偵測值蓋掉
+sed 's|dockerfile: "src/Web.Api/Dockerfile"|dockerfile: "deploy/Custom.Dockerfile"|' "$CI" > "$CI.tmp" && mv "$CI.tmp" "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'dockerfile: "deploy/Custom.Dockerfile"' "升級時保留使用者自訂的 dockerfile:"
+check "升級後仍只有一行 dockerfile:" "$(grep -c '^ *dockerfile:' "$CI")" "1"
+
+# 根目錄有 Dockerfile 時維持舊行為：不帶 dockerfile: input
+new_repo root-docker
+printf 'FROM alpine\n' > Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+hasnt "$CI" 'dockerfile:' "根目錄 Dockerfile 不寫 dockerfile:（用預設值，呼叫端保持乾淨）"
+
+# 多個 Dockerfile：不猜，關掉 Docker 檢查並列出清單
+new_repo multi-docker
+mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+has "$CI" 'run-docker-build: false' "多個 Dockerfile 時不自動開 Docker 檢查"
+hasnt "$CI" 'dockerfile:'           "多個 Dockerfile 時不猜路徑"
+case "$OUT" in
+  *"svc/a/Dockerfile"*"svc/b/Dockerfile"*) ok "多個 Dockerfile 時列出所有候選" ;;
+  *) bad "沒有列出候選 Dockerfile（實際輸出：${OUT}）" ;;
 esac
 
 # ═════════════════════════════════════════════════════════════

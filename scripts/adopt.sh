@@ -125,8 +125,24 @@ found_any() {
   [ -n "$(find . -maxdepth "$1" -name "$2" -not -path './.git/*' -print -quit 2>/dev/null)" ]
 }
 
+# Dockerfile 不一定在根目錄（.NET 專案常放 src/<專案>/Dockerfile）。
+# 根目錄沒有時往下找：只有一個就用它，多個就列出來請使用者自己填 dockerfile input。
+# build context 維持預設 "."（Visual Studio / docker-compose 的慣例都是從 repo 根目錄 build）。
+DOCKERFILE_PATH=""
+DOCKERFILE_CANDIDATES=""
+if [ -f Dockerfile ]; then
+  DOCKERFILE_PATH="Dockerfile"
+else
+  # || true：碰到沒權限讀的子資料夾 find 會回 1，set -e 下不能讓整支腳本因此中止。
+  # -type f 不含符號連結、find 預設也不跟進目錄連結 —— adopt.ps1 照同樣規則略過連結。
+  DOCKERFILE_CANDIDATES="$(find . -maxdepth 4 -type f -name Dockerfile -not -path './.git/*' -not -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort || true)"
+  if [ -n "$DOCKERFILE_CANDIDATES" ] && [ "$(printf '%s\n' "$DOCKERFILE_CANDIDATES" | wc -l | tr -d ' ')" = 1 ]; then
+    DOCKERFILE_PATH="$DOCKERFILE_CANDIDATES"
+    DOCKERFILE_CANDIDATES=""
+  fi
+fi
 HAS_DOCKERFILE=false
-if [ -f Dockerfile ]; then HAS_DOCKERFILE=true; fi
+if [ -n "$DOCKERFILE_PATH" ]; then HAS_DOCKERFILE=true; fi
 HAS_PY=false
 if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || found_any 2 '*.py'; then
   HAS_PY=true
@@ -144,7 +160,11 @@ fi
 
 info "偵測結果："
 info "  模式         : $MODE $( [ "$MODE" = upgrade ] && echo '（已有呼叫端，改用合併模式）' || echo '（全新導入）')"
-info "  Dockerfile   : $HAS_DOCKERFILE"
+info "  Dockerfile   : $HAS_DOCKERFILE$( [ -n "$DOCKERFILE_PATH" ] && [ "$DOCKERFILE_PATH" != Dockerfile ] && echo "（$DOCKERFILE_PATH）")"
+if [ -n "$DOCKERFILE_CANDIDATES" ]; then
+  info "  ⚠ 找到多個 Dockerfile，不會自動開啟 Docker 相關檢查；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等設為 true："
+  printf '%s\n' "$DOCKERFILE_CANDIDATES" | while IFS= read -r f; do info "      $f"; done
+fi
 info "  Python       : ${HAS_PY}（版本 ${PYVER}）"
 info "  shell script : $HAS_SH"
 info ""
@@ -364,6 +384,14 @@ run-shellcheck: $HAS_SH"
 # run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
 SEC_ADDITIONS="scan-docker-image: $HAS_DOCKERFILE
 run-zizmor: true"
+
+# Dockerfile 在子資料夾時才帶 dockerfile:（在根目錄就用 input 預設值，呼叫端保持乾淨）
+if [ -n "$DOCKERFILE_PATH" ] && [ "$DOCKERFILE_PATH" != Dockerfile ]; then
+  CI_ADDITIONS="$CI_ADDITIONS
+dockerfile: \"$DOCKERFILE_PATH\""
+  SEC_ADDITIONS="$SEC_ADDITIONS
+dockerfile: \"$DOCKERFILE_PATH\""
+fi
 
 plan_line() { info "  $1"; }
 

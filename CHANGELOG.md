@@ -10,6 +10,49 @@
 
 ---
 
+## [1.4.0] — 2026-10-22
+
+**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變。**既有專案重跑 adopt 時，Dockerfile 在子資料夾的專案會補上缺少的 `dockerfile:`（ci.yml、security.yml 各一行），其他缺少的預設 input 也照舊補上；下面「呼叫端範本」的觸發條件變更**不會**自動套到既有專案，要用來源分支政策的專案請照該段手動修改。
+
+從 #36 拆出來先發：#36 其餘的「移除 Copilot 自動修 / 自動審」是破壞性變更，依[版本策略](README.md#版本策略)改走 `v2.0.0`。
+
+### 新增 —— PR 來源分支政策（ci-reusable）
+- 兩個選配 input：`restricted-base-branches`（要管制的 base，空白隔開、支援 glob）與
+  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**，既有呼叫端行為完全不變。
+- 新 job `PR source branch policy`，只在 `pull_request` 事件且 `restricted-base-branches`
+  有值時執行，結果收進 `ci / CI Gate` —— **專案端的 ruleset 一個字都不用改**。
+- 判定順序：base 不受管制→通過；受管制但沒列允許來源→失敗（視為漏填）；
+  來自 fork→失敗；head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
+- 公版不寫死任何分支名稱，也不預設任何分支模型。
+
+### 變更 —— 呼叫端範本（templates/consumer-repo）
+- `ci.yml` 的 `pull_request.types` 加上 `edited`，job 只在「改了目標分支」的 edited 才跑：
+  PR 從 develop 改發到 main 時來源分支政策會重跑，不會沿用舊的綠燈；改標題、內文不重跑。
+  **⚠️ 已導入的專案重跑 adopt 不會改到這段**（adopt 升級只合併 `with:`，不動 `on:`、`if:`、`concurrency:`）。
+  有設 `restricted-base-branches` 的專案要手動把 `.github/workflows/ci.yml` 改成和範本一致：
+  `pull_request.types` 加 `edited`、`jobs.ci.if` 與 `concurrency.group` 照範本改。
+  沒用來源分支政策的專案可以不改。
+- `ci.yml` 的 `concurrency.group`：改標題／內文的 edited 改用獨立 group，
+  不會把同一個 PR 正在跑的 CI 取消掉（否則該 commit 會沒有 CI Gate 結果）。
+
+### 新增 —— Dockerfile 路徑（ci-reusable、security-reusable）
+- 新 input `dockerfile`（預設 `Dockerfile`）與 `docker-context`（預設 `.`），
+  Docker build check、hadolint、Trivy image 掃描都改用它們。
+  特別指定的路徑找不到時直接失敗（避免打錯字讓檢查被靜靜略過）；預設值找不到維持「略過」。Dockerfile 放在子資料夾
+  （例如 `src/Web.Api/Dockerfile`）的專案不必再整組關掉。
+- `adopt.sh` / `adopt.ps1` 也會找子資料夾裡的 Dockerfile：只有一個時自動填入兩個 input，
+  多個時印出清單請使用者挑。
+
+### 變更 —— 分支保護腳本（setup-branch-protection.sh）
+- 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，支援 fnmatch 樣式。
+  不給分支時維持舊行為（只保護 default branch）。
+- 新增 `REQUIRED_CHECKS` 環境變數與 `--dry-run`。
+- 指定分支時 ruleset 名稱為 `CI Standard (branches: <排序後的分支清單>)`，與無參數模式的
+  `CI Standard - main protection` 不同名，不同分支清單也不會撞名而互相覆蓋；名稱放進查詢前會跳脫，
+  讀取 ruleset 清單失敗時中止，不再誤判「不存在」而重複建立。
+
+---
+
 ## [1.3.1] — 2026-09-15
 
 **只改用詞，沒有任何行為變更。** 指向 `@v1` 的專案 CI 行為完全不變；因為範本與導入腳本的
