@@ -56,10 +56,10 @@ flowchart TD
 
 1. **CI 與 Security 是兩條獨立、並行的 workflow**，各自有自己的 Gate。分支保護只要求這兩個 Gate。
    repo 設不了分支保護時（例如 Free 方案的 private repo），Gate 照跑、照樣紅，但擋不住 merge ——
-   見 [README 的「沒辦法設分支保護時」](../README.md#沒辦法設分支保護時)。
+   見 [README 的「無法設定分支保護時」](../README.md#無法設定分支保護時)。
 2. **公版不會替你改任何程式碼**。它只負責「找」與「擋」，修與決定都是人。
 3. **圖裡沒有出現任何分支名稱**，這是刻意的 —— 要用什麼分支模型由各專案決定，
-   見 [README 的分支模型](../README.md#分支模型pr-要發到哪裡)。本 repo 自己走的是
+   見 [README 的分支模型](../README.md#分支模型)。本 repo 自己走的是
    「功能分支 → PR → `develop` → PR → `main`」，靠 `restricted-base-branches` 擋住發錯地方的 PR。
 
 > ℹ️ 2.0.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。

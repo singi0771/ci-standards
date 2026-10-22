@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `ff5a781`（1.4.0，2026-10-22；前一版 1.3.1 在 `386c990`）。`main` 之後會領先它若干個純文件 commit，屬正常；要確認有沒有實質變更沒發請跑 `git log --oneline v1..main -- .github/workflows templates scripts`（`v2` 建立後改成 `v2..main`），有輸出才需要發版。2.0.0 發佈後這格要換成新的基準 |
-| CHANGELOG | 已寫到 **2.0.0（2026-10-22）**；1.4.0 同日發在 `v1` |
+| 發佈基準 | `v2.0.1`（2026-10-22，SHA 以 `git rev-parse v2.0.1^{}` 為準；前一版 2.0.0 在 `dad6a47`）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.0.1（2026-10-22）** |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` / `v2.0.0` tag | ⏳ **還沒建立**（見 §3 ⑪） |
-| 最新版本 tag | ✅ `v1.4.0`（`v1.4.0^{}` → `ff5a781`，已驗證與 `v1` 同一 SHA） |
+| `v2` tag | ✅ 指向 2.0.1（`v2.0.0^{}` → `dad6a47`）。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.0.1`（驗收：`v2` 與 `v2.0.1^{}` 同一 SHA，`v1` 仍在 `ff5a781`） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |

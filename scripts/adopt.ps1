@@ -525,7 +525,7 @@ Write-Host "-----------------------------------------------------------"
 
  4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
     不是每個 repo 都設得了（例如 Free 方案的 private repo）—— 設不了時 Gate 照跑、
-    紅燈只能提醒、擋不住 merge，補位做法見 README「沒辦法設分支保護時」。
+    紅燈只能提醒、擋不住 merge，補位做法見 README「無法設定分支保護時」。
 
  5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；

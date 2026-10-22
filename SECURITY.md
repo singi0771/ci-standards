@@ -41,4 +41,4 @@
 
 公版提供的是**開發階段就先擋**的防護（SAST、相依 CVE、密鑰、IaC/Docker 設定、workflow 本身的安全）。
 它**不是**完整資安防護 —— 不含 WAF、EDR、SIEM、CSPM、runtime 偵測、滲透測試、DAST。
-詳見 [README — 這套涵蓋什麼、不涵蓋什麼](README.md#這套涵蓋什麼不涵蓋什麼)。
+詳見 [README — 這套涵蓋什麼、不涵蓋什麼](README.md#涵蓋範圍)。
