@@ -70,12 +70,31 @@ has "$CI"  'run-docker-build: true'    "run-docker-build 依 Dockerfile 設為 t
 has "$CI"  'run-shellcheck: true'      "run-shellcheck 依 .sh 設為 true"
 has "$CI"  'run-hadolint: true'        "run-hadolint 依 Dockerfile 設為 true"
 has "$CI"  'python-version: "3.11"'    "python-version 讀到 .python-version"
+has "$CI"  'run-dotnet: false'         "沒有 .NET 專案時 run-dotnet 為 false"
+has "$CI"  'ci-reusable.yml@v2'        "全新導入預設指向 @v2"
+has "$CI"  'ready_for_review, edited]' "範本的 pull_request 有 edited（改 base 時重跑來源分支政策）"
 has "$SEC" 'scan-docker-image: true'   "scan-docker-image 依 Dockerfile 設為 true"
 has "$SEC" 'run-zizmor: true'          "run-zizmor 預設打開"
 hasnt "$SEC" 'python-version'          "security.yml 不再傳沒有任何步驟用到的 python-version"
 has ".github/zizmor.yml" 'singi0771/ci-standards/*' "zizmor.yml 有建立，且放行規則指向公版"
 if [ -f ".github/pull_request_template.md" ]; then ok "pull_request_template.md 有建立"; else bad "應建立 pull_request_template.md"; fi
 if [ ! -e ".github/zizmor.yml.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 A2：全新導入（.NET 專案、Dockerfile 在子目錄、.python-version 帶 BOM）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo dotnet
+mkdir -p src/App deploy
+printf '<Project Sdk="Microsoft.NET.Sdk"></Project>\n' > src/App/App.csproj
+printf 'Microsoft Visual Studio Solution File\n' > App.sln
+printf 'FROM mcr.microsoft.com/dotnet/aspnet:10.0\n' > deploy/Dockerfile
+# PowerShell 5.1 的 Set-Content -Encoding UTF8 會寫 BOM、Windows 編輯器會寫 CRLF
+printf '\357\273\2773.11\r\n' > .python-version
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  'run-dotnet: true'          "偵測到 .sln / .csproj → run-dotnet 為 true"
+has "$CI"  'run-python: false'         "沒有 Python 時 run-python 為 false（v2 起語言檢查預設關）"
+has "$CI"  'run-docker-build: true'    "子目錄的 Dockerfile 也算有 Dockerfile"
+has "$CI"  'python-version: "3.11"'    ".python-version 的 BOM 與 CRLF 被去掉"
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 B：升級既有的舊版呼叫端\n'
@@ -95,10 +114,12 @@ on:
   pull_request:
 jobs:
   ci:
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1   # 公版
     with:
       python-version: "3.9"
       run-docker-build: false
+
+      # 分支政策（空行之後的 key 也要被正確過濾）
       restricted-base-branches: "main"
       allowed-head-branches: "develop hotfix/*"
       legacy-option: true
@@ -112,11 +133,12 @@ on:
     - cron: "30 19 * * 3"        # 這個專案自己調過的排程，必須保留
 jobs:
   security:
-    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
-    with:
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1  
+    with:   # 這個專案調過的設定
       python-version: "3.9"
       severity: "CRITICAL,HIGH,MEDIUM"
       fail-on-findings: false
+      upload-sarif: false
       obsolete-flag: "x"
 OLD
 
@@ -135,6 +157,10 @@ has "$SEC" 'cron: "30 19 * * 3"'                "保留使用者自訂的 cron�
 # ── 公版已廢除的 input 必須移除 ──
 hasnt "$CI"  'legacy-option'  "移除公版已不存在的 legacy-option"
 hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
+hasnt "$SEC" 'python-version' "移除 v2 拿掉的 security python-version"
+hasnt "$SEC" 'upload-sarif'   "移除 v2 拿掉的 upload-sarif"
+check "空行後面的 key 不會被重複補上（run-python 只出現一次）" "$(grep -c 'run-python:' "$CI")" "1"
+has "$CI" '# 分支政策（空行之後的 key 也要被正確過濾）' "with: 區塊裡的空行與註解原樣保留"
 
 # ── 選配的分支政策設定：公版認得，升級時必須原封不動 ──
 # 分支名稱是專案自己的決定，adopt 不能替它改或刪掉。
@@ -146,12 +172,12 @@ has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"
 has "$CI" 'run-python:'       "補上新版才有的 run-python"
 has "$CI" 'run-hadolint:'     "補上新版才有的 run-hadolint"
 has "$SEC" 'run-zizmor:'      "補上新版才有的 run-zizmor"
-has "$SEC" 'python-version: "3.9"' "舊呼叫端已經在傳的 python-version 照樣保留（公版仍認得它）"
 if [ -f ".github/zizmor.yml" ]; then ok "升級時補上原本沒有的 zizmor.yml"; else bad "升級時應補上 zizmor.yml"; fi
 
 # ── uses: 要更新 ref ──
-has "$CI"  'ci-reusable.yml@v1.1.0'        "ci.yml 的 uses: ref 已更新"
-has "$SEC" 'security-reusable.yml@v1.1.0'  "security.yml 的 uses: ref 已更新"
+has "$CI"  'ci-reusable.yml@v1.1.0   # 公版' "uses: 行尾有註解時 ref 照樣更新、註解原樣保留"
+has "$SEC" 'security-reusable.yml@v1.1.0'      "uses: 行尾有空白時 ref 照樣更新"
+has "$SEC" 'run-zizmor:'                       "with: 後面有註解也認得出區塊（有補上新 input）"
 
 # ── job id 不可以被動到（分支保護綁著它）──
 has "$CI"  '  ci:'        "job id 'ci' 未被更動"
@@ -161,14 +187,8 @@ has "$SEC" '  security:'  "job id 'security' 未被更動"
 has ".github/pull_request_template.md" '專案專屬內容，絕不能被洗掉' "既有 pull_request_template.md 未被覆蓋"
 if [ -f ".github/pull_request_template.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
 
-# ── 已移除的 Copilot 流程不得再被導入 ──
-# 1.4.0 把 Copilot 自動修 / 自動審整組拿掉了。導入腳本若還在複製那些檔案，consumer 會
-# 拿到指向不存在 reusable 的呼叫端 workflow —— 每次 PR 都直接 startup_failure。
-for gone in copilot-autofix-ci-security.yml copilot-autofix-review.yml \
-            copilot-autoreview-gate.yml copilot-setup-steps.yml; do
-  if [ -e ".github/workflows/$gone" ]; then bad "不該再導入已移除的 $gone"; else ok "不再導入已移除的 $gone"; fi
-done
-if [ -e ".github/copilot-instructions.md" ]; then bad "不該再導入 copilot-instructions.md"; else ok "不再導入 copilot-instructions.md"; fi
+# ── 觸發條件不是 v1 範本原樣 → 不自動改（只回報），檔案裡也不會出現 edited ──
+hasnt "$CI" 'edited' "觸發條件被使用者改過時，不自作主張加 edited"
 
 # ── 產生的 YAML 必須合法 ──
 # 先確認 PyYAML 真的裝得起來 —— 只檢查 python3 存在是不夠的：
@@ -216,6 +236,107 @@ if [ -z "$(git status --porcelain)" ]; then ok "第二次執行沒有產生任�
 fi
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 G：v1 範本原樣的呼叫端升級到 v2（觸發條件修補、CRLF）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo v1-template
+mkdir -p .github/workflows
+cat > "$WORK/v1-ci.lf" <<'OLD'
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ci:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      python-version: "3.12"
+      run-python: true
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop"
+OLD
+# 用 CRLF 寫：Windows 上 core.autocrlf=true 簽出的檔案就是這樣
+sed 's/$/\r/' "$WORK/v1-ci.lf" > "$CI"
+cat > "$SEC" <<'OLD'
+name: Security Scan
+on:
+  pull_request:
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  security:
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
+    with:
+      upload-sarif: false
+      run-zizmor: true
+OLD
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  'ready_for_review, edited]'                                     "v1 範本的 types 補上 edited"
+has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "job if 一起改成「只有改 base 的 edited 才跑」"
+has "$CI"  "&& 'noop' || 'run' }}"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
+has "$CI"  'ci-reusable.yml@v2'                                            "uses: 改指向 @v2"
+has "$SEC" 'group: security-${{ github.event_name }}-${{ github.ref }}'    "security.yml 的 concurrency 依事件分組"
+if grep -q "$(printf '\r')" "$CI"; then bad "CRLF 呼叫端合併後應統一成 LF"; else ok "CRLF 呼叫端合併後統一成 LF（與 adopt.ps1 一致）"; fi
+cp "$CI" "$WORK/v1-ci-after"
+"$ADOPT" --std "$STD" >/dev/null
+if cmp -s "$CI" "$WORK/v1-ci-after"; then ok "觸發條件修補可重複執行（第二次不再變動）"; else bad "第二次執行又改了 ci.yml"; fi
+
+# 半套：使用者手動加了 edited，但 if / concurrency 還是 v1 —— 也要補齊
+new_repo v1-half
+mkdir -p .github/workflows
+sed -e 's/ready_for_review\]/ready_for_review, edited]/' "$WORK/v1-ci.lf" > "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "只加了 edited 的半套狀態：job if 也補上"
+has "$CI"  "&& 'noop' || 'run' }}"                                         "只加了 edited 的半套狀態：concurrency 也補上"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 I：偵測範圍要跟公版 reusable 實際檢查的範圍一致\n'
+# ═════════════════════════════════════════════════════════════
+new_repo deep
+mkdir -p services/api/build tools/ci/scripts/x node_modules/pkg
+printf 'FROM alpine\n' > services/api/build/Dockerfile          # 第 4 層：公版會 build 它
+printf '#!/bin/sh\ntrue\n' > tools/ci/scripts/x/run.sh          # 第 5 層：公版會 shellcheck 它
+printf '#!/bin/sh\ntrue\n' > node_modules/pkg/postinstall.sh   # node_modules：公版不看
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: true' "深層目錄的 Dockerfile 也偵測得到"
+has "$CI" 'run-shellcheck: true'   "深層目錄的 .sh 也偵測得到"
+new_repo lowercase-dockerfile
+printf 'FROM alpine\n' > api.dockerfile                        # 公版的 find 分大小寫，不會 build 它
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: false' "小寫的 api.dockerfile 不算（公版也不會 build 它）"
+
+# 不帶 --std、用相對路徑呼叫：腳本要靠自己的位置找到公版（舊版在 cd 之後才算位置，會找錯）
+new_repo relative
+TARGET_DIR="$PWD"
+if ( cd "$STD" && ./scripts/adopt.sh --target "$TARGET_DIR" --dry-run >/dev/null 2>&1 ); then
+  ok "相對路徑呼叫、不帶 --std 也找得到公版"
+else
+  bad "相對路徑呼叫、不帶 --std 時找不到公版"
+fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'
+# ═════════════════════════════════════════════════════════════
+FAKE_STD="$WORK/fake-std"
+mkdir -p "$FAKE_STD/.github/workflows"
+cp -R "$STD/templates" "$FAKE_STD/"
+cp "$STD/.github/workflows/security-reusable.yml" "$FAKE_STD/.github/workflows/"
+# ci-reusable 的 inputs: 那一行格式變了 → 解析結果是空的
+sed 's/^    inputs:$/    inputs:  # changed/' "$STD/.github/workflows/ci-reusable.yml" > "$FAKE_STD/.github/workflows/ci-reusable.yml"
+new_repo guard
+mkdir -p .github/workflows
+printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1\n    with:\n      run-python: true\n' > "$CI"
+cp "$CI" "$WORK/guard-before"
+if "$ADOPT" --std "$FAKE_STD" >/dev/null 2>&1; then bad "讀不到 inputs 時應該中止"; else ok "讀不到 inputs 時中止"; fi
+if cmp -s "$CI" "$WORK/guard-before"; then ok "中止時呼叫端原封不動"; else bad "中止前已經改動了呼叫端"; fi
+
+# ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 D：--dry-run 不得動到任何檔案\n'
 # ═════════════════════════════════════════════════════════════
 new_repo dryrun
@@ -227,7 +348,7 @@ printf '\n▸ 情境 E：--uses-repo（搬到組織時換掉 owner/repo）\n'
 # ═════════════════════════════════════════════════════════════
 new_repo orgmove
 "$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
-has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 owner/repo 已換成 ACME"
+has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v2' "uses: 的 owner/repo 已換成 ACME"
 has ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "zizmor.yml 的放行規則也換成 ACME"
 hasnt ".github/zizmor.yml" 'singi0771' "zizmor.yml 不再留著舊的 owner"
 

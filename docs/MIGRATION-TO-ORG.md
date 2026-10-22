@@ -106,15 +106,15 @@ REQUIRED_APPROVALS=1 ./scripts/setup-branch-protection.sh ORG/ci-standards
 搬完之後，每一個 consumer repo 都要開一個小 PR：
 
 ```diff
--    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
-+    uses: ORG/ci-standards/.github/workflows/ci-reusable.yml@v1
+-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
++    uses: ORG/ci-standards/.github/workflows/ci-reusable.yml@v2
 ```
 
 （`security.yml` 同理；`.github/zizmor.yml` 裡的放行規則也要換 owner，
-不然 zizmor 會開始抱怨 `@v1` 沒釘 SHA。）
+不然 zizmor 會開始抱怨 `@v2` 沒釘 SHA。）
 最省事的做法是用導入腳本一次換完：`adopt.sh --uses-repo ORG/ci-standards`。
 
-> **順序很重要**：先確認新路徑的 `@v1` 真的解析得到（拿一個 repo 試一次），再通知其他人改。
+> **順序很重要**：先確認新路徑的 `@v2` 真的解析得到（`v2` 與 `v2.x.y` tag 要跟著 repo 一起搬過去）（拿一個 repo 試一次），再通知其他人改。
 > 全部改完之前**不要**刪掉或改名舊 repo。
 
 ### 7. 最後驗證

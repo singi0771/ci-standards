@@ -39,29 +39,29 @@ git tag v1 && git push origin v1
 
 ### 改完公版之後
 
-⚠️ **一定要移動 tag，否則所有專案完全不會有感覺**（大家都指向 `@v1`）。
+⚠️ **一定要移動目前的主版本 tag，否則所有專案完全不會有感覺**（2.0.0 起大家指向 `@v2`；`v1` 凍結在 1.3.1，不再移動）。
 
 每次發佈打**兩個** tag：不可變的版本號（還原點）+ 會移動的別名（大家指向的）。
 
 ```bash
-git tag -a v1.2.0 -m "說明" && git push origin v1.2.0   # 不可變
-git tag -f v1 && git push -f origin v1                  # 移動別名
-git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞性變更
+git tag -a v2.0.1 -m "說明" && git push origin v2.0.1   # 不可變
+git tag -f v2 && git push -f origin v2                  # 移動別名
+git tag -a v3.0.0 -m "..." && git tag v3 && git push origin v3.0.0 v3   # 下一次破壞性變更才開新主版本
 ```
 
 並在 [CHANGELOG.md](../CHANGELOG.md) 補上這一版。判斷標準見 [README — 版本策略](../README.md#版本策略)。
 
-> 🔴 **這是這套機制最容易出的事故**：改動合進 `main`，但忘了移 `v1`，
-> 於是 `main` 領先 `v1` 好幾個 commit 而沒有人發現 —— 新導入的專案拿到的其實是舊版，
+> 🔴 **這是這套機制最容易出的事故**：改動合進 `main`，但忘了移 `v2`，
+> 於是 `main` 領先 `v2` 好幾個 commit 而沒有人發現 —— 新導入的專案拿到的其實是舊版，
 > 包含你以為早就修掉的 bug。**定期檢查**：
 >
 > ```bash
-> git log --oneline "$(git rev-list -n1 v1)"..origin/main   # 應該是空的
+> git log --oneline "$(git rev-list -n1 v2)"..origin/main   # 應該是空的
 > ```
 
 ### 改動公版的自我檢查
 
-- [ ] 有沒有改到 input 名稱或 job 名稱？（會打壞既有 repo 的 ruleset → 該開 v2）
+- [ ] 有沒有改名／移除 input、改了會讓行為變的預設值、或改 job 名稱？（會打壞既有 repo → 該開新的主版本，例如 v3）
 - [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋 PR，形同虛設）
 - [ ] 新 action 有沒有釘 commit SHA？（不要用 `@master` / `@main`，供應鏈風險）
 - [ ] 新 **container image** 有沒有釘 tag + digest？（`:latest` 的話沒改程式的 repo 會隨上游新規則突然變紅，
@@ -71,7 +71,7 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
       只把它加進 gate 的 `needs`，由 gate 判斷「開了就必須 success」
 - [ ] 掃描工具「執行失敗」有沒有被當成「通過」？（下載用 `curl --fail` + `sha256sum -c` + 跑前先驗 `--version`）
 - [ ] 跑不到 30 秒的新檢查有沒有併進既有 job？（每個 job 不滿一分鐘也算一分鐘）
-- [ ] 先在一個專案用 `@main` 試跑過，再移動 `v1`
+- [ ] 先在一個專案用 `@main` 試跑過，再移動 `v2`
 
 ---
 
@@ -92,6 +92,7 @@ git tag -a v2.0.0 -m "..." && git tag v2 && git push origin v2.0.0 v2   # 破壞
 | **轉移到 Team 方案的 org**（推薦） | 團隊專案 | 需 org owner 操作；好處是 billing、權限、ruleset 一起統一管 |
 | 帳號升級 GitHub Pro | 個人專案、想最小改動 | 約 $4/月 |
 | repo 轉 public | 本來就要開源的專案 | 內容全公開，多數內部工具不適用 |
+| **先不設，照樣導入** | 上面三個都做不到（含公司統一管制、不讓專案自己設的 repo） | Gate 照跑、照樣紅，但擋不住 merge；靠團隊約定與事後檢查補位，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時) |
 
 ### 另一個常見卡點：你不是該 repo 的 admin
 

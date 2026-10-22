@@ -1,6 +1,6 @@
 # Changelog
 
-本 repo 是**中央公版**：所有專案用 `uses: .../@v1` 呼叫它。
+本 repo 是**中央公版**：所有專案用 `uses: .../@v2` 呼叫它（1.x 時期是 `@v1`，已凍結在 1.3.1）。
 一次改動會同時影響所有專案，所以每次發佈都必須記在這裡。
 
 版本規則見 [README — 版本策略](README.md#版本策略)。每次發佈打兩個 tag：
@@ -10,25 +10,50 @@
 
 ---
 
-## [1.4.0] — 未發佈
+## [2.0.0] — 未發佈
 
-**把 Copilot 自動修 / 自動審整組拿掉，公版只剩 CI 與 Security 兩條線。**
+**新主版本 `v2`。** 把 Copilot 自動修 / 自動審整組拿掉、公版只剩 CI 與 Security 兩條線；
+CI 多了 .NET；Docker 檢查改成找全 repo；修掉「改 PR 的 base 就能繞過來源分支政策」等一批洞。
 
-**⚠️ 這是破壞性變更。** 已導入的專案升級後，留在專案裡的三支 `copilot-*` 呼叫端 workflow
-會指向不存在的 reusable，每次 PR 直接 `startup_failure`。
-`adopt.sh` **不會**幫忙刪（它從不刪專案裡既有的檔案），必須各專案自己動手：
+原本規劃成 1.4.0、沿用 `v1` 發佈，但這一版有好幾個破壞性變更（移除 input、改預設值、移除 workflow），
+依[版本策略](README.md#版本策略)改開 `v2`：
 
-```bash
-git rm .github/workflows/copilot-autofix-ci-security.yml \
-       .github/workflows/copilot-autofix-review.yml \
-       .github/workflows/copilot-autoreview-gate.yml \
-       .github/workflows/copilot-setup-steps.yml
-```
+- **`v1` 凍結在 `v1.3.1`，不再移動。** 還指向 `@v1` 的專案照常能跑，只是不會再收到更新。
+- 各專案要自己把 `@v1` 換成 `@v2`，步驟見 [README — 從 v1 升級到 v2](README.md#從-v1-升級到-v2)
+  （重跑一次 `adopt.sh` / `adopt.ps1` 會處理大部分，`--ref` 預設已經是 `v2`）。
 
-repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可一併刪除；
-`.github/zizmor.yml` 裡若還留著對那兩支的 `dangerous-triggers` 放行，也要拿掉。
+### ⚠️ 破壞性變更
 
-### 為什麼拿掉
+- **`ci-reusable` 的 `run-python` 預設改成 `false`。** 語言相關的檢查一律「用到才開」，公版不再假設專案是 Python。
+  `adopt.sh` / `adopt.ps1` 會依偵測結果明確寫出 `run-python: true/false`；
+  手寫呼叫端、又靠預設值跑 Python 的專案，要自己加 `run-python: true`，否則 ruff / pytest 不會跑。
+- **`security-reusable` 移除 `python-version` 與 `upload-sarif` 兩個 input。** 呼叫端還在傳的話，
+  整支 workflow 會因 `invalid input` 起不來。`adopt.sh` / `adopt.ps1` 升級時會自動拿掉。
+  - `python-version`：沒有任何步驟用到。
+  - `upload-sarif`：從沒真正能用過。被呼叫的 reusable 只能縮減、不能擴張呼叫端給的權限，
+    要它能動，**每一個**呼叫端都得授予 `security-events: write`（沒授予的整支 `startup_failure`）。
+    為一個沒驗證過、多數私有 repo 也用不到的功能讓所有人多給寫入權限，不划算。
+    Semgrep 結果一律存成 artifact `semgrep-sarif`，功能上沒有損失。
+- **`fail-on-findings: false` 不再用 `continue-on-error`。** Semgrep、Trivy、gitleaks 改成只把「有找到問題」的
+  exit code 壓掉（Semgrep 不加 `--error`、Trivy 與 gitleaks 用 `exit-code 0`）；規則下載失敗、弱點資料庫下載失敗、
+  工具當掉這類**掃描本身出錯**，現在會讓 job 變紅。舊寫法會把「沒掃成」也一起吞成綠燈。
+  OSV-Scanner 異常結束（不是 0 / 1 / 128）不論 `fail-on-findings` 都是紅的。
+- **Copilot 自動修 / 自動審整組移除。** 已導入的專案升級後，留在專案裡的 `copilot-*` 呼叫端 workflow
+  會指向不存在的 reusable，每次 PR 直接 `startup_failure`。
+  `adopt.sh` **不會**幫忙刪（它從不刪專案裡既有的檔案），必須各專案自己動手：
+
+  ```bash
+  git rm .github/workflows/copilot-autofix-ci-security.yml \
+         .github/workflows/copilot-autofix-review.yml \
+         .github/workflows/copilot-autoreview-gate.yml \
+         .github/workflows/copilot-setup-steps.yml
+  ```
+
+  repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可一併刪除；
+  `.github/zizmor.yml` 裡若還留著對那幾支的 `dangerous-triggers` 放行，也要拿掉。
+- **呼叫端要改指向 `@v2`。**
+
+#### 為什麼拿掉 Copilot 那套
 
 - 要 **Copilot Business** 授權，還要每個 repo 各設一支真人 fine-grained PAT（`COPILOT_TRIGGER_PAT`）——
   `github-actions[bot]` 發的 `@copilot` mention 會被 coding agent 忽略，這是平台限制，繞不掉。
@@ -45,53 +70,119 @@ repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可一併刪除；
   `copilot-autofix-review.yml`、`copilot-autofix-review-reusable.yml`、
   `copilot-autoreview-gate.yml`、`copilot-autoreview-reusable.yml`
 - `templates/consumer-repo/.github/` 底下的三支呼叫端、`copilot-setup-steps.yml`、`copilot-instructions.md`
+- `security-reusable` 的 `python-version`、`upload-sarif` input（見上）
 
-### 變更 —— 導入腳本（adopt.sh / adopt.ps1）
-- **三類檔案策略變成兩類**：`SHELL_FILES`（只負責觸發的呼叫端 workflow → 整份換新、舊檔留 `.bak`）
-  已無成員，該條路徑與 `carry_knobs` / `inject_knobs` / `with_keys` 三個函式一併移除。
-- `PROJECT_OWNED` 從五個減為三個：`pull_request_template.md`、`dependabot.yml`、`zizmor.yml`。
-- 移除 1.2.0 的 `COPILOT_TRIGGER_PAT` / COMMENTED 觸發條件最後檢查。
-- 兩支輸出仍 **byte-identical**（CI 的 Windows job 每次都會實跑 PowerShell 5.1 對拍）。
+### 新增 —— .NET（ci-reusable）
+- 新 job `.NET build + test`（`run-dotnet`，預設 `false`）：`dotnet restore` → `dotnet format --verify-no-changes`
+  → `dotnet build -c Release` → `dotnet test`。C# / F# / VB 都適用；方案裡沒有測試專案時不擋。已加進 `ci-gate` 的 `needs`。
+- `dotnet-version`：留空＝有 `global.json` 就照它；沒有就讀 `*.csproj` / `*.fsproj` / `*.vbproj` / `Directory.Build.props`
+  的 `TargetFramework(s)`，把用到的版本全部裝起來（`net8.0` → `8.0.x`，否則只裝新版 SDK 時測試會找不到 8.0 runtime；
+  `net48` 這類 .NET Framework 不算）；都找不到才用 `10.0.x`。可填多個版本，用換行隔開。
+- `dotnet-project`：留空＝自動找。只有一個 `.sln` / `.slnx` 就用它；沒有方案檔時只有一個專案檔就用它；
+  **兩個以上直接紅、要求明確指定**（猜錯的話綠燈只代表其中一個建得起來）。
+- `run-dotnet-format`（預設 `true`）：讀專案的 `.editorconfig`，地位等同 Python 的 ruff；舊專案過渡期可先關。
+- `dotnet-runner`（預設 `ubuntu-latest`）：`net*-windows`（WPF / WinForms）或 .NET Framework 專案設 `windows-latest`
+  （分鐘數 2 倍）。job 一律用 bash，兩種 runner 同一份腳本。
+- 有 `packages.lock.json` 才開 NuGet 快取（setup-dotnet 找不到 lock 檔會直接失敗）。
+- `adopt.sh` / `adopt.ps1` 偵測 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj`（往下四層）寫入 `run-dotnet`，
+  方案檔不只一個時提醒補 `dotnet-project`。
+
+### 新增 —— Dockerfile 找全 repo（ci-reusable、security-reusable）
+- 新 input `dockerfiles`（兩支都有，寫法相同）：留空＝自動找全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`
+  （舊版只看根目錄，monorepo 子目錄的完全沒被檢查到）；也可以明確列，每一項 `路徑` 或 `路徑:build context`。
+- Docker build、hadolint、Trivy image 掃描都吃這份清單；列出的檔案不存在會直接紅。
+- `trivy-image` 改用 `setup-trivy` + trivy CLI `v0.70.0`（與 trivy-action v0.36.0 內部同一版）跑迴圈，
+  因為 trivy-action 一次只能掃一個 image。
 
 ### 新增 —— PR 來源分支政策（ci-reusable）
 - 兩個選配 input：`restricted-base-branches`（要管制的 base，空白隔開、支援 glob）與
-  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**，既有呼叫端行為完全不變。
+  `allowed-head-branches`（允許的來源分支）。**留空＝不啟用**。
 - 新 job `PR source branch policy`，只在 `pull_request` 事件且 `restricted-base-branches`
   有值時執行，結果收進 `ci / CI Gate` —— **專案端的 ruleset 一個字都不用改**。
 - 判定順序：base 不受管制→通過；受管制但沒列允許來源→失敗（視為漏填）；
   來自 fork→失敗（fork 的分支名可以隨便取，叫 develop 不代表是你的 develop）；
   head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
+- 比對前 `set -f`，`release/*` 這類樣式不會被當成檔名展開。
 - **公版不寫死任何分支名稱**，也不預設任何分支模型。要 main-only、main+develop
   還是完整 GitFlow，由各專案用這兩個 input 與呼叫端的 `on.pull_request.branches` 決定。
+
+### 修正 —— 改 PR 的 base 就能繞過來源分支政策
+- PR 先發到 `develop` 拿到綠燈、再到網頁上把 base 改成 `main`，預設的 `pull_request` 事件不會重跑，
+  同一個 head SHA 上的綠燈直接滿足 required check。
+- 範本 `ci.yml` 的 `pull_request.types` 加上 `edited`；job 的 `if` 只放行 `github.event.changes.base` 有值的 edited
+  （改標題、改內文不重跑）；`concurrency` 把那種只改標題 / 內文的 edited 分到另一組（`noop`），
+  不會取消正在跑的那一輪。
+- `adopt.sh` / `adopt.ps1` 升級時，呼叫端若還是 v1 範本原樣，三行一起自動換掉；
+  改過的不動，只印出「請手動處理」的提醒。
+
+### 變更 —— CI（ci-reusable）
+- Python job：只有 `pyproject.toml` 含 `[project]` 或 `[build-system]` 時才 `pip install -e .`
+  （只放 ruff / pytest 設定的 pyproject 不是可安裝的套件）；拿掉 `|| true`，真的裝不起來會紅，
+  不再讓後面的 pytest 噴一堆看不懂的 ImportError。
+
+### 變更 —— 範本
+- `security.yml` 的 `concurrency` group 加上 `event_name`：同一分支上的每週排程重掃與 push 不再互相取消
+  （被取消的那一輪 Security Gate 是紅的）。升級時若還是 v1 範本那行，導入腳本會自動換掉。
+- `ci.yml` / `security.yml` 指向 `@v2`；`ci.yml` 明寫 `run-python: true`，並附上 `run-dotnet` 的註解範例。
+- `dependabot.yml` 檔尾附上 `nuget`、`npm` 的註解範例。
+- `push.branches` 補上註解說明（`on:` 不吃運算式，走 develop 流程要自己把分支列進去）；
+  `ci.yml` 檔頭新增分支政策的用法說明。
 
 ### 變更 —— 分支保護腳本（setup-branch-protection.sh）
 - 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，
   支援 fnmatch 樣式（`'release/*'`）。不給分支時維持舊行為（只保護 default branch），
   ruleset 名稱也維持 `CI Standard - main protection`，既有 repo 重跑是更新而不是新增一份。
-- 新增 `REQUIRED_CHECKS` 環境變數，可自訂要求哪些 status check
-  （例如本 repo 要多一個 `adopt regression gate`）。
-- 新增 `--dry-run`：只印出要送出的 ruleset、不呼叫任何 API。
-  沒有 admin 權限時可以用它產出 payload，交給有權限的人執行。
+- required check 綁定來源是 GitHub Actions（`integration_id: 15368`），擋掉有人用 commit status API
+  貼一個同名綠燈。`CHECKS_INTEGRATION_ID` 可改綁，設空字串＝不綁。
+- 找既有 ruleset 時加 `--paginate`（超過 30 份也找得到）與 `includes_parents=false`（不把組織層的同名 ruleset 當成自己的）。
+- 檢查 `REQUIRED_APPROVALS`（非負整數）與 `STRICT_CHECKS`（`true` / `false`），打錯直接中止。
+- repo 不能用 ruleset 時（Free 方案的 private repo 回 403「Upgrade to GitHub Pro」）講清楚原因再結束；404 提示名稱或權限問題。
+- 新增 `REQUIRED_CHECKS` 環境變數，可自訂要求哪些 status check（例如本 repo 要多一個 `adopt regression gate`）。
+- 新增 `--dry-run`：只印出要送出的 ruleset、不呼叫任何 API。沒有 admin 權限時可以用它產出 payload，交給有權限的人執行。
+
+### 變更 —— 導入腳本（adopt.sh / adopt.ps1）
+- `--ref` / `-Ref` 預設改成 `v2`。
+- **三類檔案策略變成兩類**：`SHELL_FILES`（只負責觸發的呼叫端 workflow → 整份換新、舊檔留 `.bak`）
+  已無成員，該條路徑與 `carry_knobs` / `inject_knobs` / `with_keys` 三個函式一併移除；
+  `PROJECT_OWNED` 從五個減為三個：`pull_request_template.md`、`dependabot.yml`、`zizmor.yml`。
+  移除 1.2.0 的 `COPILOT_TRIGGER_PAT` / COMMENTED 觸發條件最後檢查。
+- 修正 `with:` 區塊解析：區塊裡的空行不再被當成區塊結束；`with:   # 註解` 認得出來。
+- 修正 `uses:` 行尾有空白或註解時沒被更新；而且只動指向 `ci-reusable` / `security-reusable` 的 `uses:`。
+- 讀不到公版 reusable 宣告的 inputs 時**中止**。之前會把呼叫端 `with:` 的設定全部當成已廢除刪掉。
+- 範本缺檔時回報，不再安靜略過；暫存 clone 在失敗時也會清掉。
+- `adopt.sh`：`.python-version` 的 UTF-8 BOM 與 CRLF 會去掉（PowerShell 5.1 寫的檔常帶 BOM，留著 setup-python 會失敗）；
+  `adopt.sh` 改在任何 `cd` 之前算出腳本位置（相對路徑呼叫、不帶 `--std` 時以前會找不到公版）。
+- 偵測範圍改成跟公版 reusable 一致：全 repo、不限深度、略過 `node_modules`、檔名分大小寫（以前只看前幾層，深層的 Dockerfile / `.sh` 會被判成沒有、把檢查安靜關掉）。
+- `adopt.ps1`：呼叫 git 時不再因為 PowerShell 5.1 把 stderr 當成錯誤而中止（不帶 `-Std` 的 HTTPS clone 路徑以前一定失敗）。
+- 觸發條件修補也處理「使用者只手動加了 `edited`、沒改 `if` / concurrency」的半套狀態。
+- 兩支都把呼叫端的 CRLF 統一成 LF；`zizmor.yml` 換 owner 時保留原本的換行格式。
+- 兩支輸出仍 **byte-identical**。
+
+### 變更 —— 測試
+- `test-adopt.sh` 新增情境 A2（.NET、`.python-version` 帶 BOM、Dockerfile 在子目錄）、
+  升級 fixture 加上 `with:` 裡的空行、註解、行尾空白、情境 G（v1 範本原樣的觸發條件修補 + CRLF + 重跑不再改動）、
+  情境 H（讀不到 inputs 時中止）、情境 I（深層偵測、分大小寫、相對路徑呼叫）、半套觸發條件；拿掉幾條恆真的 Copilot 斷言。共 72 項。
+- `adopt-tests.yml` 的 Windows 對拍除了全新導入，再加一個刻意塞滿難搞寫法的升級 fixture，兩支都要 byte-identical；
+  `push` 也在 `develop` 上跑。
 
 ### 變更 —— 其他
-- `test-adopt.sh`：情境 B 的專案專屬檔案 fixture 改用 `pull_request_template.md`，
-  新增「已移除的 Copilot 檔案不得再被導入」與「使用者設定的分支政策 input 升級時不被洗掉」斷言。共 49 項。
 - `.github/zizmor.yml`（本 repo 與範本）：`dangerous-triggers` 的放行已無對象，移除。
-- `setup-branch-protection.sh`：`REQUIRED_APPROVALS` / `STRICT_CHECKS` 預設值不變，
-  但註解裡以 Copilot 為前提的兩條理由改掉了。
-- `docs/KNOWN-LIMITATIONS.md`：兩條 Copilot 限制（`action_required`、bot mention 喚不醒 Agent）
-  隨流程移除一併刪除。
-- 範本呼叫端 `ci.yml` / `security.yml` 的 `push.branches` 補上註解說明
-  （`on:` 不吃運算式，走 develop 流程要自己把分支列進去）；`ci.yml` 檔頭新增分支政策的用法說明。
-- README 新增「分支模型：PR 要發到哪裡」一章，`docs/FLOW.md` 的 CI Gate 圖補上新 job。
-- README 的第 4 章「自動修、自動審」整章移除，目錄重新編號；
-  `docs/SETUP.md` 的 §B「啟用 Copilot 兩個 Agent」整節移除，後續章節遞補為 §B / §C / §D。
+- `.gitignore`：忽略 Office 開檔時的鎖定檔（`~$*`）與手動備份（`*.bak*`）。
+- README：新增「沒辦法設分支保護時」（Free 方案 private repo、公司統一管制的 repo 怎麼補位）、
+  「C# / .NET 專案」、「前端（React / Vue / Node）」三節；「分支模型：PR 要發到哪裡」一章；
+  第 4 章「自動修、自動審」整章移除；版本策略改成以 `v2` 為準並加上「從 v1 升級到 v2」。
+- `docs/KNOWN-LIMITATIONS.md`：
+  - 「`upload-sarif: true` 尚未驗證可用」**移除** —— 隨 `upload-sarif` input 一起拿掉，不再是限制。
+  - 「只有 Python 的 lint/test」改成「只內建 Python 與 .NET 的 lint/test」，並寫明前端的涵蓋範圍。
+  - 兩條 Copilot 限制（`action_required`、bot mention 喚不醒 Agent）隨流程移除一併刪除。
+- `docs/SETUP.md` 的 §B「啟用 Copilot 兩個 Agent」整節移除，後續章節遞補。
 
 ### 相容性
-- **job 名稱完全沒動**：`ci / CI Gate`、`security / Security Gate` 不變 —— 既有 ruleset 不必改。
-- **沒有移除或改名任何 input**；新增的兩個都有預設值 `""`（不啟用），舊呼叫端照舊運作。
-- 破壞的只有「專案裡那三支 Copilot 呼叫端 workflow」。依[版本策略](README.md#版本策略)，
-  移除 workflow 屬於破壞性變更；要沿用 `v1` 就得先把每個已導入的專案清乾淨再移 tag。
+- **job 名稱完全沒動**：`ci / CI Gate`、`security / Security Gate` 不變 —— 既有 ruleset 不必改
+  （想補 `integration_id` 的話重跑一次 `setup-branch-protection.sh`）。
+- 新增的 input 都有預設值；**移除**的是 `security-reusable` 的 `python-version`、`upload-sarif`，
+  **改預設值**的是 `ci-reusable` 的 `run-python`（`true` → `false`）。
+- 還指向 `@v1` 的專案完全不受影響（`v1` 停在 1.3.1）。
 
 ---
 

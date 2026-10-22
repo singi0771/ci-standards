@@ -1,5 +1,5 @@
 # 各專案的「呼叫端」CI workflow —— 邏輯全在中央公版。
-# ⚠️ 中央公版在 singi0771/ci-standards；@v1 是版本 tag（要最新可改 @main）。
+# ⚠️ 中央公版在 singi0771/ci-standards；@v2 是版本 tag（要最新可改 @main）。
 #
 # ── 選配：PR 來源分支政策（走 develop / GitFlow 這類流程時才需要）────────────
 # 公版不預設任何分支模型，分支名稱完全由你決定。要限制「誰可以 merge 進哪裡」，
@@ -10,7 +10,8 @@
 #
 # 這組的意思是「main 只接受從 develop 或 hotfix/* 發來的 PR」，其他分支發到 main 會被擋下。
 # 檢查結果收進 `ci / CI Gate`，所以分支保護的 ruleset 不必加新的 required check。
-# ⚠️ 它擋的是誤操作。真正不讓人繞過的是 ruleset（必須開 PR、禁止 force push），兩者要一起設。
+# ⚠️ 它擋的是誤操作。repo 能設分支保護時，要跟 ruleset（必須開 PR、禁止 force push）一起設；
+#    不能設分支保護的 repo（例如 Free 方案的 private repo），紅燈只能提醒、擋不住 merge。
 name: CI
 
 on:
@@ -25,6 +26,9 @@ on:
   # 根本不會啟動 workflow → required check 永遠 pending → 純文件 PR 永遠 merge 不了
   # （連 admin 都不行，ruleset 沒有例外名單）。省那幾分鐘不值得換一個卡死。
   # 多列 ready_for_review 是為了讓「草稿 PR 不跑、改成正式 PR 那一刻才跑」能運作（見 jobs 的 if）。
+  # 多列 edited 是為了「PR 改了 base 分支」時重跑：不然先發到 develop 拿綠燈、再把 base 改成 main，
+  # 綠燈會原封不動沿用，來源分支政策就被繞過了。改標題、改內文也是 edited，
+  # 那種不重跑（見 jobs 的 if 與 concurrency）。
   # 沒有 branches: 篩選＝「發到任何分支的 PR 都跑」。
   # 只想對特定分支的 PR 跑，就自己加，例如：
   #   pull_request:
@@ -32,22 +36,27 @@ on:
   #     types: [...]
   # ⚠️ 加了之後，沒被列到的分支其 PR 不會有 `ci / CI Gate` —— 那些分支就不能設成 required check。
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # 呼叫端也要宣告最小權限，不然 reusable 拿到的是 repo 預設 token 權限
 permissions:
   contents: read
 
+# 只改 PR 標題 / 內文的 edited 事件分到另一組 —— 否則它會把正在跑的那一輪 CI 取消掉
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'noop' || 'run' }}
   cancel-in-progress: true
 
 jobs:
   ci:
-    # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘；
+    # edited 事件只有在 base 分支被改掉時才跑
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base)) }}
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
+      # 語言相關的檢查預設都是關的，用到哪個開哪個（adopt.sh 會依偵測結果填好）
+      run-python: true
       python-version: "3.12"
+      # run-dotnet: true           # C# / .NET 專案打開；有多個 .sln 時再加 dotnet-project: "src/App.sln"
       run-docker-build: true
       run-hadolint: true         # 有 Dockerfile 才有作用：build 之前先檢查 Dockerfile 寫法

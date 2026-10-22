@@ -5,7 +5,7 @@ rules:
   unpinned-uses:
     config:
       policies:
-        # 公版刻意用「會移動的 v1」讓所有專案自動跟版（見 README「版本策略」）。
+        # 公版刻意用「會移動的 v2」（主版號別名）讓所有專案自動跟版（見 README「版本策略」）。
         # 這是有意的取捨：不可變的 vX.Y.Z tag 是還原點，SECURITY.md 有寫明風險。
         # 所以指向本公版的 uses: 只要求有釘 tag / branch（ref-pin），不要求釘 SHA。
         "singi0771/ci-standards/*": ref-pin

@@ -8,8 +8,8 @@
 
 | 限制 | 影響 | 現在該怎麼辦 |
 |---|---|---|
-| [`upload-sarif: true` 尚未驗證可用](#upload-sarif-true-尚未驗證可用) | Security 分頁整合 | 維持 `false`，用 artifact |
-| [只有 Python 的 lint/test](#ci-reusable-只內建-python-的-linttest) | 非 Python 專案 | `run-python: false` + 自己補一支 |
+| [只內建 Python 與 .NET 的 lint/test](#ci-reusable-只內建-python-與-net-的-linttest) | 其他語言、前端（React / Vue / Node） | 安全掃描照用；CI 的 lint/test 在呼叫端自己補一個 job |
+| [沒有分支保護時紅燈擋不住 merge](#沒有分支保護時紅燈擋不住-merge) | Free 方案的 private repo、公司統一管制的 repo | 照 README「沒辦法設分支保護時」補位 |
 
 ---
 
@@ -32,42 +32,48 @@
 
 ---
 
-## `upload-sarif: true` 尚未驗證可用
-
-**狀態：🟡 疑似不可用，維持 `false`**
-
-`security-reusable.yml` 的 workflow 層 `permissions` 是 `contents: read`。
-被呼叫的 reusable workflow **只能縮減呼叫端授予的權限、不能擴張**，
-所以呼叫端就算自己加了 `security-events: write`，進到公版的 job 仍可能被縮掉 → upload 回 403。
-
-也就是說 README 上「呼叫端 job 自行加 `permissions:`」這個說法**還沒有被實測證實**。
-
-**查問題的步驟：**
-
-1. 在本 repo（public，不需要 GHAS）開一個測試 PR，把 `.github/workflows/security.yml` 的
-   `upload-sarif` 改成 `true`，並在該 job 加上 `permissions: { contents: read, security-events: write }`
-2. 看 `Upload SARIF to Security tab` 這一步的結果：
-   - 成功 → 只要更新文件說明「呼叫端必須自行加 permissions」
-   - 403 / Resource not accessible → 公版要改：在 `security-reusable.yml` 的 workflow 層
-     直接宣告 `security-events: write`。**但這是破壞性變更** —— 沒有授予該權限的呼叫端可能整支起不來，
-     要按[版本策略](../README.md#版本策略)開 `v2`，不能移 `v1`
-3. 在這之前，掃描結果一律走 artifact（`semgrep-sarif`），功能上沒有損失
-
----
-
-## `ci-reusable` 只內建 Python 的 lint/test
+## `ci-reusable` 只內建 Python 與 .NET 的 lint/test
 
 **狀態：🟢 已知設計取捨，不是 bug**
 
-`ci-reusable.yml` 內建的是 ruff + pytest。其餘語言目前沒有對應的 job。
+`ci-reusable.yml` 內建兩種語言的 job，都是預設關、用到才開：
 
-非 Python 專案**仍然照用公版**，把 Python 關掉即可（`run-python: false`），
-`actionlint` / `shellcheck` / `docker build` / `hadolint` 都是語言無關的，
-安全掃描那邊（Semgrep / OSV / Trivy / gitleaks / zizmor）本來就自己認語言。
+- Python：ruff + pytest（`run-python`）
+- .NET（C# / F# / VB）：`dotnet format` + build + test（`run-dotnet`，2.0.0 新增）
+
+其餘語言目前沒有對應的 job。這些專案**仍然照用公版**：`actionlint` / `shellcheck` / `docker build` / `hadolint`
+都是語言無關的，安全掃描那邊（Semgrep / OSV / Trivy / gitleaks / zizmor）本來就自己認語言。
 要語言原生的 lint/test，見 [README — 專案不是 Python](../README.md#專案不是-python)。
 
+### 前端（React / Vue / Node）：安全掃描有、CI 沒有
+
+| | 狀況 |
+|---|---|
+| Semgrep | ✅ `auto` 會挑 JS / TS 規則。⚠️ 對 `.vue` 單檔元件的支援有限，`<script>` 裡的程式可能只掃到一部分 |
+| OSV-Scanner、Trivy（檔案系統） | ✅ 讀 `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` |
+| gitleaks | ✅ 不分語言 |
+| eslint、`tsc`、vitest / jest、`npm run build` | ❌ 公版沒有 Node 的 job，一個都不會跑 |
+
+**現在的做法**：在專案自己的呼叫端 workflow 寫一個 job 跑 `npm ci` / lint / test / build，
+用不同的 job id（例如 `node`），範例見 [README — 前端](../README.md#前端react--vue--node)。
+**下一個要補的**就是公版的 `ci-node` job（加進 `ci-gate` 的 `needs`，呼叫端用一個 `run-node` 打開）。
+
 > 推廣到更多專案之前，先盤點一次組織內的語言分布。
-> 如果 Node 專案佔比高，補一支 `ci-node-reusable.yml` 的優先度會高於其他所有待辦。
+> 如果前端專案佔比高，`ci-node` 的優先度會高於其他所有待辦。
+
+---
+
+## 沒有分支保護時紅燈擋不住 merge
+
+**狀態：🟢 平台限制，不是 bug**
+
+Gate 會不會「擋住 merge」完全取決於 GitHub 的分支保護 / ruleset，公版本身做不到。
+GitHub Free 方案的 **private** repo 不能用 ruleset（API 回 `403 Upgrade to GitHub Pro…`），
+公司統一管理的 repo 也可能不讓各專案自己設。
+
+這種 repo 一樣照常導入：Gate 照跑、照樣紅、push 到 main 之後也會再跑一輪，只是紅燈擋不住有寫入權限的人按 merge。
+補位做法（團隊約定、merge 後看 main 那一輪、限縮寫入權限、需要時升級方案）見
+[README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時)。
 
 ---
 

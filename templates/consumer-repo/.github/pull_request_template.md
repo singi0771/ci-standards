@@ -18,6 +18,8 @@
 - [ ] 沒有新增 public bucket、privileged container、對 0.0.0.0/0 開放的規則
 - [ ] 已確認輸入驗證與權限控管
 - [ ] 通過 Security Scan（Semgrep / Trivy / OSV / gitleaks / zizmor）
+- [ ] `ci / CI Gate` 與 `security / Security Gate` 都是綠的才 merge
+      （repo 設不了分支保護時，GitHub 不會擋紅燈的 PR —— 這一條就是唯一的關卡）
 
 ## AI 使用說明
 - [ ] 本 PR 有使用 AI 工具協助

@@ -9,7 +9,8 @@
 | Windows（Git Bash） | `scripts/adopt.sh` 也可以 |
 
 兩支功能完全相同，產出的檔案 byte-identical —— CI 的 Windows job 會真的用 PowerShell 5.1
-跑一次 `adopt.ps1`、用 Git Bash 跑一次 `adopt.sh`，對同一個範例專案（含 `--uses-repo`）`diff -r` 整個 `.github/`。
+跑一次 `adopt.ps1`、用 Git Bash 跑一次 `adopt.sh`，對同樣的範例專案（含 `--uses-repo`）`diff -r` 整個 `.github/` ——
+全新導入一個、升級一個（升級那個刻意塞了 CRLF、`with:` 裡的空行、行尾註解這類最容易讓兩支分岔的寫法）。
 
 ---
 
@@ -28,7 +29,7 @@
 | **導入（複製範本 + 改參數）** | 檔案操作 | — 本來就不需要 |
 | 推分支 | `git`（HTTPS 443） | — |
 | 開 PR | — | **瀏覽器開就好** |
-| 設分支保護 | GitHub API | 瀏覽器手動建 ruleset，或**組織層級 ruleset 一次涵蓋所有 repo** |
+| 設分支保護 | GitHub API | 瀏覽器手動建 ruleset，或**組織層級 ruleset 一次涵蓋所有 repo**。repo 設不了分支保護（例如 Free 方案的 private repo）也能導入，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時) |
 
 **結論：`gh` 完全是選配的。** 它只讓 `setup-branch-protection.sh` 和 `gh pr create` 方便一點。
 
@@ -63,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 |---|---|---|
 | `--target <dir>` | `-Target <dir>` | 要導入的專案目錄（預設：目前目錄） |
 | `--std <path>` | `-Std <path>` | 公版 clone 的位置（預設：自動找） |
-| `--ref <tag>` | `-Ref <tag>` | 要指向的公版版本（預設 `v1`） |
+| `--ref <tag>` | `-Ref <tag>` | 要指向的公版版本（預設 `v2`；2.0.0 之前是 `v1`） |
 | `--uses-repo <owner/repo>` | `-UsesRepo <owner/repo>` | 公版搬到組織後換掉 `uses:` 的 owner/repo（`zizmor.yml` 的放行規則會一起換） |
 | `--dry-run` | `-DryRun` | 只印偵測結果，不動檔案 |
 
@@ -88,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 帶專案設定 | `ci.yml`、`security.yml` | **就地合併**（保留你的值） |
 | 專案專屬 | `pull_request_template.md`、`dependabot.yml`、`zizmor.yml` | **絕不覆蓋**（只放一份 `.new`） |
 
-> 1.4.0 之前還有第三類「只負責觸發的呼叫端 workflow」（三支 `copilot-*`），
+> 2.0.0 之前還有第三類「只負責觸發的呼叫端 workflow」（三支 `copilot-*`），
 > 升級時整份換新。Copilot 流程移除後那一類已經沒有成員，腳本裡對應的程式碼也一併刪了。
 > **已導入的專案要自己 `git rm` 那三支**（加上 `copilot-setup-steps.yml`）——
 > 導入腳本從不刪專案裡既有的檔案，留著會指向不存在的 reusable、每次 PR 直接 `startup_failure`。
@@ -98,15 +99,30 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 | 情況 | 行為 | 為什麼 |
 |---|---|---|
 | 你調過的參數（`severity`、`fail-on-findings`、`python-version`…） | **保留原值** | 那是你針對這個專案的決定，偵測結果不該蓋過去 |
-| 你自訂的 `on:` 觸發（例如改過的 cron） | **完全不動** | 只改 `uses:` 那一行與 `with:` 區塊，其餘原樣。所以「草稿 PR 跳過」這種寫在 `on:` 的新設計，升級不會幫你加，要的話照範本手動改 |
-| `with:` 裡的註解 | **保留** | `# max-attempts: "3"` 這種提示不該消失 |
-| 公版**已廢除**的 input | **移除並回報** | 留著會讓 workflow 直接 `invalid input` 起不來 |
-| 公版**新增**的 input | 補上（用偵測值） | 只補「你檔案裡沒有」的，不覆寫既有的。1.3.0 會補 `run-hadolint`（有 Dockerfile 才 true）與 `run-zizmor: true` |
-| `uses:` 的 ref | 更新成 `--ref` | 這才是真正生效的那一行 |
+| 你自訂的 `on:` 觸發（例如改過的 cron） | **完全不動** | 只改 `uses:` 那一行與 `with:` 區塊，其餘原樣。所以「草稿 PR 跳過」這種寫在 `on:` 的新設計，升級不會幫你加，要的話照範本手動改。**唯一的例外**見下面「v1 → v2 的觸發條件修補」 |
+| `with:` 裡的註解、空行 | **保留** | `# max-attempts: "3"` 這種提示不該消失；區塊中間的空行不會被當成區塊結束 |
+| 公版**已廢除**的 input | **移除並回報** | 留著會讓 workflow 直接 `invalid input` 起不來。升到 v2 時會拿掉 `security.yml` 的 `python-version`、`upload-sarif` |
+| 公版**新增**的 input | 補上（用偵測值） | 只補「你檔案裡沒有」的，不覆寫既有的。例如 `run-hadolint`（有 Dockerfile 才 true）、`run-zizmor: true`、`run-dotnet`；原本靠預設值而沒寫 `run-python` 的，會依偵測結果寫明 |
+| `uses:` 的 ref | 更新成 `--ref` | 這才是真正生效的那一行。行尾有空白或註解也認得；只動指向 `ci-reusable` / `security-reusable` 的那行 |
+| CRLF 換行 | 統一成 LF | 兩支腳本的產出才會一致 |
 | **job id（`ci` / `security`）** | **絕不更動** | 分支保護的 check 名稱綁著它，改了 ruleset 就對不上 |
 
 「公版有哪些 input」是**直接讀公版 reusable 的 `workflow_call.inputs` 宣告**得來的，
 不是腳本裡寫死一份清單 —— 公版加減 input 時自動跟上，不會漂移。
+讀不到那份宣告（公版 clone 不完整、格式變了）時**腳本會中止**，不會把你 `with:` 的設定全部當成已廢除刪掉。
+
+#### v1 → v2 的觸發條件修補
+
+2.0.0 修了「PR 改 base 就能繞過來源分支政策」，`ci.yml` 要改三行：`pull_request.types` 加 `edited`、
+job 的 `if` 與 `concurrency` 跟著改（只改標題 / 內文的 edited 不重跑、也不取消正在跑的那一輪）。
+
+- 你的 `ci.yml` 這三行**還是 v1 範本原樣** → 腳本自動換掉，報告裡「觸發條件（v2）」那行會寫出來
+- **改過**其中任何一行 → 不動，只印 ⚠️ 提醒，請照 `templates/consumer-repo/.github/workflows/ci.yml` 手動補
+
+三行要嘛一起換、要嘛都不動，不會只改一半。
+
+`security.yml` 的 `concurrency` 若還是 v1 範本那行（`group: security-${{ github.ref }}`），也會換成依事件分組的寫法，
+讓每週排程重掃跟 push 不再互相取消；改過的同樣不動。
 
 #### 2. 絕不覆蓋的檔案
 
@@ -128,10 +144,18 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 | 偵測 | 依據 | 影響的參數 |
 |---|---|---|
-| Dockerfile | 根目錄有 `Dockerfile` | `run-docker-build`、`run-hadolint`、`scan-docker-image` |
-| Python | `requirements.txt` / `pyproject.toml` / `setup.py` / 有 `.py` | `run-python` |
-| Python 版本 | `.python-version`，沒有就用 `3.12` | `python-version`（只有 `ci.yml`；`security.yml` 不再傳它，因為公版沒用到） |
-| shell script | 專案裡有 `.sh` | `run-shellcheck` |
+| Dockerfile | 全 repo 任何一層有 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`） | `run-docker-build`、`run-hadolint`、`scan-docker-image` |
+| Python | `requirements.txt` / `pyproject.toml` / `setup.py` / 有 `.py` | `run-python`（2.0.0 起公版預設 `false`，所以一定會明確寫出 `true` 或 `false`） |
+| Python 版本 | `.python-version`（UTF-8 BOM 與 CRLF 會去掉），沒有就用 `3.12` | `python-version`（只有 `ci.yml`；`security-reusable` 2.0.0 起已沒有這個 input） |
+| .NET | 全 repo 任何一層有 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj` | `run-dotnet`。方案檔不只一個（或沒有方案檔、專案檔不只一個）時會提醒你補 `dotnet-project` |
+| shell script | 全 repo 任何一層有 `.sh` | `run-shellcheck` |
+
+偵測範圍刻意跟公版 reusable「實際會檢查的範圍」一致：全 repo、不限深度、略過 `.git` 與 `node_modules`，
+檔名分大小寫（`api.dockerfile` 不算 —— 公版的 Docker build 也不會去建它）。
+範圍比公版小的話，深層的 Dockerfile / `.sh` 會被判成「沒有」，adopt 把開關明寫成 `false`，那項檢查就安靜地關掉了。
+Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1` 的判斷完全相同。
+前端（`package.json`）目前**不偵測**，因為公版還沒有 Node 的 CI job —— 安全掃描那邊不用設定就會掃 JS / TS 與 lock 檔，
+見 [README — 前端](../README.md#前端react--vue--node)。
 
 `run-actionlint` 與 `run-zizmor` 一律開啟 —— 導入之後你的 repo 就有 workflow 了，
 語法跟安全都該檢查；兩個加起來不到一分鐘。
@@ -140,7 +164,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 ## 回歸測試
 
-`scripts/test-adopt.sh` 涵蓋六個情境共 49 項檢查，改動腳本後請先跑過：
+`scripts/test-adopt.sh` 涵蓋十個情境共 72 項檢查（沒裝 PyYAML 的機器會跳過「產生的 YAML 是否合法」那一項），改動腳本後請先跑過：
 
 ```bash
 ./scripts/test-adopt.sh
@@ -148,16 +172,21 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.p
 
 | 情境 | 驗什麼 |
 |---|---|
-| A 全新導入 | 偵測結果正確寫入（含 `run-hadolint`、`run-zizmor`）、`zizmor.yml` 有建立、`security.yml` 不傳沒用到的 `python-version`、不產生多餘的 `.new` |
-| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input、補上新 input、`uses:` ref 更新、**job id 不變**、`pull_request_template.md` 未被覆蓋、補上 `zizmor.yml`、已移除的 Copilot 檔案不會被重新導入 |
+| A 全新導入 | 偵測結果正確寫入（含 `run-hadolint`、`run-zizmor`）、`zizmor.yml` 有建立、`security.yml` 不傳已移除的 `python-version`、不產生多餘的 `.new` |
+| A2 全新導入（.NET） | 偵測到 .NET 寫入 `run-dotnet: true`、Dockerfile 在子目錄也找得到、`.python-version` 帶 BOM 時版本號乾淨 |
+| B 升級舊版 | 保留使用者參數與 cron、移除廢除的 input（含 `upload-sarif`）、補上新 input、`uses:` ref 更新（行尾有空白／註解也要）、`with:` 裡的空行與註解不會讓區塊提早結束、**job id 不變**、`pull_request_template.md` 未被覆蓋、補上 `zizmor.yml`、改過的觸發條件不被自動改 |
 | C 重複執行 | 跑第二次沒有任何 diff |
+| G v1 範本升級 | v1 範本原樣的 `ci.yml` 三行觸發條件被換成 v2、`security.yml` 的 concurrency 依事件分組、`uses:` 改指向 `@v2`、CRLF 統一成 LF、再跑一次不會重複改 |
+| G' 半套觸發條件 | 使用者只手動加了 `edited`、`if` / concurrency 還是 v1 時，也會補齊 |
+| H 讀不到 inputs | 公版 reusable 的 inputs 讀不到時中止，使用者的 `with:` 設定原封不動 |
+| I 偵測範圍 | 深層目錄的 Dockerfile / `.sh` 偵測得到、`node_modules` 不算、小寫 `api.dockerfile` 不算、相對路徑呼叫不帶 `--std` 也找得到公版 |
 | D `--dry-run` | 一個檔案都沒動 |
 | E `--uses-repo` | 搬到組織時 `owner/repo` 正確替換，`zizmor.yml` 的放行規則也跟著換 —— 新建的、既有的（使用者自己的規則要留著）、另存的 `.new` 都要 |
 | F 巢狀結構 | 目標是外層資料夾時，提示往下一層找 |
 
 CI（`adopt-tests.yml`）會在 ubuntu / macOS / Windows 三個平台跑這份測試，Windows 那台還會：
 用 **PowerShell 5.1** 載入 `adopt.ps1` 確認 UTF-8 BOM 沒掉，以及真的跑 `adopt.ps1` 與 `adopt.sh`
-比對產出 byte-identical。只動文件的 PR 會整個跳過（macOS runner 算 10 倍分鐘）；
+比對產出 byte-identical（全新導入與一個難搞的升級 fixture 各比一次）。只動文件的 PR 會整個跳過（macOS runner 算 10 倍分鐘）；
 `templates/` 底下的 `.md` 不算文件，因為它們會被原樣複製到專案裡。
 
 ### ⚠️ 一定要在 macOS 上也跑一次
@@ -234,7 +263,9 @@ Windows PowerShell 5.1 讀 `.ps1` 沒看到 BOM 就用 ANSI codepage（繁中 = 
 
 1. 檢查 `git diff --stat`
 2. 開 PR（瀏覽器就行）
-3. **等第一次 CI 跑完再開分支保護** —— check 名稱要先存在於 GitHub，否則 ruleset 對不上
+3. **等第一次 CI 跑完再開分支保護** —— check 名稱要先存在於 GitHub，否則 ruleset 對不上。
+   設不了（Free 方案的 private repo、公司統一管制）就跳過，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時)
+4. 從 v1 升上來的專案：刪掉 `copilot-*` 呼叫端、看報告裡「觸發條件（v2）」那行，見 [README — 從 v1 升級到 v2](../README.md#從-v1-升級到-v2)
 5. 第一次一定會有東西紅，那是掃描器真的找到問題。**不要為了讓它變綠就關掉檢查**
 6. zizmor 挑到你自己寫的 workflow 的毛病（沒釘 SHA、權限太大）多半是真的該修；確定是誤判才放進 `.github/zizmor.yml`
 

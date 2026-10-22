@@ -3,7 +3,7 @@
 ## 專案概觀
 - 用途：團隊統一的 CI / 安全掃描「中央公版」。各專案用一行 `uses:` 呼叫，邏輯集中在此。
 - 這裡**沒有應用程式碼**：內容是 GitHub Actions workflow（YAML + 內嵌 bash）、shell / PowerShell script 與文件。
-- 使用端指向 `@v1` tag，所以**這個 repo 的每一次改動都會同時影響所有專案**。
+- 使用端指向主版本 tag（2.0.0 起是 `@v2`；`v1` 凍結在 1.3.1、不要再動），所以**這個 repo 的每一次改動都會同時影響所有專案**。
 
 ## 開發與測試指令（修完必須自己跑過）
 - Workflow 語法：`actionlint -color`（PATH 上有 shellcheck 的話會連 `run:` 區塊的 bash 一起檢查）；
@@ -11,7 +11,7 @@
 - Workflow 安全：`zizmor .`（會連 `templates/` 一起掃，設定在 `.github/zizmor.yml`）
 - Shell script：`shellcheck scripts/*.sh`
 - 導入腳本回歸測試：`bash scripts/test-adopt.sh`（會自己 cd 到暫存目錄，不會動到本 repo）
-- 沒有 pytest / ruff —— 本 repo 的 CI 已把 `run-python` 關掉，不要為了「讓它有測試」而硬加。
+- 沒有 pytest / ruff —— 本 repo 的 CI 沒有開 `run-python`（2.0.0 起預設就是關），不要為了「讓它有測試」而硬加。
 
 ## 改動這個 repo 的鐵則
 
@@ -27,9 +27,10 @@
 action 釘 commit SHA、image 釘 tag + digest、執行檔釘版本 + sha256。不要用 `@main` / `@master` / `:latest`。
 理由有二：供應鏈風險，以及上游升版新增規則會讓沒改程式的 repo 突然變紅。
 
-**4. 改 input 名稱或 job 名稱＝破壞性變更。**
+**4. 改名／移除 input、改會讓行為變的預設值、改 job 名稱＝破壞性變更。**
 使用端的 ruleset 綁著 job 名稱（`ci / CI Gate`、`security / Security Gate`），
-改名會讓既有專案的 required check 永遠 pending。這種改動要開 `v2`，不能移 `v1`。
+改名會讓既有專案的 required check 永遠 pending；移除 input 會讓還在傳它的呼叫端起不來。
+這種改動要開新的主版本（下一個是 `v3`），不能移目前的 `v2`。
 
 **5. 每多一個 job 就多付一分鐘。**
 GitHub 每個 job 不滿一分鐘也算一分鐘。跑不到 30 秒的檢查要併進既有 job 當一個步驟，不要另開 job。

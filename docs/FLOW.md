@@ -28,7 +28,7 @@
 
 ```mermaid
 flowchart TD
-    PR[PR opened / synchronize / reopened / ready_for_review] --> DRAFT{草稿 PR?}
+    PR[PR opened / synchronize / reopened / ready_for_review<br/>或 edited 且改了 base 分支] --> DRAFT{草稿 PR?}
     DRAFT -->|是| STOP1[不跑，省 Actions 分鐘]
     DRAFT -->|否| PAR
 
@@ -45,7 +45,7 @@ flowchart TD
     CIG -->|pass| BOTH{兩個 Gate 都綠?}
     SG -->|pass| BOTH
     BOTH -->|否| WAIT[等另一條跑完]
-    BOTH -->|是| MERGE[人工 review → merge]
+    BOTH -->|是| MERGE[人工 review → merge<br/>有分支保護時，Gate 沒綠按不下去]
 
     SCHED[schedule：每週一 03:00<br/>只跑 Security] --> SEC
     PUSHMAIN[push 到 main / develop<br/>非 md/docs 變更] --> CI
@@ -55,12 +55,14 @@ flowchart TD
 讀這張圖要記住三件事：
 
 1. **CI 與 Security 是兩條獨立、並行的 workflow**，各自有自己的 Gate。分支保護只要求這兩個 Gate。
+   repo 設不了分支保護時（例如 Free 方案的 private repo），Gate 照跑、照樣紅，但擋不住 merge ——
+   見 [README 的「沒辦法設分支保護時」](../README.md#沒辦法設分支保護時)。
 2. **公版不會替你改任何程式碼**。它只負責「找」與「擋」，修與決定都是人。
 3. **圖裡沒有出現任何分支名稱**，這是刻意的 —— 要用什麼分支模型由各專案決定，
    見 [README 的分支模型](../README.md#分支模型pr-要發到哪裡)。本 repo 自己走的是
    「功能分支 → PR → `develop` → PR → `main`」，靠 `restricted-base-branches` 擋住發錯地方的 PR。
 
-> ℹ️ 1.4.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。
+> ℹ️ 2.0.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。
 > 那套已整組移除 —— 它需要 Copilot Business 授權與真人 PAT，而且 Copilot 每推一次 commit，
 > 觸發的 CI/Security run 都會卡在 `action_required` 要人手動核准（GitHub 硬性規定）。
 
@@ -70,14 +72,18 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    CALL[呼叫端 ci.yml<br/>uses: ci-reusable.yml] --> P{run-python}
+    CALL[呼叫端 ci.yml<br/>uses: ci-reusable.yml] --> P{run-python<br/>預設 false}
+    CALL --> N{run-dotnet<br/>預設 false}
     CALL --> D{run-docker-build}
     CALL --> L{run-actionlint 或 run-shellcheck}
 
     P -->|true| PJ[Python lint + test<br/>ruff 釘 0.16.0 → pytest<br/>pytest exit 5 沒測試 = 過但警告]
     P -->|false| PS[skipped]
 
-    D -->|true| DJ[Docker build check<br/>hadolint 可選 → docker build，不推送]
+    N -->|true| NJ[.NET build + test<br/>restore → dotnet format → build Release → test<br/>ubuntu 或 windows runner]
+    N -->|false| NS[skipped]
+
+    D -->|true| DJ[Docker build check<br/>找全 repo 的 Dockerfile 或照 dockerfiles<br/>hadolint 可選 → docker build，不推送]
     D -->|false| DS[skipped]
 
     L -->|true| LJ[Workflow + shell lint<br/>actionlint 1.7.12 + shellcheck<br/>兩個併成一個 job 省分鐘]
@@ -87,8 +93,10 @@ flowchart TD
     B2 -->|是| BJ[PR source branch policy<br/>base 受管制時檢查 head]
     B2 -->|否| BS[skipped]
 
-    PJ --> G[CI Gate<br/>needs 四個 job、always 執行]
+    PJ --> G[CI Gate<br/>needs 五個 job、always 執行]
     PS --> G
+    NJ --> G
+    NS --> G
     DJ --> G
     DS --> G
     LJ --> G
@@ -128,7 +136,7 @@ flowchart TD
 
     F -->|true| FJ[Workflow security zizmor]
     F -->|false| FS[skipped]
-    H -->|true| HJ[build image → Trivy 掃 image]
+    H -->|true| HJ[每個 Dockerfile 各 build 一個 image → Trivy 掃 image]
     H -->|false| HS[skipped]
 
     A --> G[Security Gate<br/>needs 六個 job、always 執行]
@@ -156,10 +164,12 @@ flowchart TD
 | zizmor | workflow 自己的安全問題（腳本注入、權限過大、沒釘 SHA） | `run-zizmor` |
 | Trivy（image） | build 出來的 image 裡的 CVE | `scan-docker-image` |
 
-**為什麼不上傳 Security 分頁**：`upload-sarif` 預設 `false`。
-reusable 的 `permissions` 是 `contents: read`，而 reusable 只能「縮減」呼叫端給的權限、不能擴張，
-就算呼叫端給了 `security-events: write` 也可能被縮掉、upload 403。
-改成存 artifact + 用 job 成敗當關卡，**私有 repo 不需要 GHAS 也能跑**。
+**為什麼不上傳 Security 分頁**：reusable 只能「縮減」呼叫端給的權限、不能擴張，
+要上傳就得讓**每一個**呼叫端都授予 `security-events: write`（沒授予的整支起不來）。
+所以 2.0.0 把 `upload-sarif` 整個拿掉，改成存 artifact（`semgrep-sarif`）+ 用 job 成敗當關卡，**私有 repo 不需要 GHAS 也能跑**。
+
+**`fail-on-findings: false` 放行的是什麼**：只有「有找到問題」。掃描工具本身出錯（規則、弱點資料庫下載失敗、當掉）
+照樣讓那個 job 紅 —— 沒掃成不能當成掃過。
 
 ---
 
@@ -168,12 +178,13 @@ reusable 的 `permissions` 是 `contents: read`，而 reusable 只能「縮減�
 專案裡的 `ci.yml` / `security.yml` 只寫兩件事：**什麼時候觸發**、**傳什麼參數**。
 一行 `uses:` 之後就進公版，所有 bash 邏輯、工具版本、Gate 判定都在這個 repo。
 
-這樣切的好處是升級不必動專案：公版改完移動 `v1` tag，各專案**下次跑 CI 就吃到新版**。
-代價是呼叫端的 `uses:` 指向會移動的 `v1`（不是釘死的 SHA）——
+這樣切的好處是升級不必動專案：公版改完移動主版本 tag（目前是 `v2`），各專案**下次跑 CI 就吃到新版**。
+代價是呼叫端的 `uses:` 指向會移動的 `v2`（不是釘死的 SHA）——
 這是有意的取捨，`.github/zizmor.yml` 對公版的 `uses:` 只要求 ref-pin，其餘第三方 action 一律 hash-pin。
 
-唯一需要回頭改專案的情況是**input 約定改變**（改名或移除）。那種改動走 `v2`，
-不移動 `v1`，既有專案不會被動到 —— 見 README「版本策略」。
+唯一需要回頭改專案的情況是**破壞性變更**（input 改名或移除、改預設值、改 job 名稱）。那種改動開新的主版本，
+舊的主版本 tag 不動，既有專案不會被動到 —— 2.0.0 就是這樣：`v1` 停在 1.3.1，各專案自行改成 `@v2`。
+見 README「版本策略」。
 
 ---
 
@@ -181,7 +192,7 @@ reusable 的 `permissions` 是 `contents: read`，而 reusable 只能「縮減�
 
 建議順序（由外而內）：
 
-1. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)（36 行）—— 呼叫端長什麼樣，一眼看完。
+1. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)（四十幾行，多半是註解）—— 呼叫端長什麼樣，一眼看完。
 2. [`.github/workflows/ci-reusable.yml`](../.github/workflows/ci-reusable.yml) 的 `ci-gate` job —— Gate 判定的核心，註解寫了為什麼這樣寫。
 3. [`.github/workflows/security-reusable.yml`](../.github/workflows/security-reusable.yml) 的 `inputs` 區塊 —— 可調的旋鈕全在這裡。
 4. [`templates/consumer-repo/`](../templates/consumer-repo/) —— 別人導入時實際會拿到的整包檔案（五個，沒有邏輯）。
