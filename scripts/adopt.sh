@@ -365,12 +365,15 @@ mkdir -p .github/workflows
 # 三行要嘛一起換、要嘛都不動：只認 v1 範本原封不動的寫法，使用者改過的就回報請他手動處理。
 V1_TYPES='    types: [opened, synchronize, reopened, ready_for_review]'
 V2_TYPES='    types: [opened, synchronize, reopened, ready_for_review, edited]'
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
 V1_CI_CONC='  group: ci-${{ github.ref }}'
 V2_CI_CONC="  group: \${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}"
 V1_IF="    if: \${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
 V2_IF="    if: \${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}"
 # security.yml：排程重掃與 push 分開一組，免得同一分支上互相取消
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
 V1_SEC_CONC='  group: security-${{ github.ref }}'
+# shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
 V2_SEC_CONC='  group: security-${{ github.event_name }}-${{ github.ref }}'
 
 # replace_lines <檔案> <舊行> <新行> [<舊行> <新行>]... → 整行完全相同才換

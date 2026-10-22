@@ -281,6 +281,7 @@ has "$CI"  'ready_for_review, edited]'                                     "v1 �
 has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "job if 一起改成「只有改 base 的 edited 才跑」"
 has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
 has "$CI"  'ci-reusable.yml@v2'                                            "uses: 改指向 @v2"
+# shellcheck disable=SC2016  # 故意不展開：比對的是檔案裡的 ${{ }} 原文
 has "$SEC" 'group: security-${{ github.event_name }}-${{ github.ref }}'    "security.yml 的 concurrency 依事件分組"
 if grep -q "$(printf '\r')" "$CI"; then bad "CRLF 呼叫端合併後應統一成 LF"; else ok "CRLF 呼叫端合併後統一成 LF（與 adopt.ps1 一致）"; fi
 cp "$CI" "$WORK/v1-ci-after"
