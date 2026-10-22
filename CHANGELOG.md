@@ -47,6 +47,9 @@
 - 可指定任意分支：`./scripts/setup-branch-protection.sh <owner>/<repo> main develop`，支援 fnmatch 樣式。
   不給分支時維持舊行為（只保護 default branch）。
 - 新增 `REQUIRED_CHECKS` 環境變數與 `--dry-run`。
+- 指定分支時 ruleset 名稱為 `CI Standard (branches: <排序後的分支清單>)`，與無參數模式的
+  `CI Standard - main protection` 不同名，不同分支清單也不會撞名而互相覆蓋；名稱放進查詢前會跳脫，
+  讀取 ruleset 清單失敗時中止，不再誤判「不存在」而重複建立。
 
 ---
 
