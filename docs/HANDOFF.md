@@ -1,6 +1,6 @@
 # 交接：現況與待辦
 
-> **最後更新**：2026-09-15　**已發佈版本 1.3.1**（發佈基準 `386c990`＝PR #34 的合併 commit，
+> **最後更新**：2026-10-22　**已發佈版本 1.4.0**（發佈基準 `ff5a781`＝PR #40 的合併 commit，`v1` 與 `v1.4.0^{}` 都指向它，已用 `git ls-remote` 驗過）。以下 1.3.1 的說明保留作紀錄（發佈基準 `386c990`＝PR #34 的合併 commit，
 > `v1` 與 `v1.3.1^{}` 都指向它，已用 `git ls-remote` 驗過）。1.3.1 只改用詞，行為跟 1.3.0 一樣。
 > **1.3.0 是一次大整理**：多了 zizmor（workflow 安全）、hadolint、SBOM 三個可選檢查，
 > 下載的執行檔全部釘 sha256、image 釘 digest，CI 少開一個 job、兩支用 `workflow_run` 觸發的呼叫端 workflow 只理 PR，
@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `386c990`（1.3.1，2026-09-15）。`main` 之後會領先它若干個純文件 commit，屬正常；要確認有沒有實質變更沒發請跑 `git log --oneline v1..main -- .github/workflows templates scripts`（`v2` 建立後改成 `v2..main`），有輸出才需要發版。2.0.0 發佈後這格要換成新的基準 |
-| CHANGELOG | 已寫到 **2.0.0（未發佈）**；最後一個已發佈的是 1.3.1 |
-| `v1` tag | 目前在 `386c990`（1.3.1）。發 1.4.0 時移到 1.4.0；之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
+| 發佈基準 | `ff5a781`（1.4.0，2026-10-22；前一版 1.3.1 在 `386c990`）。`main` 之後會領先它若干個純文件 commit，屬正常；要確認有沒有實質變更沒發請跑 `git log --oneline v1..main -- .github/workflows templates scripts`（`v2` 建立後改成 `v2..main`），有輸出才需要發版。2.0.0 發佈後這格要換成新的基準 |
+| CHANGELOG | 已寫到 **2.0.0（未發佈）**；最後一個已發佈的是 1.4.0（2026-10-22） |
+| `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
 | `v2` / `v2.0.0` tag | ⏳ **還沒建立**（見 §3 ⑪） |
-| 最新版本 tag | ✅ `v1.3.1`（`v1.3.1^{}` → `386c990`，已驗證與 `v1` 同一 SHA） |
+| 最新版本 tag | ✅ `v1.4.0`（`v1.4.0^{}` → `ff5a781`，已驗證與 `v1` 同一 SHA） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
@@ -125,7 +125,7 @@
 
 > **⚠️ 順序：先發 1.4.0，再合併 2.0.0。** develop 上已經有 1.4.0（PR #37、#38，非破壞性，發在 `v1`）。
 > 2.0.0（PR #36）一旦合進 develop，develop → main 就只能整包一起上，1.4.0 再也無法單獨發在 `v1`。所以：
-> 1. 先開 develop → main 的 PR，合併後在 main 打 `v1.4.0` 並把 `v1` 移過去（照下面「發佈流程」）。
+> 1. ~~先開 develop → main 的 PR，合併後在 main 打 `v1.4.0` 並把 `v1` 移過去~~ ✅ 2026-10-22 完成（#39、#40；`v1` → `ff5a781`）。
 > 2. 之後才合併 PR #36 進 develop，再開 develop → main，合併後打 `v2.0.0` 與 `v2`（`v1` 不動）。
 
 程式與文件已在 `feat/drop-copilot-focus-ci-security` 分支上。本 repo 走 develop 流程，**一律開 PR**：
@@ -147,7 +147,7 @@
    git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
    ```
 
-   **驗收**：`refs/tags/v2` 與 `refs/tags/v2.0.0^{}` 指向同一個 SHA；`refs/tags/v1` **仍然是 `386c990`**。
+   **驗收**：`refs/tags/v2` 與 `refs/tags/v2.0.0^{}` 指向同一個 SHA；`refs/tags/v1` **仍然是 `ff5a781`**（1.4.0）。
 
 4. ⛔ **不要動 `v1`**：不要 `git tag -f v1`、不要 `git push -f origin v1`。
    `v1` 是還沒升級的專案唯一的依靠，移過去等於把破壞性變更硬塞給它們。
