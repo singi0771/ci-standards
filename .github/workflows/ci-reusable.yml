@@ -127,8 +127,10 @@ jobs:
         env:
           DOCKERFILE: ${{ inputs.dockerfile }}
         run: |
+          # 預設值找不到＝專案沒有 Dockerfile，略過；特別指定的路徑找不到＝多半打錯字，要吵
           if [ ! -f "$DOCKERFILE" ]; then
-            echo "沒有 $DOCKERFILE，略過 hadolint"; exit 0
+            if [ "$DOCKERFILE" = "Dockerfile" ]; then echo "沒有 Dockerfile，略過 hadolint"; exit 0; fi
+            echo "::error::dockerfile input 指定的 $DOCKERFILE 不存在（路徑打錯？）"; exit 1
           fi
           # 版本 + sha256 一起釘，升版時到 release 的 checksums.sha256 重抓：
           # https://github.com/hadolint/hadolint/releases
@@ -150,8 +152,10 @@ jobs:
         run: |
           if [ -f "$DOCKERFILE" ]; then
             docker build -f "$DOCKERFILE" -t "ci-check:$SHA" "$DOCKER_CONTEXT"
+          elif [ "$DOCKERFILE" = "Dockerfile" ]; then
+            echo "沒有 Dockerfile，略過"
           else
-            echo "沒有 $DOCKERFILE，略過"
+            echo "::error::dockerfile input 指定的 $DOCKERFILE 不存在（路徑打錯？）"; exit 1
           fi
 
   # workflow 語法 + shell script 檢查，合在一個 job（見檔頭「省分鐘」說明）。
@@ -237,14 +241,18 @@ jobs:
         run: |
           # glob 比對：把「空白隔開的樣式」逐一拿去 case 比對。
           # 用 case 而不是 [[ ]]，是為了讓樣式來自變數時仍然當 glob 解讀。
+          # set -f：拆字串時不要把 release/* 這類樣式展開成工作目錄裡的檔名。
+          # 注意 case 的 * 也會比對 /，所以 hotfix/* 會符合 hotfix/a/b（多層分支名也算）。
           matches() {
             _value="$1"; _patterns="$2"
+            set -f
             for _p in $_patterns; do
               # shellcheck disable=SC2254  # 故意讓 $_p 展開成 glob 樣式
               case "$_value" in
-                $_p) return 0 ;;
+                $_p) set +f; return 0 ;;
               esac
             done
+            set +f
             return 1
           }
 

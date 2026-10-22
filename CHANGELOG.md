@@ -12,7 +12,7 @@
 
 ## [1.4.0] — 未發佈
 
-**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變，既有專案升級零改動。**
+**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變。**既有專案升級時，只有 Dockerfile 在子資料夾的專案會被補上一行 `dockerfile:`，其餘不變。
 
 從 #36 拆出來先發：#36 其餘的「移除 Copilot 自動修 / 自動審」是破壞性變更，依[版本策略](README.md#版本策略)改走 `v2.0.0`。
 
@@ -25,9 +25,15 @@
   來自 fork→失敗；head 符合允許樣式→通過，否則失敗並在 Summary 印出目標／來源／允許清單。
 - 公版不寫死任何分支名稱，也不預設任何分支模型。
 
+### 變更 —— 呼叫端範本（templates/consumer-repo）
+- `ci.yml` 的 `pull_request.types` 加上 `edited`，job 只在「改了目標分支」的 edited 才跑：
+  PR 從 develop 改發到 main 時來源分支政策會重跑，不會沿用舊的綠燈；改標題、內文不重跑。
+  已導入的專案要重跑一次 adopt 才會吃到（或手動在 types 加 `edited` 並同步 job 的 `if`）。
+
 ### 新增 —— Dockerfile 路徑（ci-reusable、security-reusable）
 - 新 input `dockerfile`（預設 `Dockerfile`）與 `docker-context`（預設 `.`），
-  Docker build check、hadolint、Trivy image 掃描都改用它們。Dockerfile 放在子資料夾
+  Docker build check、hadolint、Trivy image 掃描都改用它們。
+  特別指定的路徑找不到時直接失敗（避免打錯字讓檢查被靜靜略過）；預設值找不到維持「略過」。Dockerfile 放在子資料夾
   （例如 `src/Web.Api/Dockerfile`）的專案不必再整組關掉。
 - `adopt.sh` / `adopt.ps1` 也會找子資料夾裡的 Dockerfile：只有一個時自動填入兩個 input，
   多個時印出清單請使用者挑。

@@ -12,8 +12,10 @@ on:
     paths-ignore: ["**/*.md", "docs/**"]
   # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。
+  # 多列 edited：PR 改目標分支（base）時 GitHub 只送 edited。少了它，分支政策不會重跑，
+  # 原本對 develop 的綠燈會被沿用到改成 main 之後（見下面 job 的 if：只有改 base 的 edited 才跑）。
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # 呼叫端也要宣告最小權限；沒寫的話 reusable 拿到的是 repo 預設 token 權限（zizmor: excessive-permissions）
 permissions:
@@ -25,8 +27,9 @@ concurrency:
 
 jobs:
   ci:
-    # 草稿 PR 先不跑，反正草稿本來就不能 merge；標成 ready for review 會再觸發一次
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # 草稿 PR 先不跑，反正草稿本來就不能 merge；標成 ready for review 會再觸發一次。
+    # edited 只在改了 base 時才跑（改標題、內文不重跑整套 CI）。
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: ./.github/workflows/ci-reusable.yml
     with:
       # 本 repo 沒有 Python、沒有 Dockerfile，真正要檢查的是 workflow 與 shell script

@@ -362,7 +362,18 @@ has "$CI"  'run-docker-build: true'                "子資料夾唯一的 Docker
 has "$CI"  'dockerfile: "src/Web.Api/Dockerfile"'  "ci.yml 帶入子資料夾 Dockerfile 路徑"
 has "$SEC" 'scan-docker-image: true'               "子資料夾 Dockerfile 也會開 scan-docker-image"
 has "$SEC" 'dockerfile: "src/Web.Api/Dockerfile"'  "security.yml 帶入子資料夾 Dockerfile 路徑"
-hasnt "$CI" 'docker-context'                       "context 維持預設（repo 根目錄），不寫進呼叫端"
+hasnt "$CI" 'docker-context:'                      "context 維持預設（repo 根目錄），不寫進呼叫端"
+
+# 升級：再跑一次，dockerfile: 只能有一行（不重複補）
+"$ADOPT" --std "$STD" >/dev/null
+check "升級後 ci.yml 的 dockerfile: 只有一行"       "$(grep -c '^ *dockerfile:' "$CI")"  "1"
+check "升級後 security.yml 的 dockerfile: 只有一行" "$(grep -c '^ *dockerfile:' "$SEC")" "1"
+
+# 升級：使用者自己改過的 dockerfile: 不被偵測值蓋掉
+sed 's|dockerfile: "src/Web.Api/Dockerfile"|dockerfile: "deploy/Custom.Dockerfile"|' "$CI" > "$CI.tmp" && mv "$CI.tmp" "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'dockerfile: "deploy/Custom.Dockerfile"' "升級時保留使用者自訂的 dockerfile:"
+check "升級後仍只有一行 dockerfile:" "$(grep -c '^ *dockerfile:' "$CI")" "1"
 
 # 根目錄有 Dockerfile 時維持舊行為：不帶 dockerfile: input
 new_repo root-docker

@@ -133,7 +133,9 @@ DOCKERFILE_CANDIDATES=""
 if [ -f Dockerfile ]; then
   DOCKERFILE_PATH="Dockerfile"
 else
-  DOCKERFILE_CANDIDATES="$(find . -maxdepth 4 -type f -name Dockerfile -not -path './.git/*' -not -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort)"
+  # || true：碰到沒權限讀的子資料夾 find 會回 1，set -e 下不能讓整支腳本因此中止。
+  # -type f 不含符號連結、find 預設也不跟進目錄連結 —— adopt.ps1 照同樣規則略過連結。
+  DOCKERFILE_CANDIDATES="$(find . -maxdepth 4 -type f -name Dockerfile -not -path './.git/*' -not -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||' | LC_ALL=C sort || true)"
   if [ -n "$DOCKERFILE_CANDIDATES" ] && [ "$(printf '%s\n' "$DOCKERFILE_CANDIDATES" | wc -l | tr -d ' ')" = 1 ]; then
     DOCKERFILE_PATH="$DOCKERFILE_CANDIDATES"
     DOCKERFILE_CANDIDATES=""
@@ -160,7 +162,7 @@ info "偵測結果："
 info "  模式         : $MODE $( [ "$MODE" = upgrade ] && echo '（已有呼叫端，改用合併模式）' || echo '（全新導入）')"
 info "  Dockerfile   : $HAS_DOCKERFILE$( [ -n "$DOCKERFILE_PATH" ] && [ "$DOCKERFILE_PATH" != Dockerfile ] && echo "（$DOCKERFILE_PATH）")"
 if [ -n "$DOCKERFILE_CANDIDATES" ]; then
-  info "  ⚠ 找到多個 Dockerfile，Docker 相關檢查先關閉；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等改 true："
+  info "  ⚠ 找到多個 Dockerfile，不會自動開啟 Docker 相關檢查；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等設為 true："
   printf '%s\n' "$DOCKERFILE_CANDIDATES" | while IFS= read -r f; do info "      $f"; done
 fi
 info "  Python       : ${HAS_PY}（版本 ${PYVER}）"

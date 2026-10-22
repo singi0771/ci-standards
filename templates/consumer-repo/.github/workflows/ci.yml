@@ -31,8 +31,10 @@ on:
   #     branches: [main, develop]
   #     types: [...]
   # ⚠️ 加了之後，沒被列到的分支其 PR 不會有 `ci / CI Gate` —— 那些分支就不能設成 required check。
+  # 多列 edited：PR 改目標分支（base）時 GitHub 只送 edited。少了它，來源分支政策不會重跑，
+  # 原本對 develop 的綠燈會被沿用到改成 main 之後（見 jobs 的 if：只有改 base 的 edited 才跑）。
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # 呼叫端也要宣告最小權限，不然 reusable 拿到的是 repo 預設 token 權限
 permissions:
@@ -44,8 +46,9 @@ concurrency:
 
 jobs:
   ci:
-    # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # 草稿 PR 先不跑（草稿本來就不能 merge），省 Actions 分鐘。
+    # edited 只在改了 base 時才跑（改標題、內文不重跑整套 CI）。
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
     with:
       python-version: "3.12"

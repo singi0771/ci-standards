@@ -160,16 +160,30 @@ function B([bool]$v) { if ($v) { 'true' } else { 'false' } }
 
 # Dockerfile 不一定在根目錄（.NET 專案常放 src/<專案>/Dockerfile）。與 adopt.sh 同規則：
 # 根目錄沒有時往下找，只有一個就用它，多個就列出來請使用者自己填 dockerfile input。
+# 規則逐條對齊 adopt.sh 的 `find . -maxdepth 4 -type f -name Dockerfile -not -path './.git/*'
+# -not -path '*/node_modules/*'`：只認一般檔案（不含連結）、不跟進目錄連結、含隱藏檔、
+# 只排除根目錄的 .git 與任何層的 node_modules、排序用位元組順序（同 LC_ALL=C sort）。
+function Find-SubDockerfiles([string]$Dir, [string]$Rel, [int]$Level) {
+  foreach ($i in @(Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue)) {
+    if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+    $r = if ($Rel) { "$Rel/$($i.Name)" } else { $i.Name }
+    if ($i.PSIsContainer) {
+      if ($i.Name -ceq 'node_modules') { continue }
+      if ($Level -eq 1 -and $i.Name -ceq '.git') { continue }
+      if ($Level -lt 4) { Find-SubDockerfiles $i.FullName $r ($Level + 1) }
+    } elseif ($i.Name -ceq 'Dockerfile') {
+      $r
+    }
+  }
+}
 $DockerfilePath = ''
 $DockerfileCandidates = @()
-if (Test-Path -LiteralPath 'Dockerfile') {
+if (Test-Path -LiteralPath 'Dockerfile' -PathType Leaf) {
   $DockerfilePath = 'Dockerfile'
 } else {
-  $root = (Get-Location).Path.TrimEnd('\', '/')
-  $DockerfileCandidates = @(Get-ChildItem -Path . -Filter 'Dockerfile' -Recurse -Depth 3 -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ceq 'Dockerfile' -and $_.FullName -notmatch '[\\/](\.git|node_modules)[\\/]' } |
-    ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } |
-    Sort-Object { [string]$_ } -CaseSensitive)
+  [string[]]$found = @(Find-SubDockerfiles (Get-Location).Path '' 1)
+  [Array]::Sort($found, [StringComparer]::Ordinal)
+  $DockerfileCandidates = $found
   if ($DockerfileCandidates.Count -eq 1) {
     $DockerfilePath = $DockerfileCandidates[0]
     $DockerfileCandidates = @()
@@ -195,7 +209,7 @@ $dfNote = ''
 if ($DockerfilePath -and $DockerfilePath -ne 'Dockerfile') { $dfNote = "（$DockerfilePath）" }
 Write-Host ("  Dockerfile   : {0}{1}" -f (B $HasDockerfile), $dfNote)
 if ($DockerfileCandidates.Count -gt 1) {
-  Write-Host "  ⚠ 找到多個 Dockerfile，Docker 相關檢查先關閉；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等改 true："
+  Write-Host "  ⚠ 找到多個 Dockerfile，不會自動開啟 Docker 相關檢查；要開請在 ci.yml / security.yml 填 dockerfile: 並把 run-docker-build 等設為 true："
   foreach ($f in $DockerfileCandidates) { Write-Host "      $f" }
 }
 Write-Host ("  Python       : {0} (版本 {1})" -f (B $HasPy), $PyVer)

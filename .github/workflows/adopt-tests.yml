@@ -158,16 +158,32 @@ jobs:
         if: ${{ runner.os == 'Windows' }}
         run: |
           P="$(mktemp -d)"
-          for v in sh ps; do
-            mkdir -p "$P/$v"
-            ( cd "$P/$v" && git init -q . && git commit -q --allow-empty -m init \
-              && printf 'FROM python:3.12\n' > Dockerfile && printf 'flask\n' > requirements.txt \
-              && mkdir -p bin && printf '#!/bin/sh\ntrue\n' > bin/x.sh )
+          # 範例專案：root＝根目錄 Dockerfile；sub＝只在子資料夾（.NET 慣例）；multi＝多個子資料夾。
+          # sub 再跑第二次 adopt，比對升級模式（dockerfile: 只補一次、不重複）。
+          setup() {  # $1=情境 $2=sh|ps
+            d="$P/$1/$2"; mkdir -p "$d"
+            ( cd "$d" && git init -q . && git commit -q --allow-empty -m init \
+              && printf 'flask\n' > requirements.txt \
+              && mkdir -p bin && printf '#!/bin/sh\ntrue\n' > bin/x.sh
+              case "$1" in
+                root)  printf 'FROM python:3.12\n' > Dockerfile ;;
+                sub)   mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile ;;
+                multi) mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile ;;
+              esac )
+          }
+          run_both() {  # $1=情境
+            ./scripts/adopt.sh --std . --target "$P/$1/sh" --uses-repo ACME/ci-standards >/dev/null
+            powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
+              -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$1/ps")" -UsesRepo ACME/ci-standards >/dev/null
+          }
+          for s in root sub multi; do
+            setup "$s" sh; setup "$s" ps; run_both "$s"
+            diff -r "$P/$s/sh/.github" "$P/$s/ps/.github"
+            echo "情境 $s：byte-identical ✅"
           done
-          ./scripts/adopt.sh --std . --target "$P/sh" --uses-repo ACME/ci-standards >/dev/null
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
-            -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/ps")" -UsesRepo ACME/ci-standards >/dev/null
-          diff -r "$P/sh/.github" "$P/ps/.github"
+          run_both sub
+          diff -r "$P/sub/sh/.github" "$P/sub/ps/.github"
+          echo "情境 sub 升級：byte-identical ✅"
           echo "adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
 
       # 呼應 docs/HANDOFF.md §5：測試曾經污染過本 repo 的 .github/，

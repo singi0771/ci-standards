@@ -381,7 +381,7 @@ gh pr create
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
 | `shellcheck-paths` | string | `""` | 要檢查的 `.sh` glob。空字串＝自動找全 repo（找不到就略過） |
 | `restricted-base-branches` | string | `""` | 要管制「誰可以 merge 進來」的 base 分支，空白隔開、支援 glob。留空＝不檢查。見[分支模型](#分支模型pr-要發到哪裡) |
-| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填 |
+| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填。樣式的 `*` 也會比對 `/`，`hotfix/*` 包含 `hotfix/a/b`。呼叫端的 `pull_request.types` 要含 `edited`（範本已含），PR 改目標分支時才會重跑 |
 | `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改程式的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
 
 > **`run-*` 全部關掉也不會卡住**：子 job 都可能因 input 而 `skipped`，Gate 只在「開了卻不是 success」才擋。
@@ -746,7 +746,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（67 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（71 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh

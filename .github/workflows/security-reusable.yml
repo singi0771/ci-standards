@@ -307,8 +307,11 @@ jobs:
           if [ -f "$DOCKERFILE" ]; then
             docker build -f "$DOCKERFILE" -t "scan-target:$SHA" "$DOCKER_CONTEXT"
             echo "built=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DOCKERFILE" = "Dockerfile" ]; then
+            echo "沒有 Dockerfile，略過"
           else
-            echo "沒有 $DOCKERFILE，略過"
+            # 特別指定的路徑找不到就失敗：否則 image 掃描會被靜靜略過、Security Gate 照樣綠燈
+            echo "::error::dockerfile input 指定的 $DOCKERFILE 不存在（路徑打錯？）"; exit 1
           fi
       - name: Scan image
         if: ${{ steps.build.outputs.built == 'true' }}
