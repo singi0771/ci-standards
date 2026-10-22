@@ -27,6 +27,14 @@ on:
         description: "專案有 Dockerfile 時，是否 build 出 image 再掃它的弱點（會多花 2–3 分鐘）"
         type: boolean
         default: false
+      dockerfile:
+        description: "Dockerfile 路徑（相對 repo 根目錄），scan-docker-image 用它 build image"
+        type: string
+        default: "Dockerfile"
+      docker-context:
+        description: "docker build 的 context 目錄（相對 repo 根目錄）"
+        type: string
+        default: "."
       upload-sarif:
         description: "是否把 Semgrep 結果上傳到 Security 分頁（只有 public repo 或有 GHAS 的 private repo 能用）"
         type: boolean
@@ -290,16 +298,23 @@ jobs:
         with:
           persist-credentials: false
       - name: Build image (不推送，只為掃描)
+        id: build
         env:
           SHA: ${{ github.sha }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          DOCKER_CONTEXT: ${{ inputs.docker-context }}
         run: |
-          if [ -f Dockerfile ]; then
-            docker build -t "scan-target:$SHA" .
+          if [ -f "$DOCKERFILE" ]; then
+            docker build -f "$DOCKERFILE" -t "scan-target:$SHA" "$DOCKER_CONTEXT"
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DOCKERFILE" = "Dockerfile" ]; then
+            echo "沒有 Dockerfile，略過"
           else
-            echo "沒有 Dockerfile，略過"; exit 0
+            # 特別指定的路徑找不到就失敗：否則 image 掃描會被靜靜略過、Security Gate 照樣綠燈
+            echo "::error::dockerfile input 指定的 $DOCKERFILE 不存在（路徑打錯？）"; exit 1
           fi
       - name: Scan image
-        if: ${{ hashFiles('Dockerfile') != '' }}
+        if: ${{ steps.build.outputs.built == 'true' }}
         continue-on-error: ${{ inputs.fail-on-findings == false }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

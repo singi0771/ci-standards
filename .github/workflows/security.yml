@@ -2,8 +2,11 @@
 name: Security Scan
 
 on:
+  # push 觸發：列出「合併後要再驗一次」的長壽分支。
+  # GitHub 的 on: 不吃 ${{ }} 運算式，這裡只能寫死分支名 ——
+  # 用什麼分支模型是各專案自己的事，改這一行即可（例如只有 main、或 main + develop）。
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore: ["**/*.md", "docs/**"]
   # pull_request 不加 paths-ignore —— Security Gate 是 required check，
   # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死。

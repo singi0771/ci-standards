@@ -24,11 +24,12 @@
 5. [可調參數（inputs）](#可調參數inputs)
 6. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
 7. [分支保護：讓流程「非過不可」](#分支保護讓流程非過不可)
-8. [常見情境客製](#常見情境客製)
-9. [疑難排解](#疑難排解)
-10. [版本策略](#版本策略)
-11. [檔案地圖](#檔案地圖)
-12. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
+8. [分支模型：PR 要發到哪裡](#分支模型pr-要發到哪裡)
+9. [常見情境客製](#常見情境客製)
+10. [疑難排解](#疑難排解)
+11. [版本策略](#版本策略)
+12. [檔案地圖](#檔案地圖)
+13. [這套涵蓋什麼、不涵蓋什麼](#這套涵蓋什麼不涵蓋什麼)
 
 ---
 
@@ -355,6 +356,8 @@ gh pr create
 | `severity` | string | `CRITICAL,HIGH` | Trivy 要擋下的嚴重度。可加 `MEDIUM` 收更嚴 |
 | `fail-on-findings` | boolean | `true` | `true`=掃到就擋 merge；`false`=只回報不擋（**導入初期過渡用**） |
 | `scan-docker-image` | boolean | `false` | build 出 image 再掃 CVE。**有 Dockerfile 才開**，會多吃 2–3 分鐘 |
+| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄），例如 `src/Web.Api/Dockerfile`。Trivy image 掃描用它 build |
+| `docker-context` | string | `"."` | docker build 的 context 目錄 |
 | `run-zizmor` | boolean | `false` | 用 [zizmor](https://docs.zizmor.sh/) 檢查 `.github/workflows` 本身：把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、沒釘 SHA 的 action、權限給太大…。放行規則放專案的 `.github/zizmor.yml`（範本已附） |
 | `zizmor-min-severity` | string | `low` | zizmor 只回報這個等級以上：`low` / `medium` / `high` |
 | `semgrep-rules` | string | `p/owasp-top-ten p/security-audit p/secrets auto` | Semgrep 規則包，空白隔開。`auto` 會依語言自動挑（要連 Semgrep 規則庫、會回傳匿名使用統計；不想要就拿掉）。想加 `p/python`、`p/dockerfile` 就寫在這 |
@@ -371,10 +374,14 @@ gh pr create
 | `run-python` | boolean | `true` | 是否跑 ruff + pytest。**非 Python 專案設 `false`**，不必自己另寫一支 CI |
 | `run-docker-build` | boolean | `true` | 驗證 image 能 build（不推送）。沒 Dockerfile 就設 `false` |
 | `run-hadolint` | boolean | `false` | build 之前先用 [hadolint](https://github.com/hadolint/hadolint) 檢查 Dockerfile 寫法（沒釘版本的 apt 套件、`latest` tag、`RUN` 裡的 shell 問題…）。warning 以上才算失敗；要忽略某條規則放 `.hadolint.yaml`。放在 Docker build 那個 job 裡，不多花一個 job |
+| `dockerfile` | string | `"Dockerfile"` | Dockerfile 路徑（相對 repo 根目錄）。hadolint 與 Docker build 都用它；`adopt` 在根目錄找不到、子資料夾只有一個時會自動填入 |
+| `docker-context` | string | `"."` | docker build 的 context 目錄（Visual Studio / docker-compose 慣例是 repo 根目錄，通常不用改） |
 | `run-actionlint` | boolean | `false` | 檢查 GitHub Actions workflow 語法，會連 `run:` 區塊的 bash 一起用 shellcheck 檢查 |
 | `actionlint-paths` | string | `""` | 額外要檢查的 workflow 檔 glob。空字串＝只檢查 `.github/workflows`。⚠️ actionlint 一旦收到檔案參數就「只」檢查那些檔案，所以公版是**分兩次**跑（預設路徑一次、額外路徑一次） |
 | `run-shellcheck` | boolean | `false` | 用 shellcheck 檢查 shell script（runner 內建，不必安裝）。跟 actionlint 合在同一個 job 跑 |
 | `shellcheck-paths` | string | `""` | 要檢查的 `.sh` glob。空字串＝自動找全 repo（找不到就略過） |
+| `restricted-base-branches` | string | `""` | 要管制「誰可以 merge 進來」的 base 分支，空白隔開、支援 glob。留空＝不檢查。見[分支模型](#分支模型pr-要發到哪裡) |
+| `allowed-head-branches` | string | `""` | 承上，允許合併進那些 base 的來源分支。`restricted-base-branches` 有值時必填。樣式的 `*` 也會比對 `/`，`hotfix/*` 包含 `hotfix/a/b`。呼叫端的 `pull_request.types` 要含 `edited`（範本已含），PR 改目標分支時才會重跑 |
 | `ruff-version` | string | `0.16.0` | **釘死**的 ruff 版本。不釘的話新版 ruff 會憑空多出規則、讓沒改程式的 repo 突然變紅；要升級 lint 規則在此改一版、統一生效 |
 
 > **`run-*` 全部關掉也不會卡住**：子 job 都可能因 input 而 `skipped`，Gate 只在「開了卻不是 success」才擋。
@@ -499,6 +506,97 @@ gh auth login                                        # 需有目標 repo 的 adm
 > 本 repo 目前在個人帳號底下。**private repo 的 ruleset 需要 Pro 以上方案**，
 > 而組織可以用「一條 org ruleset 管所有 repo」，不必逐個跑腳本。
 > 建議在導入第 3 個專案之前搬到組織，見 [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md)。
+
+---
+
+## 分支模型：PR 要發到哪裡
+
+**公版不預設任何分支模型。** 你要只有 `main`、`main` + `develop`、還是完整 GitFlow，
+都是專案自己的決定 —— 公版只提供兩件事：**PR 上跑檢查**，以及**選配的來源分支限制**。
+
+### 哪些 PR 會跑檢查
+
+由呼叫端的 `on.pull_request` 決定，跟分支名稱無關：
+
+```yaml
+# 範本預設：發到「任何分支」的 PR 都跑
+pull_request:
+  types: [opened, synchronize, reopened, ready_for_review]
+
+# 只想對特定分支的 PR 跑，自己加 branches:
+pull_request:
+  branches: [main, develop]
+  types: [opened, synchronize, reopened, ready_for_review]
+```
+
+> ⚠️ 加了 `branches:` 篩選之後，**沒被列到的分支其 PR 不會有 `ci / CI Gate`**。
+> 那些分支就不能設成 required check，否則會永遠 pending。
+> 不確定就別加 —— 「全部都跑」永遠是安全的預設。
+
+`push:` 那邊同理，但 GitHub 的 `on:` **不吃 `${{ }}` 運算式**，分支名只能寫死。
+走 develop 流程就把它列進去：`branches: [main, develop]`。
+
+### 限制「誰可以 merge 進哪裡」
+
+`ci-reusable` 有兩個選配 input，不填就不檢查：
+
+```yaml
+jobs:
+  ci:
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      restricted-base-branches: "main"              # 要管的 base，空白隔開，支援 glob
+      allowed-head-branches: "develop hotfix/*"     # 允許的來源分支
+```
+
+意思是「`main` 只接受從 `develop` 或 `hotfix/*` 發來的 PR」，其他分支發到 `main` 會被擋下，
+Summary 會印出目標／來源／允許清單，並提示把 base 改成整合分支。
+
+判定順序：
+
+1. base 不在 `restricted-base-branches` 內 → 直接通過（不管制）
+2. `restricted-base-branches` 有值但 `allowed-head-branches` 空白 → **失敗**（這幾乎一定是漏填，不是本意）
+3. PR 來自 fork → **失敗**（fork 的分支名可以隨便取，叫 `develop` 不代表是你的 `develop`；外部貢獻請發到整合分支）
+4. head 符合 `allowed-head-branches` 的任一樣式 → 通過，否則失敗
+
+檢查結果收進 `ci / CI Gate`，所以**分支保護的 ruleset 不必加新的 required check**。
+
+> ⚠️ **這擋的是誤操作，不是惡意。** 它是一個 status check，沒有 ruleset 的話，
+> 有權限的人照樣可以直接 push 或用 admin 權限硬 merge。
+> 真正不讓人繞過的是下面這組設定 —— 兩者要一起用。
+
+### 一個 develop 流程完整長什麼樣
+
+```
+功能分支 ──PR──▶ develop ──PR──▶ main
+   ↑                 ↑              ↑
+   隨便取名        整合分支        正式版
+```
+
+| 要達成的事 | 靠什麼 |
+|---|---|
+| 功能分支不能直接推 develop | develop 的 ruleset：`pull_request` 規則（必須開 PR） |
+| 檢查沒過不能按 merge | develop 的 ruleset：required status checks = 兩個 Gate |
+| 不能 force push / 刪掉 develop | develop 的 ruleset：`non_fast_forward` + `deletion` |
+| 連 admin 都不能繞過 | ruleset 不設 `bypass_actors`（腳本預設就沒有） |
+| 只有 develop 能 merge 進 main | `restricted-base-branches` + `allowed-head-branches` |
+| 不能直接推 main | main 的 ruleset，同上 |
+
+設定指令：
+
+```bash
+# 兩條長壽分支一起保護（腳本可重複執行，同名 ruleset 會更新而不是新增一份）
+./scripts/setup-branch-protection.sh <owner>/<repo> main develop
+
+# 先看要送出什麼、不打 API（沒有 admin 權限時也能用，把 payload 交給有權限的人）
+./scripts/setup-branch-protection.sh <owner>/<repo> main develop --dry-run
+```
+
+再到 repo → Settings → General → Default branch 把預設分支改成 `develop`，
+新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
+
+> 💡 分支名稱不必是 `develop`。腳本吃的是你給的名字，`restricted-base-branches` /
+> `allowed-head-branches` 吃的也是你寫的 glob —— 叫 `integration`、`staging` 都行。
 
 ---
 
@@ -648,7 +746,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（57 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（71 項；⚠️ 破壞性，會自己 cd 到暫存目錄）
 ├── docs/
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
 │   ├── ADOPT.md                       ← 一鍵導入的跨平台說明、內網/離線做法、要不要 gh

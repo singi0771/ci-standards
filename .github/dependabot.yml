@@ -3,6 +3,11 @@ version: 2
 
 updates:
   - package-ecosystem: "github-actions"
+    # 明確指定發到整合分支。不寫的話 Dependabot 會發到 default branch ——
+    # 本 repo 的 ci.yml 有設 restricted-base-branches: main / allowed-head-branches: develop，
+    # dependabot/* 發到 main 會被 PR source branch policy 擋下，那個 PR 永遠 merge 不了。
+    # 走 develop 流程的專案都要記得補這一行（或把 default branch 設成 develop）。
+    target-branch: "develop"
     cooldown:
       # 供應鏈防護：剛發布的版本先觀察幾天再更新，避免搶到被動過手腳的新版。
       # 只用 default-days —— semver-major-days 這類細分選項不是每個 ecosystem 都支援
