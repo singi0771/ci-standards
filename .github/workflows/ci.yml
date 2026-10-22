@@ -21,8 +21,10 @@ on:
 permissions:
   contents: read
 
+# 改標題／內文的 edited 不跑任何 job，給它獨立的 group：否則它會把同一個 PR 正在跑的 CI 取消掉，
+# 而自己又什麼都不跑，這個 commit 就永遠沒有 CI Gate 結果。改 base 的 edited 照常共用 group。
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:

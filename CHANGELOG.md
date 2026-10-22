@@ -12,7 +12,7 @@
 
 ## [1.4.0] — 未發佈
 
-**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變。**既有專案升級時，只有 Dockerfile 在子資料夾的專案會被補上一行 `dockerfile:`，其餘不變。
+**新增兩個選配功能：PR 來源分支政策、Dockerfile 不在根目錄的專案。全部是新增 input，留空＝行為不變。**既有專案重跑 adopt 時，只有 Dockerfile 在子資料夾的專案會被補上一行 `dockerfile:`；下面「呼叫端範本」的觸發條件變更**不會**自動套到既有專案，要用來源分支政策的專案請照該段手動修改。
 
 從 #36 拆出來先發：#36 其餘的「移除 Copilot 自動修 / 自動審」是破壞性變更，依[版本策略](README.md#版本策略)改走 `v2.0.0`。
 
@@ -28,7 +28,12 @@
 ### 變更 —— 呼叫端範本（templates/consumer-repo）
 - `ci.yml` 的 `pull_request.types` 加上 `edited`，job 只在「改了目標分支」的 edited 才跑：
   PR 從 develop 改發到 main 時來源分支政策會重跑，不會沿用舊的綠燈；改標題、內文不重跑。
-  已導入的專案要重跑一次 adopt 才會吃到（或手動在 types 加 `edited` 並同步 job 的 `if`）。
+  **⚠️ 已導入的專案重跑 adopt 不會改到這段**（adopt 升級只合併 `with:`，不動 `on:`、`if:`、`concurrency:`）。
+  有設 `restricted-base-branches` 的專案要手動把 `.github/workflows/ci.yml` 改成和範本一致：
+  `pull_request.types` 加 `edited`、`jobs.ci.if` 與 `concurrency.group` 照範本改。
+  沒用來源分支政策的專案可以不改。
+- `ci.yml` 的 `concurrency.group`：改標題／內文的 edited 改用獨立 group，
+  不會把同一個 PR 正在跑的 CI 取消掉（否則該 commit 會沒有 CI Gate 結果）。
 
 ### 新增 —— Dockerfile 路徑（ci-reusable、security-reusable）
 - 新 input `dockerfile`（預設 `Dockerfile`）與 `docker-context`（預設 `.`），
