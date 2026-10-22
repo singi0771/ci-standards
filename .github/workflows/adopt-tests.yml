@@ -189,7 +189,14 @@ jobs:
           }
           FAIL=0
           for kind in fresh upgrade; do
-            for v in sh ps; do mkdir -p "$P/$kind-$v"; "mk_$kind" "$P/$kind-$v"; done
+            for v in sh ps; do
+              mkdir -p "$P/$kind-$v"
+              # 明寫 case 而不是 "mk_$kind"：shellcheck 看不出間接呼叫，會報 SC2329
+              case "$kind" in
+                fresh)   mk_fresh   "$P/$kind-$v" ;;
+                upgrade) mk_upgrade "$P/$kind-$v" ;;
+              esac
+            done
             ./scripts/adopt.sh --std . --target "$P/$kind-sh" --uses-repo ACME/ci-standards >/dev/null
             powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
               -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$kind-ps")" -UsesRepo ACME/ci-standards >/dev/null

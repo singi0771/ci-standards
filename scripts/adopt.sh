@@ -164,7 +164,8 @@ if [ "$DOTNET_SLN" -gt 0 ] || [ "$DOTNET_PROJ" -gt 0 ]; then HAS_DOTNET=true; fi
 PYVER="3.12"
 # 連 UTF-8 BOM（EF BB BF）一起去掉：PowerShell 5.1 的 Set-Content -Encoding UTF8 會寫 BOM，
 # 留著的話 python-version 會變成「BOM + 3.11」，setup-python 直接失敗（adopt.ps1 讀檔時會自動去掉）
-if [ -f .python-version ]; then PYVER="$(tr -d '\357\273\277 \r\n\t' < .python-version)"; fi
+# LC_ALL=C：macOS 的 BSD tr 在 UTF-8 locale 下按「字元」處理，\357 這種單一位元組刪不掉
+if [ -f .python-version ]; then PYVER="$(LC_ALL=C tr -d '\357\273\277 \r\n\t' < .python-version)"; fi
 
 # ── 判斷模式：全新安裝 vs 升級 ───────────────────────────────
 MODE="install"

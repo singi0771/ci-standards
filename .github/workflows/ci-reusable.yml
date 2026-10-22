@@ -276,11 +276,14 @@ jobs:
           fi
           if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
           echo "要檢查的 Dockerfile："; sed 's/^/  /' "$LIST"
+          # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為。
+          # 清空清單（讓後面的 hadolint / build 略過）要在下面的迴圈外做 —— 邊讀邊寫同一個檔是 SC2094
+          if [ "$DOCKERFILES" = "Dockerfile" ] && [ ! -f Dockerfile ]; then
+            echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0
+          fi
           while IFS= read -r entry; do
             f="${entry%%:*}"
             if [ ! -f "$f" ]; then
-              # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為
-              if [ "$DOCKERFILES" = "Dockerfile" ]; then echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0; fi
               # 其他明確指定的路徑找不到＝多半打錯字，要吵（不能讓檢查被靜靜略過）
               echo "::error::dockerfile input 指定的 $f 不存在（路徑打錯？）"; exit 1
             fi
