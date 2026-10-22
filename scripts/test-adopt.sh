@@ -70,12 +70,31 @@ has "$CI"  'run-docker-build: true'    "run-docker-build 依 Dockerfile 設為 t
 has "$CI"  'run-shellcheck: true'      "run-shellcheck 依 .sh 設為 true"
 has "$CI"  'run-hadolint: true'        "run-hadolint 依 Dockerfile 設為 true"
 has "$CI"  'python-version: "3.11"'    "python-version 讀到 .python-version"
+has "$CI"  'run-dotnet: false'         "沒有 .NET 專案時 run-dotnet 為 false"
+has "$CI"  'ci-reusable.yml@v2'        "全新導入預設指向 @v2"
+has "$CI"  'ready_for_review, edited]' "範本的 pull_request 有 edited（改 base 時重跑來源分支政策）"
 has "$SEC" 'scan-docker-image: true'   "scan-docker-image 依 Dockerfile 設為 true"
 has "$SEC" 'run-zizmor: true'          "run-zizmor 預設打開"
 hasnt "$SEC" 'python-version'          "security.yml 不再傳沒有任何步驟用到的 python-version"
-has ".github/copilot-instructions.md" 'Copilot 專案指引' "copilot-instructions.md 有建立"
 has ".github/zizmor.yml" 'singi0771/ci-standards/*' "zizmor.yml 有建立，且放行規則指向公版"
-if [ ! -e ".github/copilot-instructions.md.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
+if [ -f ".github/pull_request_template.md" ]; then ok "pull_request_template.md 有建立"; else bad "應建立 pull_request_template.md"; fi
+if [ ! -e ".github/zizmor.yml.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 A2：全新導入（.NET 專案、Dockerfile 在子目錄、.python-version 帶 BOM）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo dotnet
+mkdir -p src/App deploy
+printf '<Project Sdk="Microsoft.NET.Sdk"></Project>\n' > src/App/App.csproj
+printf 'Microsoft Visual Studio Solution File\n' > App.sln
+printf 'FROM mcr.microsoft.com/dotnet/aspnet:10.0\n' > deploy/Dockerfile
+# PowerShell 5.1 的 Set-Content -Encoding UTF8 會寫 BOM、Windows 編輯器會寫 CRLF
+printf '\357\273\2773.11\r\n' > .python-version
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  'run-dotnet: true'          "偵測到 .sln / .csproj → run-dotnet 為 true"
+has "$CI"  'run-python: false'         "沒有 Python 時 run-python 為 false（v2 起語言檢查預設關）"
+has "$CI"  'run-docker-build: true'    "子目錄的 Dockerfile 也算有 Dockerfile"
+has "$CI"  'python-version: "3.11"'    ".python-version 的 BOM 與 CRLF 被去掉"
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 B：升級既有的舊版呼叫端\n'
@@ -95,10 +114,12 @@ on:
   pull_request:
 jobs:
   ci:
-    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1   # 公版
     with:
       python-version: "3.9"
       run-docker-build: false
+
+      # 分支政策（空行之後的 key 也要被正確過濾）
       restricted-base-branches: "main"
       allowed-head-branches: "develop hotfix/*"
       legacy-option: true
@@ -112,67 +133,17 @@ on:
     - cron: "30 19 * * 3"        # 這個專案自己調過的排程，必須保留
 jobs:
   security:
-    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
-    with:
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1  
+    with:   # 這個專案調過的設定
       python-version: "3.9"
       severity: "CRITICAL,HIGH,MEDIUM"
       fail-on-findings: false
+      upload-sarif: false
       obsolete-flag: "x"
 OLD
 
-# 1.2.0 之前的呼叫端 workflow：只認 changes_requested、沒有 review-id/review-state、
-# 沒有 secrets: 區塊。AdminAutoTools 就是停在這個版本。
-# 這幾支的 if:/with:/secrets: 是公版規定的呼叫方式，不是專案設定 —— 升級時必須整份換掉，
-# 只保留使用者調過的設定（max-attempts / max-review-requests）。
-cat > .github/workflows/copilot-autofix-review.yml <<'OLD'
-name: Copilot Autofix — Review
-
-on:
-  pull_request_review:
-    types: [submitted]
-
-permissions:
-  pull-requests: write
-
-jobs:
-  autofix-review:
-    if: ${{ github.event.review.state == 'changes_requested' }}
-    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-review-reusable.yml@v1
-    with:
-      pr-number:    ${{ github.event.pull_request.number }}
-      pr-author:    ${{ github.event.pull_request.user.login }}
-      reviewer:     ${{ github.event.review.user.login }}
-      review-body:  ${{ github.event.review.body }}
-      review-url:   ${{ github.event.review.html_url }}
-      max-attempts: "5"
-      legacy-knob:  "x"
-OLD
-
-cat > .github/workflows/copilot-autoreview-gate.yml <<'OLD'
-name: Copilot Auto Review
-
-on:
-  workflow_run:
-    workflows: ["CI", "Security Scan"]
-    types: [completed]
-
-permissions:
-  pull-requests: write
-  contents: read
-  actions: read
-
-jobs:
-  autoreview:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    uses: singi0771/ci-standards/.github/workflows/copilot-autoreview-reusable.yml@v1
-    with:
-      head-sha:            ${{ github.event.workflow_run.head_sha }}
-      head-branch:         ${{ github.event.workflow_run.head_branch }}
-      triggered-by:        ${{ github.event.workflow_run.name }}
-      max-review-requests: "7"
-OLD
-
-printf '# 我們自己寫的 Copilot 指引\n專案專屬內容，絕不能被洗掉。\n' > .github/copilot-instructions.md
+# 專案專屬檔案：使用者改過的內容絕不能被洗掉
+printf '# 我們自己的 PR 檢查清單\n專案專屬內容，絕不能被洗掉。\n' > .github/pull_request_template.md
 
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
 
@@ -186,6 +157,10 @@ has "$SEC" 'cron: "30 19 * * 3"'                "保留使用者自訂的 cron�
 # ── 公版已廢除的 input 必須移除 ──
 hasnt "$CI"  'legacy-option'  "移除公版已不存在的 legacy-option"
 hasnt "$SEC" 'obsolete-flag'  "移除公版已不存在的 obsolete-flag"
+hasnt "$SEC" 'python-version' "移除 v2 拿掉的 security python-version"
+hasnt "$SEC" 'upload-sarif'   "移除 v2 拿掉的 upload-sarif"
+check "空行後面的 key 不會被重複補上（run-python 只出現一次）" "$(grep -c 'run-python:' "$CI")" "1"
+has "$CI" '# 分支政策（空行之後的 key 也要被正確過濾）' "with: 區塊裡的空行與註解原樣保留"
 
 # ── 選配的分支政策設定：公版認得，升級時必須原封不動 ──
 # 分支名稱是專案自己的決定，adopt 不能替它改或刪掉。
@@ -197,45 +172,23 @@ has "$CI" 'run-actionlint:'   "補上新版才有的 run-actionlint"
 has "$CI" 'run-python:'       "補上新版才有的 run-python"
 has "$CI" 'run-hadolint:'     "補上新版才有的 run-hadolint"
 has "$SEC" 'run-zizmor:'      "補上新版才有的 run-zizmor"
-has "$SEC" 'python-version: "3.9"' "舊呼叫端已經在傳的 python-version 照樣保留（公版仍認得它）"
 if [ -f ".github/zizmor.yml" ]; then ok "升級時補上原本沒有的 zizmor.yml"; else bad "升級時應補上 zizmor.yml"; fi
 
 # ── uses: 要更新 ref ──
-has "$CI"  'ci-reusable.yml@v1.1.0'        "ci.yml 的 uses: ref 已更新"
-has "$SEC" 'security-reusable.yml@v1.1.0'  "security.yml 的 uses: ref 已更新"
+has "$CI"  'ci-reusable.yml@v1.1.0   # 公版' "uses: 行尾有註解時 ref 照樣更新、註解原樣保留"
+has "$SEC" 'security-reusable.yml@v1.1.0'      "uses: 行尾有空白時 ref 照樣更新"
+has "$SEC" 'run-zizmor:'                       "with: 後面有註解也認得出區塊（有補上新 input）"
 
 # ── job id 不可以被動到（分支保護綁著它）──
 has "$CI"  '  ci:'        "job id 'ci' 未被更動"
 has "$SEC" '  security:'  "job id 'security' 未被更動"
 
 # ── 專案專屬檔案絕不覆蓋 ──
-has ".github/copilot-instructions.md" '專案專屬內容，絕不能被洗掉' "既有 copilot-instructions.md 未被覆蓋"
-if [ -f ".github/copilot-instructions.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
+has ".github/pull_request_template.md" '專案專屬內容，絕不能被洗掉' "既有 pull_request_template.md 未被覆蓋"
+if [ -f ".github/pull_request_template.md.new" ]; then ok "新版範本另存為 .new 供比對"; else bad "應產生 .new"; fi
 
-# ── 呼叫端 workflow：1.2.0 的呼叫方式必須真的補進去 ──
-# 這一段是整個升級路徑最會出事的地方：只合併 with: 的話，舊 consumer 會拿到
-# 新的 uses: 卻留著舊的 if: 與缺席的 secrets: —— 版本號變了、自動修迴圈還是壞的。
-REV=".github/workflows/copilot-autofix-review.yml"
-GATE=".github/workflows/copilot-autoreview-gate.yml"
-has "$REV" "'commented'"            "review 那支呼叫端 workflow 補上 COMMENTED 觸發條件（Copilot 只送 COMMENTED）"
-has "$REV" 'copilot-pull-request-reviewer' "review 那支呼叫端 workflow 補上 Copilot 帳號比對"
-has "$REV" 'OWNER'                  "review 那支呼叫端 workflow 補上真人 reviewer 的信任身分檢查"
-has "$REV" 'review-id:'             "review 那支呼叫端 workflow 補上新版才有的 review-id"
-has "$REV" 'review-state:'          "review 那支呼叫端 workflow 補上新版才有的 review-state"
-has "$REV" 'copilot-trigger-pat'    "review 那支呼叫端 workflow 補上 secrets: copilot-trigger-pat"
-has ".github/workflows/copilot-autofix-ci-security.yml" 'copilot-trigger-pat' \
-    "CI/Security 那支呼叫端 workflow 補上 secrets: copilot-trigger-pat"
-
-# ── 換新時，使用者調過的設定要搬回來；廢除的要丟掉 ──
-has   "$REV"  'max-attempts: "5"'        "換新後仍保留使用者調過的 max-attempts"
-hasnt "$REV"  'legacy-knob'              "換新時丟掉公版已不認得的 legacy-knob"
-has   "$GATE" 'max-review-requests: "7"' "換新後仍保留使用者調過的 max-review-requests"
-hasnt "$GATE" '# max-review-requests'    "被搬回來的設定取代掉範本的註解提示（不會兩份並存）"
-has   "$REV"  'copilot-autofix-review-reusable.yml@v1.1.0' "呼叫端 workflow 的 uses: ref 也有更新"
-
-# ── 舊檔要留下來供比對 ──
-if [ -f "$REV.bak" ]; then ok "被換掉的舊呼叫端 workflow 留成 .bak"; else bad "應留下 .bak"; fi
-has "$REV.bak" 'legacy-knob' ".bak 是原本那份（沒被動過）"
+# ── 觸發條件不是 v1 範本原樣 → 不自動改（只回報），檔案裡也不會出現 edited ──
+hasnt "$CI" 'edited' "觸發條件被使用者改過時，不自作主張加 edited"
 
 # ── 產生的 YAML 必須合法 ──
 # 先確認 PyYAML 真的裝得起來 —— 只檢查 python3 存在是不夠的：
@@ -274,13 +227,174 @@ fi
 printf '\n▸ 情境 C：重複執行（同樣的指令跑兩次，第二次不應再改動）\n'
 # ═════════════════════════════════════════════════════════════
 # 使用者處理完 .new / .bak 之後的正常狀態
-rm -f .github/copilot-instructions.md.new .github/workflows/*.bak
+rm -f .github/pull_request_template.md.new
 git add -A >/dev/null 2>&1; git commit -qm "after first adopt"
 "$ADOPT" --std "$STD" --ref v1.1.0 >/dev/null
-rm -f .github/copilot-instructions.md.new
+rm -f .github/pull_request_template.md.new
 if [ -z "$(git status --porcelain)" ]; then ok "第二次執行沒有產生任何差異"; else
   bad "第二次執行仍有變動："; git --no-pager diff --stat; git status --porcelain
 fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 G：v1 範本原樣的呼叫端升級到 v2（觸發條件修補、CRLF）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo v1-template
+mkdir -p .github/workflows
+cat > "$WORK/v1-ci.lf" <<'OLD'
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ci:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1
+    with:
+      python-version: "3.12"
+      run-python: true
+      restricted-base-branches: "main"
+      allowed-head-branches: "develop"
+OLD
+# 用 CRLF 寫：Windows 上 core.autocrlf=true 簽出的檔案就是這樣
+sed 's/$/\r/' "$WORK/v1-ci.lf" > "$CI"
+cat > "$SEC" <<'OLD'
+name: Security Scan
+on:
+  pull_request:
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  security:
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v1
+    with:
+      upload-sarif: false
+      run-zizmor: true
+OLD
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  'ready_for_review, edited]'                                     "v1 範本的 types 補上 edited"
+has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "job if 一起改成「只有改 base 的 edited 才跑」"
+has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
+has "$CI"  'ci-reusable.yml@v2'                                            "uses: 改指向 @v2"
+# shellcheck disable=SC2016  # 故意不展開：比對的是檔案裡的 ${{ }} 原文
+has "$SEC" 'group: security-${{ github.event_name }}-${{ github.ref }}'    "security.yml 的 concurrency 依事件分組"
+if grep -q "$(printf '\r')" "$CI"; then bad "CRLF 呼叫端合併後應統一成 LF"; else ok "CRLF 呼叫端合併後統一成 LF（與 adopt.ps1 一致）"; fi
+cp "$CI" "$WORK/v1-ci-after"
+"$ADOPT" --std "$STD" >/dev/null
+if cmp -s "$CI" "$WORK/v1-ci-after"; then ok "觸發條件修補可重複執行（第二次不再變動）"; else bad "第二次執行又改了 ci.yml"; fi
+
+# 半套：使用者手動加了 edited，但 if / concurrency 還是 v1 —— 也要補齊
+new_repo v1-half
+mkdir -p .github/workflows
+sed -e 's/ready_for_review\]/ready_for_review, edited]/' "$WORK/v1-ci.lf" > "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "只加了 edited 的半套狀態：job if 也補上"
+has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "只加了 edited 的半套狀態：concurrency 也補上"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 I：偵測範圍要跟公版 reusable 實際檢查的範圍一致\n'
+# ═════════════════════════════════════════════════════════════
+new_repo deep
+mkdir -p services/api/build tools/ci/scripts/x node_modules/pkg
+printf 'FROM alpine\n' > services/api/build/Dockerfile          # 第 4 層：公版會 build 它
+printf '#!/bin/sh\ntrue\n' > tools/ci/scripts/x/run.sh          # 第 5 層：公版會 shellcheck 它
+printf '#!/bin/sh\ntrue\n' > node_modules/pkg/postinstall.sh   # node_modules：公版不看
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: true' "深層目錄的 Dockerfile 也偵測得到"
+has "$CI" 'run-shellcheck: true'   "深層目錄的 .sh 也偵測得到"
+new_repo lowercase-dockerfile
+printf 'FROM alpine\n' > api.dockerfile                        # 公版的 find 分大小寫，不會 build 它
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: false' "小寫的 api.dockerfile 不算（公版也不會 build 它）"
+
+# 不帶 --std、用相對路徑呼叫：腳本要靠自己的位置找到公版（舊版在 cd 之後才算位置，會找錯）
+new_repo relative
+TARGET_DIR="$PWD"
+if ( cd "$STD" && ./scripts/adopt.sh --target "$TARGET_DIR" --dry-run >/dev/null 2>&1 ); then
+  ok "相對路徑呼叫、不帶 --std 也找得到公版"
+else
+  bad "相對路徑呼叫、不帶 --std 時找不到公版"
+fi
+
+# 1.4.0 範本（已經是 edited + 新 if / concurrency）升級到 v2：觸發條件視為已完成、不再改動
+new_repo v140-template
+mkdir -p .github/workflows
+cp "$STD/templates/consumer-repo/.github/workflows/ci.yml" "$CI"
+sed -i.bak 's|ci-reusable.yml@v2|ci-reusable.yml@v1|' "$CI" && rm -f "$CI.bak"
+grep -v -e 'ci-reusable.yml@' -e '^ *run-\|^ *python-version' "$CI" > "$WORK/v140-before"
+"$ADOPT" --std "$STD" >/dev/null
+grep -v -e 'ci-reusable.yml@' -e '^ *run-\|^ *python-version' "$CI" > "$WORK/v140-after"
+if cmp -s "$WORK/v140-before" "$WORK/v140-after"; then ok "1.4.0 範本的觸發條件已是 v2 寫法，不再改動"; else bad "1.4.0 範本的觸發條件被改動了"; fi
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 J：Dockerfile 不在根目錄（1.4.0 的 dockerfile: input）\n'
+# ═════════════════════════════════════════════════════════════
+# v2 的公版會自己找全 repo 的 Dockerfile，adopt 不必再寫 dockerfile:；
+# 但 1.4.0 時代呼叫端已經寫好的 dockerfile: 是使用者的設定，升級時必須原封不動。
+new_repo subdir-docker
+mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+has   "$CI"  'run-docker-build: true'   "子資料夾的 Dockerfile 也會開 run-docker-build"
+has   "$SEC" 'scan-docker-image: true'  "子資料夾的 Dockerfile 也會開 scan-docker-image"
+hasnt "$CI"  'dockerfile:'              "v2 不必寫 dockerfile:（公版自己找全 repo）"
+# awk 而不是 sed：BSD sed（macOS）的取代字串不認得 \n
+awk '{ print } /^    with:$/ { print "      dockerfile: \"deploy/Custom.Dockerfile\"" }' "$CI" > "$CI.tmp" && mv "$CI.tmp" "$CI"
+"$ADOPT" --std "$STD" >/dev/null
+has   "$CI"  'dockerfile: "deploy/Custom.Dockerfile"' "升級時保留使用者自訂的 dockerfile:"
+check "升級後仍只有一行 dockerfile:" "$(grep -c '^ *dockerfile:' "$CI")" "1"
+
+new_repo multi-docker
+mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
+"$ADOPT" --std "$STD" >/dev/null
+has "$CI" 'run-docker-build: true' "多個 Dockerfile 也開 Docker 檢查（v2 的公版會逐一 build）"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 K：1.x 留下的 Copilot 呼叫端要被明確點名（不刪，但警告不能漏）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo copilot-leftovers
+mkdir -p .github/workflows
+for f in copilot-autofix-ci-security.yml copilot-autofix-review.yml copilot-autoreview-gate.yml copilot-setup-steps.yml; do
+  printf 'jobs:\n  x:\n    uses: singi0771/ci-standards/.github/workflows/copilot-autofix-reusable.yml@v1\n' > ".github/workflows/$f"
+done
+OUT_DRY="$("$ADOPT" --std "$STD" --dry-run 2>&1)"
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+case "$OUT_DRY" in
+  *"Copilot 呼叫端"*"copilot-autofix-ci-security.yml"*) ok "--dry-run 的計畫就會點名舊的 Copilot 呼叫端" ;;
+  *) bad "--dry-run 沒有點名舊的 Copilot 呼叫端" ;;
+esac
+case "$OUT" in
+  *"git rm"*"copilot-autofix-review.yml"*"copilot-autoreview-gate.yml"*"copilot-setup-steps.yml"*) ok "報告列出要 git rm 的四支 Copilot 檔案" ;;
+  *) bad "報告沒有列出要 git rm 的 Copilot 檔案（實際輸出：${OUT}）" ;;
+esac
+if [ -f .github/workflows/copilot-autofix-review.yml ]; then ok "照原則不刪專案既有的檔案"; else bad "不該自動刪掉使用者的檔案"; fi
+has ".github/workflows/copilot-autofix-review.yml" '@v1' "Copilot 呼叫端維持 @v1（不會被改成 v2 不存在的 reusable）"
+new_repo no-copilot
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+case "$OUT" in
+  *"Copilot 呼叫端"*) bad "沒有 Copilot 檔案時不該出現這段警告" ;;
+  *) ok "沒有 Copilot 檔案時不出現警告" ;;
+esac
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'
+# ═════════════════════════════════════════════════════════════
+FAKE_STD="$WORK/fake-std"
+mkdir -p "$FAKE_STD/.github/workflows"
+cp -R "$STD/templates" "$FAKE_STD/"
+cp "$STD/.github/workflows/security-reusable.yml" "$FAKE_STD/.github/workflows/"
+# ci-reusable 的 inputs: 那一行格式變了 → 解析結果是空的
+sed 's/^    inputs:$/    inputs:  # changed/' "$STD/.github/workflows/ci-reusable.yml" > "$FAKE_STD/.github/workflows/ci-reusable.yml"
+new_repo guard
+mkdir -p .github/workflows
+printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v1\n    with:\n      run-python: true\n' > "$CI"
+cp "$CI" "$WORK/guard-before"
+if "$ADOPT" --std "$FAKE_STD" >/dev/null 2>&1; then bad "讀不到 inputs 時應該中止"; else ok "讀不到 inputs 時中止"; fi
+if cmp -s "$CI" "$WORK/guard-before"; then ok "中止時呼叫端原封不動"; else bad "中止前已經改動了呼叫端"; fi
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 D：--dry-run 不得動到任何檔案\n'
@@ -294,7 +408,7 @@ printf '\n▸ 情境 E：--uses-repo（搬到組織時換掉 owner/repo）\n'
 # ═════════════════════════════════════════════════════════════
 new_repo orgmove
 "$ADOPT" --std "$STD" --uses-repo "ACME/ci-standards" >/dev/null
-has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v1' "uses: 的 owner/repo 已換成 ACME"
+has "$CI" 'ACME/ci-standards/.github/workflows/ci-reusable.yml@v2' "uses: 的 owner/repo 已換成 ACME"
 has ".github/zizmor.yml" '"ACME/ci-standards/*": ref-pin' "zizmor.yml 的放行規則也換成 ACME"
 hasnt ".github/zizmor.yml" 'singi0771' "zizmor.yml 不再留著舊的 owner"
 
@@ -349,47 +463,6 @@ OUT="$("$ADOPT" --std "$STD" --dry-run 2>&1 || true)"
 case "$OUT" in
   *"請先 git init 或 clone"*) ok "沒有子 repo 時維持原訊息" ;;
   *) bad "沒有子 repo 時訊息不對（實際輸出：${OUT}）" ;;
-esac
-
-# ═════════════════════════════════════════════════════════════
-printf '\n▸ 情境 G：Dockerfile 不在根目錄（.NET 常見的 src/<專案>/Dockerfile）\n'
-# ═════════════════════════════════════════════════════════════
-new_repo subdir-docker
-mkdir -p src/Web.Api && printf 'FROM alpine\n' > src/Web.Api/Dockerfile
-"$ADOPT" --std "$STD" >/dev/null
-CI=".github/workflows/ci.yml"; SEC=".github/workflows/security.yml"
-has "$CI"  'run-docker-build: true'                "子資料夾唯一的 Dockerfile 也會開 run-docker-build"
-has "$CI"  'dockerfile: "src/Web.Api/Dockerfile"'  "ci.yml 帶入子資料夾 Dockerfile 路徑"
-has "$SEC" 'scan-docker-image: true'               "子資料夾 Dockerfile 也會開 scan-docker-image"
-has "$SEC" 'dockerfile: "src/Web.Api/Dockerfile"'  "security.yml 帶入子資料夾 Dockerfile 路徑"
-hasnt "$CI" 'docker-context:'                      "context 維持預設（repo 根目錄），不寫進呼叫端"
-
-# 升級：再跑一次，dockerfile: 只能有一行（不重複補）
-"$ADOPT" --std "$STD" >/dev/null
-check "升級後 ci.yml 的 dockerfile: 只有一行"       "$(grep -c '^ *dockerfile:' "$CI")"  "1"
-check "升級後 security.yml 的 dockerfile: 只有一行" "$(grep -c '^ *dockerfile:' "$SEC")" "1"
-
-# 升級：使用者自己改過的 dockerfile: 不被偵測值蓋掉
-sed 's|dockerfile: "src/Web.Api/Dockerfile"|dockerfile: "deploy/Custom.Dockerfile"|' "$CI" > "$CI.tmp" && mv "$CI.tmp" "$CI"
-"$ADOPT" --std "$STD" >/dev/null
-has "$CI" 'dockerfile: "deploy/Custom.Dockerfile"' "升級時保留使用者自訂的 dockerfile:"
-check "升級後仍只有一行 dockerfile:" "$(grep -c '^ *dockerfile:' "$CI")" "1"
-
-# 根目錄有 Dockerfile 時維持舊行為：不帶 dockerfile: input
-new_repo root-docker
-printf 'FROM alpine\n' > Dockerfile
-"$ADOPT" --std "$STD" >/dev/null
-hasnt "$CI" 'dockerfile:' "根目錄 Dockerfile 不寫 dockerfile:（用預設值，呼叫端保持乾淨）"
-
-# 多個 Dockerfile：不猜，關掉 Docker 檢查並列出清單
-new_repo multi-docker
-mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
-OUT="$("$ADOPT" --std "$STD" 2>&1)"
-has "$CI" 'run-docker-build: false' "多個 Dockerfile 時不自動開 Docker 檢查"
-hasnt "$CI" 'dockerfile:'           "多個 Dockerfile 時不猜路徑"
-case "$OUT" in
-  *"svc/a/Dockerfile"*"svc/b/Dockerfile"*) ok "多個 Dockerfile 時列出所有候選" ;;
-  *) bad "沒有列出候選 Dockerfile（實際輸出：${OUT}）" ;;
 esac
 
 # ═════════════════════════════════════════════════════════════
