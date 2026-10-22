@@ -62,7 +62,8 @@ else
   #   - 用空白分隔：git 分支名稱不可能含空白，所以 `main develop` 不會跟名為 `main+develop`
   #     的單一分支撞名（舊版用 + 串接會撞）。
   #   - 先排序：`main develop` 與 `develop main` 是同一份清單，應該更新同一份 ruleset。
-  _joined="$(printf '%s\n' "${BRANCHES[@]}" | LC_ALL=C sort -u | paste -sd' ' -)"
+  #   - 先去掉 refs/heads/：`main` 與 `refs/heads/main` 是同一個分支，要對到同一份 ruleset。
+  _joined="$(printf '%s\n' "${BRANCHES[@]}" | sed 's|^refs/heads/||' | LC_ALL=C sort -u | paste -sd' ' -)"
   DEFAULT_RULESET_NAME="CI Standard (branches: $_joined)"
 fi
 RULESET_NAME="${RULESET_NAME:-$DEFAULT_RULESET_NAME}"
@@ -186,11 +187,14 @@ fi
 # 名稱放進 jq 前一定要跳脫：jq 字串字面值與 JSON 相同，用 json_escape 包成 "…"。
 # 沒跳脫的話名稱含 " 時 filter 語法錯誤，又被 || true 吞掉 → 每次都誤判「不存在」而 POST 新的一份。
 NAME_JQ="\"$(json_escape "$RULESET_NAME")\""
-if ! EXISTING_ID=$(gh api "repos/$REPO/rulesets" \
-     --jq ".[] | select(.name == $NAME_JQ) | .id" | head -1); then
+# 先把 gh 的輸出整份收下再取第一筆：直接 `| head -1` 在有多筆同名時會提早關掉管線，
+# gh 收到 SIGPIPE，pipefail 下就被誤判成「讀取失敗」—— 偏偏是最需要處理重複的時候。
+if ! _matches=$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name == $NAME_JQ) | .id"); then
   echo "❌ 讀取 $REPO 的 ruleset 清單失敗（權限不足或 repo 名稱錯誤？），中止以免重複建立" >&2
   exit 1
 fi
+EXISTING_ID="${_matches%%$'\n'*}"
+NEW_ID=""
 
 if [ -n "$EXISTING_ID" ]; then
   echo "→ 已存在同名 ruleset（id=$EXISTING_ID），改為更新..."
@@ -198,14 +202,18 @@ if [ -n "$EXISTING_ID" ]; then
     -H "Accept: application/vnd.github+json" --input -
 else
   echo "→ 建立新的 ruleset..."
-  echo "$PAYLOAD" | gh api -X POST "repos/$REPO/rulesets" \
-    -H "Accept: application/vnd.github+json" --input -
+  NEW_ID=$(echo "$PAYLOAD" | gh api -X POST "repos/$REPO/rulesets" \
+    -H "Accept: application/vnd.github+json" --input - --jq '.id')
+  echo "   id=$NEW_ID"
 fi
 
 # 同一個 repo 上兩份都叫 "CI Standard - …" 的 ruleset 會**疊加**生效，
 # 出問題時極難 debug（規則看起來都對，但有一份在暗處多要求了東西）。
+# 用 id 排除剛剛更新／建立的那一份，而不是用名稱：同名的重複 ruleset 也要列出來提醒清掉。
+# 名稱只認本腳本產生的兩種格式，不把使用者自己取名 "CI Standards for X" 之類的也抓進來。
+SELF_ID="${EXISTING_ID:-$NEW_ID}"
 OTHERS=$(gh api "repos/$REPO/rulesets" \
-  --jq ".[] | select(.name != $NAME_JQ) | select(.name | startswith(\"CI Standard\")) | \"\(.id)\t\(.name)\"" 2>/dev/null || true)
+  --jq ".[] | select(.id != ${SELF_ID:-0}) | select(.name | test(\"^CI Standard( - | \\\\(branches: )\")) | \"\(.id)\t\(.name)\"" 2>/dev/null || true)
 
 echo
 echo "✅ 完成。到 $REPO → Settings → Rules → Rulesets 可檢視。"
