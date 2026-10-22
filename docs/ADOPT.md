@@ -274,4 +274,4 @@ Windows PowerShell 5.1 讀 `.ps1` 沒看到 BOM 就用 ANSI codepage（繁中 = 
 5. 第一次一定會有東西紅，那是掃描器真的找到問題。**不要為了讓它變綠就關掉檢查**
 6. zizmor 挑到你自己寫的 workflow 的毛病（沒釘 SHA、權限太大）多半是真的該修；確定是誤判才放進 `.github/zizmor.yml`
 
-完整說明見 [README — 5 分鐘導入](../README.md#5-分鐘導入一個新專案)。
+完整說明見 [README — 其他專案怎麼導入](../README.md#其他專案怎麼導入)。

@@ -19,7 +19,7 @@
 0. **[已知限制（導入前先看）](docs/KNOWN-LIMITATIONS.md)** —— 哪些功能實測過但還不能用
 0'. **[流程圖：這個 repo 到底在做什麼](docs/FLOW.md)** —— 讀 README 之前的地圖
 1. [運作原理（先看這個）](#運作原理先看這個)
-2. [5 分鐘導入一個新專案](#5-分鐘導入一個新專案)
+2. **[其他專案怎麼導入](#其他專案怎麼導入)** —— clone 公版 → 跑 `adopt` → 開 PR → 設分支保護
 3. [導入後，日常怎麼用](#導入後日常怎麼用)
 4. [可調參數（inputs）](#可調參數inputs)
 5. [省 Actions 分鐘：這套怎麼省、你還能怎麼省](#省-actions-分鐘這套怎麼省你還能怎麼省)
@@ -91,76 +91,85 @@ Gate job 用 `if: always()` 執行、自己判斷「開了就得 success」，�
 
 ---
 
-## 5 分鐘導入一個新專案
+## 其他專案怎麼導入
+
+**導入＝在你的專案放兩支「呼叫端」workflow（外加三個設定檔），用 `uses: ...@v2` 呼叫本 repo。**
+公版本身不用複製、也不用 fork；你的專案只留二十幾行的呼叫端，邏輯全在這裡。
+
+先分清楚你是哪一種：
+
+| 你的專案 | 照哪一節做 |
+|---|---|
+| 從沒導入過 | 下面的「新專案導入（6 步）」 |
+| 已經導入、還指向 `@v1` | [從 v1 升級到 v2](#從-v1-升級到-v2)（有破壞性變更，要先刪 Copilot 呼叫端） |
+| 已經導入、指向 `@v2` | 什麼都不用做，公版移動 `v2` tag 後下次跑 CI 自動吃到新版；想用新參數就重跑一次步驟 2 |
 
 ### 前置檢查
 
 | 項目 | 要求 |
 |---|---|
-| 語言 | 安全掃描不分語言。CI 內建 Python（ruff + pytest）與 .NET（dotnet format / build / test），**都是預設關、用到才開**（`adopt.sh` 會依偵測結果填好）。其他語言見[常見情境](#專案不是-python) |
-| 本 repo 可見性 | 目前是 **public**，任何 repo 都能呼叫。若哪天改回 private，要到 Settings → Actions → General → Access 選 **Accessible from repositories in the organization** |
-| 目標 repo 權限 | 你要有 admin（才能設分支保護）；沒有的話第 5 步得請 owner 做 |
-| 分支保護 | **不是必要條件**。Free 方案的 private repo、或公司統一管制設定的 repo 設不了也照樣能導入，只是紅燈擋不住 merge，見[沒辦法設分支保護時](#沒辦法設分支保護時) |
+| 語言 | 安全掃描不分語言。CI 內建 Python（ruff + pytest）與 .NET（dotnet format / build / test），**都是預設關、用到才開**（導入腳本會依偵測結果填好）。其他語言見[常見情境](#專案不是-python) |
+| 本 repo 可見性 | 目前是 **public**，任何 repo 都能 `uses:` 呼叫，不必另外授權。若哪天改回 private，要到本 repo 的 Settings → Actions → General → Access 選 **Accessible from repositories in the organization** |
+| 你的電腦 | 只要 `git`。`gh` 是選配（只有設分支保護那一步方便一點），見 [`docs/ADOPT.md`](docs/ADOPT.md) |
+| 目標 repo 權限 | 能推分支、開 PR 就能導入；設分支保護（步驟 6）要 admin，沒有的話請 owner 做 |
+| 分支保護 | **不是必要條件**。Free 方案的 private repo、或公司統一管制的 repo 設不了也照樣能導入，只是紅燈擋不住 merge，見[沒辦法設分支保護時](#沒辦法設分支保護時) |
 
-### 步驟 1 — 複製呼叫端範本
+### 新專案導入（6 步）
 
-**一鍵版（推薦）** —— 會自動偵測用了哪些技術並把參數填好，macOS / Linux / Windows 都能用：
+#### 步驟 1 — 把公版 clone 到本機（只做一次，之後每個專案共用）
+
+```bash
+git clone https://github.com/singi0771/ci-standards.git ~/ci-standards
+```
+
+已經 clone 過的話 `git -C ~/ci-standards pull` 更新到最新，導入腳本與範本才會是 v2 的版本。
+（clone 只是為了拿腳本與範本；你的專案在 CI 上呼叫的是 GitHub 上的 `@v2`，跟本機這份無關。）
+
+#### 步驟 2 — 在你的專案開分支，跑導入腳本
 
 ```bash
 cd /path/to/your-project
+git checkout -b chore/adopt-ci-standards
 
-/path/to/ci-standards/scripts/adopt.sh              # macOS / Linux / Git Bash
+~/ci-standards/scripts/adopt.sh --dry-run     # 先看偵測結果與要動哪些檔案，不寫入
+~/ci-standards/scripts/adopt.sh               # 確認無誤再真的跑
 ```
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.ps1   # Windows
+# Windows PowerShell（內建，不必裝東西）
+powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File C:\path\to\ci-standards\scripts\adopt.ps1
 ```
 
-先加 `--dry-run` / `-DryRun` 看它偵測到什麼，確認無誤再真的跑。
-**只需要 `git`，不需要 `gh`**；內網、離線、Proxy 的做法見 [`docs/ADOPT.md`](docs/ADOPT.md)。
+腳本做的事：
 
-用了一鍵版的話，**步驟 2 的 ① ② 可以跳過**（腳本已經填好），只剩 ③ 要自己改。
+- 偵測專案用了什麼（Python、.NET、Dockerfile、shell script…），把對應的 `run-*` 參數寫成 `true` / `false`
+- 放入 `.github/workflows/ci.yml`、`.github/workflows/security.yml`（已存在就**升級**：`uses:` 改成 `@v2`、補新參數、你調過的值原樣保留）
+- 放入 `zizmor.yml`、`dependabot.yml`、`pull_request_template.md` —— 這三個是專案專屬的，**已存在就不覆蓋**，只另存一份 `.new` 讓你比對
+- 不刪任何既有檔案、不碰網路、不 commit
+
+常用參數：`--target <路徑>`（不在專案目錄裡執行時）、`--ref v2.0.0`（釘死某一版，預設 `v2`）。
+PowerShell 版寫成 `-Target`、`-Ref`、`-DryRun`。內網、離線、Proxy 的做法見 [`docs/ADOPT.md`](docs/ADOPT.md)。
 
 <details>
-<summary>手動版</summary>
+<summary>不想跑腳本：手動複製</summary>
 
 ```bash
-cp -R /path/to/ci-standards/templates/consumer-repo/.github .
+cp -R ~/ci-standards/templates/consumer-repo/.github .
 ```
+
+然後打開 `.github/workflows/ci.yml` 與 `security.yml`，照步驟 3 把 `with:` 改成符合你的專案。
+範本的 `uses:` 已經指向 `singi0771/ci-standards/...@v2`，不用改。
 
 </details>
 
-複製過去的東西：
+#### 步驟 3 — 檢查參數
 
-| 檔案 | 作用 | 要不要改 |
-|---|---|---|
-| `workflows/security.yml` | 呼叫安全公版 | ✅ 改 `uses:` 與 `with:` |
-| `workflows/ci.yml` | 呼叫 CI 公版 | ✅ 改 `uses:` |
-| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v2` 這類版本 tag 已放行） | 有誤判才加規則 |
-| `dependabot.yml` | pip 每週、docker / actions 每月自動開更新 PR | 用不到的段落刪掉；.NET / 前端照檔尾的註解補 `nuget` / `npm` 區塊 |
-| `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
-
-> 總共只有五個檔案，**沒有任何邏輯**：兩支呼叫端 workflow 各二十幾行，其餘三個是設定與範本。
-
-### 步驟 2 — 改兩個地方
-
-**① `security.yml` 的 `uses:` 與參數**
+用腳本的話多半不用改，`git diff` 看一眼就好。要確認的只有這幾個：
 
 ```yaml
+# .github/workflows/ci.yml
 jobs:
-  security:                                   # ← job id 是 security，會影響 check 名稱
-    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v2
-    with:
-      severity: "CRITICAL,HIGH"
-      fail-on-findings: true
-      scan-docker-image: false   # 有 Dockerfile 才改 true（每個 image 多吃 2–3 分鐘）
-      run-zizmor: true           # workflow 本身的安全檢查，放行規則在 .github/zizmor.yml
-```
-
-**② `ci.yml` 的 `uses:`**
-
-```yaml
-jobs:
-  ci:                                         # ← job id 是 ci
+  ci:                                         # ← job id 不要改，會影響 check 名稱
     uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
     with:
       run-python: true           # 2.0.0 起預設是 false，Python 專案要明確打開
@@ -170,34 +179,76 @@ jobs:
       run-hadolint: true         # 有 Dockerfile 時，build 前先檢查 Dockerfile 寫法
 ```
 
-> ⚠️ **job id（`security` / `ci`）不要亂改**。分支保護的 check 名稱是 `<job id> / <公版 job 名>`，改了名稱 ruleset 就對不上。
-
-### 步驟 3 — 推上去
-
-```bash
-git add .github && git commit -m "Adopt org CI/security standard" && git push
+```yaml
+# .github/workflows/security.yml
+jobs:
+  security:                                   # ← job id 不要改
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v2
+    with:
+      severity: "CRITICAL,HIGH"
+      fail-on-findings: true
+      scan-docker-image: false   # 有 Dockerfile 才改 true（每個 image 多吃 2–3 分鐘）
+      run-zizmor: true           # workflow 本身的安全檢查，放行規則在 .github/zizmor.yml
 ```
 
-### 步驟 4 — 看第一次跑的結果
+另外兩件看專案而定的事：
+
+- **走 develop 流程**（功能分支 → develop → main）：兩支呼叫端的 `on.push.branches` 改成 `[main, develop]`；
+  要限制「只有 develop 能 merge 進 main」再加 `restricted-base-branches` / `allowed-head-branches`，見[分支模型](#分支模型pr-要發到哪裡)。
+- **專案原本就有 `.github/dependabot.yml` 等檔案**：比對腳本產生的 `.new`，要的段落手動併進去，處理完把 `.new` 刪掉。
+
+> ⚠️ **job id（`security` / `ci`）不要改**。分支保護的 check 名稱是 `<job id> / <公版 job 名>`，改了 ruleset 就對不上。
+> 所有參數的完整說明見[可調參數](#可調參數inputs)。
+
+導入後 `.github/` 會多這些東西：
+
+| 檔案 | 作用 | 要不要改 |
+|---|---|---|
+| `workflows/ci.yml` | 呼叫 CI 公版 | 只改 `with:` 的開關 |
+| `workflows/security.yml` | 呼叫安全公版 | 只改 `with:` 的開關 |
+| `zizmor.yml` | workflow 安全檢查的放行規則（公版的 `@v2` 這類版本 tag 已放行） | 有誤判才加規則 |
+| `dependabot.yml` | pip 每週、docker / actions 每月自動開更新 PR | 用不到的段落刪掉；.NET / 前端照檔尾的註解補 `nuget` / `npm` 區塊 |
+| `pull_request_template.md` | PR 檢查清單（含安全項） | 通常不用改 |
+
+#### 步驟 4 — commit、推上去、開 PR
 
 ```bash
-gh run list -L 5
+git add .github
+git commit -m "chore: 導入 ci-standards 公版 CI 與安全掃描"
+git push -u origin chore/adopt-ci-standards
+gh pr create          # 沒有 gh 就到 GitHub 網頁開 PR
 ```
 
-第一次一定會有東西紅 —— 那是掃描器真的找到問題（多半是套件 CVE、你自己寫的 workflow 沒釘版本，或是誤判）。
-先看是誤判還是真弱點，處理方式見[疑難排解](#疑難排解)。**不要為了讓它變綠就關掉檢查。**
+開 PR 那一刻 CI 與 Security 就會跑（草稿 PR 不跑，按 Ready for review 才跑）。
 
-### 步驟 5 — 開分支保護
+#### 步驟 5 — 處理第一次的紅燈
 
-等第一次 workflow 跑完（check 名稱要先存在於 GitHub），再執行：
+第一次幾乎一定有東西紅 —— 那是掃描器真的找到問題（多半是套件 CVE、你自己寫的 workflow 沒釘版本，或是誤判）。
+點進 Actions → 該 run → Summary 看是哪一項，處理方式見[掃到弱點怎麼處理](#掃到弱點怎麼處理)與[疑難排解](#疑難排解)。
+問題太多一次清不完，先設 `fail-on-findings: false` 過渡，見[導入初期紅到不想活](#導入初期紅到不想活)。
+**不要為了讓它變綠就關掉檢查。** 兩個 Gate 都綠再 merge。
+
+#### 步驟 6 — 開分支保護（能設的話）
+
+PR 上的 workflow 至少要跑完一次（GitHub 上要先有 `ci / CI Gate`、`security / Security Gate` 這兩個 check 名稱），再執行：
 
 ```bash
-./scripts/setup-branch-protection.sh <owner>/<repo>
+~/ci-standards/scripts/setup-branch-protection.sh <owner>/<repo>               # 只保護 default branch
+~/ci-standards/scripts/setup-branch-protection.sh <owner>/<repo> main develop  # 走 develop 流程
 ```
 
 這會建立 ruleset：必須開 PR + 對話解決 + 通過 `Security Gate` 與 `CI Gate` + 禁止 force push / 刪分支。
 ⚠️ 有方案限制、以及 required approvals 預設為何是 0，見[分支保護](#分支保護讓流程非過不可)。
-設不了（403、或公司統一管制）也沒關係，前四步做完公版就已經在跑了，補位做法見[沒辦法設分支保護時](#沒辦法設分支保護時)。
+設不了（403、或公司統一管制）也沒關係，前五步做完公版就已經在跑了，補位做法見[沒辦法設分支保護時](#沒辦法設分支保護時)。
+
+### 導入完成的檢查清單
+
+- [ ] `.github/workflows/ci.yml`、`security.yml` 的 `uses:` 都是 `singi0771/ci-standards/...@v2`
+- [ ] `run-python` / `run-dotnet` / `run-docker-build` / `scan-docker-image` 跟專案實際用到的技術一致
+- [ ] 兩支呼叫端的 `pull_request` **沒有** `paths-ignore`（否則純文件 PR 的 required check 永遠 pending）
+- [ ] 沒有殘留的 `.new` 檔
+- [ ] PR 上 `ci / CI Gate`、`security / Security Gate` 都綠
+- [ ] 分支保護已設；或確認設不了，並在 `CONTRIBUTING.md` / PR 範本寫上「兩個 Gate 都綠才 merge」
 
 ---
 
@@ -243,7 +294,7 @@ Gate 紅的話點進 Actions 看是哪一項掛掉。
 ### 公版更新了怎麼辦
 
 同一個主版本內什麼都不用做。`uses: ...@v2` 且 `v2` tag 已移動 → 你下次跑 CI 就吃到新版。
-新增的參數都有預設值，舊的呼叫端不會壞；想用新功能再跑一次 `adopt.sh`，它會把新參數補上、舊的保留。
+新增的參數都有預設值，舊的呼叫端不會壞；想用新功能先 `git pull` 本機的公版 clone，再跑一次 `adopt.sh`，它會把新參數補上、舊的保留。
 
 換主版本（例如 `@v1` → `@v2`）才需要動專案，因為那代表有破壞性變更。步驟見[從 v1 升級到 v2](#從-v1-升級到-v2)。
 
@@ -320,7 +371,7 @@ jobs:
 GitHub 的計費規則只有一條要記：**每個 job 不滿一分鐘也算一分鐘**（private repo 才計費；public repo 免費）。
 所以「一個 6 秒的 job」跟「一個 59 秒的 job」一樣貴，而 macOS runner 算 10 倍、Windows 算 2 倍。
 
-**1.3.0 已經幫你做的：**
+**公版已經幫你做的：**
 
 | 做法 | 省在哪 |
 |---|---|
@@ -860,7 +911,7 @@ ci-standards/
 │   │   ├── ci-reusable.yml                ← CI 公版（Python + .NET + Docker/hadolint + actionlint/shellcheck + 分支政策）
 │   │   │
 │   │   │  ── ② 本 repo 自己的呼叫端（公版拿自己當第一個使用者，用 ./ 呼叫上面那些）──
-│   │   ├── ci.yml                         ← 自己跑 actionlint + shellcheck
+│   │   ├── ci.yml                         ← 自己跑 actionlint（含範本）+ shellcheck + 分支政策
 │   │   ├── security.yml                   ← 自己跑全部安全掃描（含 zizmor）
 │   │   │
 │   │   │  ── ③ 本 repo 自己的工具測試（不是公版，consumer 不會有這支）──
@@ -877,7 +928,7 @@ ci-standards/
 │   ├── adopt.sh                       ← 一鍵導入（macOS / Linux / Git Bash）
 │   ├── adopt.ps1                      ← 一鍵導入（Windows PowerShell 5.1，零安裝；必須存 UTF-8 有 BOM）
 │   ├── setup-branch-protection.sh     ← 一鍵建立分支保護 ruleset（需要 gh）
-│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（84 項；在暫存目錄裡建測試 repo，不會動到本 repo）
+│   └── test-adopt.sh                  ← adopt.sh 的回歸測試（在暫存目錄裡建測試 repo，不會動到本 repo）
 ├── docs/
 │   ├── FLOW.md                        ← 流程圖：一個 PR 從打開到能 merge 發生什麼、由哪支檔案負責
 │   ├── HANDOFF.md                     ← 現況與待辦（換人／換機器接手時先讀這份）
@@ -896,6 +947,13 @@ ci-standards/
         ├── security.yml               ← 呼叫安全公版
         └── ci.yml                     ← 呼叫 CI 公版
 ```
+
+> **`ci.yml` 與 `ci-reusable.yml` 不是兩份要同步的副本**（`security.yml` / `security-reusable.yml` 同理）。
+> `*-reusable.yml` 是公版本體；`ci.yml` / `security.yml` 是本 repo 自己的呼叫端，用 `./` 呼叫「同一個 commit 的」reusable，
+> 所以改公版的 PR 當場就用改過的版本跑，不必、也不能手動同步。
+> 要保持一致的是另一組：**本 repo 的呼叫端 ↔ `templates/consumer-repo/` 的範本** ——
+> 觸發條件、`permissions`、`concurrency`、job 的 `if` 必須一樣；只有 `uses:`（`./` vs `@v2`）、`push.branches`、`with:` 的開關可以不同。
+> 改其中一邊時另一邊要一起改。
 
 ---
 
