@@ -314,6 +314,15 @@ copilot-autoreview-reusable.yml@main
 
 改法：`adopt.sh` 升級模式會統一把 `uses:` 換成 `--ref` 指定的值，重跑一次即可。
 
+### ⑩ 來源分支政策併入 CI Gate（省一個 runner）
+
+1.4.0 的 `PR source branch policy` 是獨立 job：只做幾行字串比對、不需 checkout，
+卻每次多一個 runner 的排隊時間與最低計費，違反 `.github/copilot-instructions.md`
+「不到 30 秒的檢查併入既有 job」的規範（PR #37 的 Copilot review 指出）。
+改法：把判定搬進一定會執行的 `CI Gate`，移除 `branch-policy` job 及 Gate 的 `needs`／
+預期狀態接線；不符合政策時 CI Gate 照樣失敗，check 名稱不變，呼叫端不必改。
+屬內部重構、非破壞性，可排在下一個 1.4.x。
+
 ### ⑤ 長期觀察中
 
 - **`action_required`**：Copilot 觸發的 run 會停在待核准，這是 GitHub 對 coding agent

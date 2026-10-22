@@ -520,13 +520,14 @@ gh auth login                                        # 需有目標 repo 的 adm
 
 ```yaml
 # 範本預設：發到「任何分支」的 PR 都跑
+# edited：PR 改目標分支（base）時 GitHub 只送 edited，少了它來源分支政策不會重跑（見下一節）
 pull_request:
-  types: [opened, synchronize, reopened, ready_for_review]
+  types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # 只想對特定分支的 PR 跑，自己加 branches:
 pull_request:
   branches: [main, develop]
-  types: [opened, synchronize, reopened, ready_for_review]
+  types: [opened, synchronize, reopened, ready_for_review, edited]
 ```
 
 > ⚠️ 加了 `branches:` 篩選之後，**沒被列到的分支其 PR 不會有 `ci / CI Gate`**。
@@ -551,6 +552,28 @@ jobs:
 
 意思是「`main` 只接受從 `develop` 或 `hotfix/*` 發來的 PR」，其他分支發到 `main` 會被擋下，
 Summary 會印出目標／來源／允許清單，並提示把 base 改成整合分支。
+
+**要搭配呼叫端的三處設定**（範本 `templates/consumer-repo/.github/workflows/ci.yml` 已全部寫好）：
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]   # 1. 改 base 時重跑
+
+concurrency:
+  # 2. 只改標題／內文的 edited 用獨立 group，不會把正在跑的 CI 取消掉
+  group: ${{ github.event.action == 'edited' && github.event.changes.base == null && format('ci-edit-{0}', github.run_id) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # 3. 草稿不跑；edited 只有改 base 才跑
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
+```
+
+> ⚠️ 1.4.0 以前導入的專案，重跑 `adopt` **不會**改這三處（adopt 升級只合併 `with:`），
+> 要用來源分支政策就手動照上面改。少了 `edited`，PR 從 `develop` 改發到 `main` 時會沿用舊的綠燈。
+> 樣式的 `*` 也會比對 `/`：`hotfix/*` 包含 `hotfix/a/b`。
 
 判定順序：
 
