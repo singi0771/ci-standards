@@ -136,4 +136,4 @@ target 選「所有 repo」或用名稱 pattern，required checks 一樣只填
 
 > 開組織層級 ruleset **之前**，先確認每個目標 repo 都已經導入公版並跑過至少一次。
 > 對還沒導入的 repo 強制 required check，那些 check 永遠不會出現 → 全組織的 PR 一起卡死。
-> 這跟 [README 的 skipped check 死鎖](../README.md#分支保護讓流程非過不可)是同一類問題，只是規模放大。
+> 這跟 [README 的 skipped check 死鎖](../README.md#分支保護)是同一類問題，只是規模放大。

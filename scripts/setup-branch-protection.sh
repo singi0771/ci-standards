@@ -11,7 +11,7 @@
 # ⚠️ 不是每個 repo 都設得了：GitHub Free 方案的 **private** repo 不能用 ruleset / 分支保護
 #    （要 Pro / Team / Enterprise，或 repo 是 public）；公司 GHES 也可能由管理者統一管制。
 #    設不了的 repo 一樣可以導入公版 —— Gate 照跑、照樣紅，只是紅燈擋不住 merge。
-#    那種情況怎麼補位見 README「沒辦法設分支保護時」。
+#    那種情況怎麼補位見 README「無法設定分支保護時」。
 #
 # 用法：./scripts/setup-branch-protection.sh <owner>/<repo> [分支...]
 #   ./scripts/setup-branch-protection.sh acme/app                 # 只保護 default branch
@@ -230,7 +230,7 @@ if ! PROBE=$(gh api "$RULESETS_API" 2>&1 >/dev/null); then
   case "$PROBE" in
     *[Uu]pgrade*|*403*)
       echo "   這個 repo 不能用分支保護（多半是 Free 方案的 private repo）。" >&2
-      echo "   公版照樣能用，只是 Gate 紅燈擋不住 merge —— 見 README「沒辦法設分支保護時」。" >&2 ;;
+      echo "   公版照樣能用，只是 Gate 紅燈擋不住 merge —— 見 README「無法設定分支保護時」。" >&2 ;;
     *404*)
       echo "   repo 名稱打錯，或你的帳號對它沒有 admin 權限。" >&2 ;;
   esac

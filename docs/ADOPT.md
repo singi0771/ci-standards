@@ -29,7 +29,7 @@
 | **導入（複製範本 + 改參數）** | 檔案操作 | — 本來就不需要 |
 | 推分支 | `git`（HTTPS 443） | — |
 | 開 PR | — | **瀏覽器開就好** |
-| 設分支保護 | GitHub API | 瀏覽器手動建 ruleset，或**組織層級 ruleset 一次涵蓋所有 repo**。repo 設不了分支保護（例如 Free 方案的 private repo）也能導入，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時) |
+| 設分支保護 | GitHub API | 瀏覽器手動建 ruleset，或**組織層級 ruleset 一次涵蓋所有 repo**。repo 設不了分支保護（例如 Free 方案的 private repo）也能導入，見 [README — 無法設定分支保護時](../README.md#無法設定分支保護時) |
 
 **結論：`gh` 完全是選配的。** 它只讓 `setup-branch-protection.sh` 和 `gh pr create` 方便一點。
 
@@ -158,7 +158,7 @@ job 的 `if` 與 `concurrency` 跟著改（只改標題 / 內文的 edited 不�
 範圍比公版小的話，深層的 Dockerfile / `.sh` 會被判成「沒有」，adopt 把開關明寫成 `false`，那項檢查就安靜地關掉了。
 Python 例外：只看根目錄的相依清單與兩層內的 `.py`。`adopt.ps1` 的判斷完全相同。
 前端（`package.json`）目前**不偵測**，因為公版還沒有 Node 的 CI job —— 安全掃描那邊不用設定就會掃 JS / TS 與 lock 檔，
-見 [README — 前端](../README.md#前端react--vue--node)。
+見 [README — 前端](../README.md#前端專案)。
 
 `run-actionlint` 與 `run-zizmor` 一律開啟 —— 導入之後你的 repo 就有 workflow 了，
 語法跟安全都該檢查；兩個加起來不到一分鐘。
@@ -269,9 +269,9 @@ Windows PowerShell 5.1 讀 `.ps1` 沒看到 BOM 就用 ANSI codepage（繁中 = 
 1. 檢查 `git diff --stat`
 2. 開 PR（瀏覽器就行）
 3. **等第一次 CI 跑完再開分支保護** —— check 名稱要先存在於 GitHub，否則 ruleset 對不上。
-   設不了（Free 方案的 private repo、公司統一管制）就跳過，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時)
+   設不了（Free 方案的 private repo、公司統一管制）就跳過，見 [README — 無法設定分支保護時](../README.md#無法設定分支保護時)
 4. 從 v1 升上來的專案：刪掉 `copilot-*` 呼叫端、看報告裡「觸發條件（v2）」那行，見 [README — 從 v1 升級到 v2](../README.md#從-v1-升級到-v2)
 5. 第一次一定會有東西紅，那是掃描器真的找到問題。**不要為了讓它變綠就關掉檢查**
 6. zizmor 挑到你自己寫的 workflow 的毛病（沒釘 SHA、權限太大）多半是真的該修；確定是誤判才放進 `.github/zizmor.yml`
 
-完整說明見 [README — 5 分鐘導入](../README.md#5-分鐘導入一個新專案)。
+完整說明見 [README — 導入](../README.md#導入)。

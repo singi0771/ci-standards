@@ -1,13 +1,13 @@
 # 平台設定指南（管理者用）
 
-> **導入流程不在這裡。** 要把公版導入一個新專案，請看 [README](../README.md#5-分鐘導入一個新專案) —— 那是開發者每次導入都要照做的操作手冊。
+> **導入流程不在這裡。** 要把公版導入一個新專案，請看 [README](../README.md#導入) —— 那是開發者每次導入都要照做的操作手冊。
 >
 > 這份文件講的是**一次性的帳號 / 組織 / 方案層級設定**：公版怎麼發佈、分支保護的方案前提、額度怎麼控。設定完通常就不用再回來。
 
 | 我要做的事 | 看哪裡 |
 |---|---|
-| 把公版導入新專案 | [README — 5 分鐘導入](../README.md#5-分鐘導入一個新專案) |
-| 查參數怎麼設 | [README — 可調參數](../README.md#可調參數inputs) |
+| 把公版導入新專案 | [README — 導入](../README.md#導入) |
+| 查參數怎麼設 | [README — 可調參數](../README.md#參數) |
 | CI 紅了怎麼辦 | [README — 疑難排解](../README.md#疑難排解) |
 | 發佈 / 更新公版 | [§A](#a-公版維護者發佈與更新) 本文 |
 | 分支保護開不起來 | [§B](#b-分支保護的方案前提) 本文 |
@@ -77,7 +77,7 @@ git tag -a v3.0.0 -m "..." && git tag v3 && git push origin v3.0.0 v3   # 下一
 
 ## B. 分支保護的方案前提
 
-操作步驟在 [README — 分支保護](../README.md#分支保護讓流程非過不可)。這裡只講**開不起來時**的決策。
+操作步驟在 [README — 分支保護](../README.md#分支保護)。這裡只講**開不起來時**的決策。
 
 ### private repo 需要 Pro 以上方案
 
@@ -92,7 +92,7 @@ git tag -a v3.0.0 -m "..." && git tag v3 && git push origin v3.0.0 v3   # 下一
 | **轉移到 Team 方案的 org**（推薦） | 團隊專案 | 需 org owner 操作；好處是 billing、權限、ruleset 一起統一管 |
 | 帳號升級 GitHub Pro | 個人專案、想最小改動 | 約 $4/月 |
 | repo 轉 public | 本來就要開源的專案 | 內容全公開，多數內部工具不適用 |
-| **先不設，照樣導入** | 上面三個都做不到（含公司統一管制、不讓專案自己設的 repo） | Gate 照跑、照樣紅，但擋不住 merge；靠團隊約定與事後檢查補位，見 [README — 沒辦法設分支保護時](../README.md#沒辦法設分支保護時) |
+| **先不設，照樣導入** | 上面三個都做不到（含公司統一管制、不讓專案自己設的 repo） | Gate 照跑、照樣紅，但擋不住 merge；靠團隊約定與事後檢查補位，見 [README — 無法設定分支保護時](../README.md#無法設定分支保護時) |
 
 ### 另一個常見卡點：你不是該 repo 的 admin
 
@@ -133,7 +133,7 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 - 1.3.0 公版自己已經把 actionlint + shellcheck 合成一個 job、hadolint 併進 Docker build
   —— 這些不用你設定，移了 `v1` 就生效
 
-完整清單見 [README — 省 Actions 分鐘](../README.md#省-actions-分鐘這套怎麼省你還能怎麼省)。
+完整清單見 [README — 省 Actions 分鐘](../README.md#actions-用量)。
 
 ---
 
