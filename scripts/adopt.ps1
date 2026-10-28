@@ -44,6 +44,11 @@
   powershell -ExecutionPolicy Bypass -File .\adopt.ps1 -DryRun
 
   公司電腦若因群組原則擋住 .ps1，用上面這種寫法就好，不需要改機器的執行原則。
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\adopt.ps1 -Notify "@alice @acme/team"
+
+  -Notify：Branch Guard 違規（直接 push、強制 merge 到 main）時通知誰。不給就不建 branch-guard.yml。
 #>
 [CmdletBinding()]
 param(
@@ -51,6 +56,7 @@ param(
   [string]$Std      = "",
   [string]$Ref      = "v2",
   [string]$UsesRepo = "singi0771/ci-standards",
+  [string]$Notify   = "",
   [switch]$DryRun
 )
 
@@ -86,6 +92,20 @@ function Join-Lines([string[]]$Lines) {
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die "找不到 git。這是唯一的必要相依。" }
+
+# -Notify：GitHub 帳號（alice）或 team（acme/team），可加 @，空白或逗號隔開（與 adopt.sh 一致）。
+# 正規化成「@a @b」再寫進 YAML 的雙引號字串 —— 只放行帳號字元，引號、反斜線進不來。
+if ($Notify) {
+  $norm = @()
+  foreach ($t in ($Notify -replace ',', ' ' -split '\s+' | Where-Object { $_ })) {
+    $n = $t -replace '^@', ''
+    if ($n -cnotmatch '^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?$') {
+      Die "-Notify 裡的「$t」不是 GitHub 帳號或 team（例如 @alice、@acme/team）"
+    }
+    $norm += "@$n"
+  }
+  $Notify = $norm -join ' '
+}
 
 # -Std / -Target 可能是相對路徑，而下面會 Set-Location 到目標 repo 根目錄。
 if ($Std) {
@@ -231,15 +251,16 @@ function Get-ReusableInputs([string]$Path) {
 $ReusableFor = @{
   'ci.yml'       = 'ci-reusable.yml'
   'security.yml' = 'security-reusable.yml'
+  'branch-guard.yml' = 'branch-guard-reusable.yml'
 }
 
 # 就地更新 uses: 的 owner/repo 與 ref。
 # 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（公版拿自己當第一個使用者）。
-# 只動指向公版那兩支 reusable 的 uses:，而且只換「owner/repo/.github/workflows/<檔名>@<ref>」那一段，
+# 只動指向公版那三支 reusable 的 uses:，而且只換「owner/repo/.github/workflows/<檔名>@<ref>」那一段，
 # 行尾空白與 `# 註解` 原樣保留（與 adopt.sh 的 patch_uses 一致）。
 function Update-UsesLines([string[]]$Lines) {
   $out = @()
-  $re = '^(\s*uses:.*?)[^ \t]+/\.github/workflows/((?:ci|security)-reusable\.ya?ml)@[^ \t#]+(.*)$'
+  $re = '^(\s*uses:.*?)[^ \t]+/\.github/workflows/((?:ci|security|branch-guard)-reusable\.ya?ml)@[^ \t#]+(.*)$'
   foreach ($line in $Lines) {
     if ($line -match '^\s*uses:\s*\./') { $out += $line; continue }
     if ($line -cmatch $re) {
@@ -362,10 +383,21 @@ $SecAdditions = @(
   ('scan-docker-image: {0}'   -f (B $HasDockerfile)),
   'run-zizmor: true'
 )
+$GuardAdditions = @()
+if ($Notify) { $GuardAdditions = @(('notify: "{0}"' -f $Notify)) }
+# 還沒有 branch-guard.yml、又沒給 -Notify → 不建（建了也沒人收得到通知）
+function Test-SkipGuard([string]$Name) {
+  return ($Name -eq 'branch-guard.yml' -and -not (Test-Path -LiteralPath ".github\workflows\$Name") -and -not $Notify)
+}
+function Show-GuardSkipped {
+  Warn "沒有指定 -Notify，未建立 .github\workflows\branch-guard.yml（直接 push / 強制 merge 到 main 時開 Issue 通知）。"
+  Write-Host '    要啟用請加上通知對象重跑：-Notify "@帳號 @組織/team"'
+}
 
 # ── 兩類檔案，兩種策略（與 adopt.sh 一致）────────────────────
 # Configured：真的帶專案設定（severity / python-version / 自訂 cron…）→ 就地合併。
-$Configured = @('ci.yml','security.yml')
+# branch-guard.yml 一定要有通知對象：沒給 -Notify 又還沒有這支時就不建，報告裡點名。
+$Configured = @('ci.yml','security.yml','branch-guard.yml')
 # zizmor.yml 也算專案專屬：使用者會在裡面放自己的放行規則。
 $ProjectOwned = @('pull_request_template.md','dependabot.yml','zizmor.yml')
 
@@ -384,7 +416,8 @@ foreach ($n in $Configured) {
 
 Write-Host "計畫:"
 foreach ($n in $Configured) {
-  if (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
+  if (Test-SkipGuard $n) { Write-Host "  - 略過  .github\workflows\$n（未指定 -Notify）" }
+  elseif (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($r in $ProjectOwned) {
@@ -414,18 +447,20 @@ if ($DryRun) { Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"; Rem
 
 New-Item -ItemType Directory -Force -Path '.github\workflows' | Out-Null
 $Created = @(); $Merged = @(); $Kept = @(); $DroppedReport = @()
-$TriggerReport = @(); $NoWithReport = @(); $MissingTpl = @()
+$TriggerReport = @(); $NoWithReport = @(); $MissingTpl = @(); $GuardSkipped = $false
 
 # ── Configured：就地合併 ─────────────────────────────────────
 foreach ($n in $Configured) {
   $dst = ".github\workflows\$n"
   $known = $KnownFor[$n]
+  if (Test-SkipGuard $n) { $GuardSkipped = $true; continue }
 
   if (-not (Test-Path -LiteralPath $dst)) {
     Copy-Item -LiteralPath (Join-Path $Tpl "workflows\$n") -Destination $dst -Force
     $lines = Read-Lines $dst
     if ($n -eq 'ci.yml')       { $lines = Set-WithBlock $lines $CiAdditions }
     if ($n -eq 'security.yml') { $lines = Set-WithBlock $lines $SecAdditions }
+    if ($n -eq 'branch-guard.yml') { $lines = Set-WithBlock $lines $GuardAdditions }
     $lines = Update-UsesLines $lines
     Write-TextFile $dst (Join-Lines $lines)
     $Created += $n
@@ -434,10 +469,15 @@ foreach ($n in $Configured) {
     $adds = @()
     if ($n -eq 'ci.yml')       { $adds = $CiAdditions }
     if ($n -eq 'security.yml') { $adds = $SecAdditions }
+    if ($n -eq 'branch-guard.yml') { $adds = $GuardAdditions }
     $found = $false
     $lines = Merge-WithBlock (Read-Lines $dst) $known $adds ([ref]$dropped) ([ref]$found)
     $lines = Update-UsesLines $lines
     $lines = Update-V2Triggers $lines $n ([ref]$TriggerReport)
+    # 既有的 notify 有值就保留；是空的而這次有給 -Notify，才補上（與 adopt.sh 一致）
+    if ($n -eq 'branch-guard.yml' -and $Notify) {
+      $lines = @($lines | ForEach-Object { if ($_ -ceq '      notify: ""') { '      ' + $GuardAdditions[0] } else { $_ } })
+    }
     Write-TextFile $dst (Join-Lines $lines)
     foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
     if (-not $found) { $NoWithReport += $n }
@@ -506,6 +546,7 @@ if ($MissingTpl.Count) {
   Warn ("公版裡找不到這些範本，沒有導入: " + ($MissingTpl -join ' ') + "（公版 clone 可能不完整）")
 }
 if ($CopilotLeftovers) { Write-Host ""; Show-CopilotLeftovers }
+if ($GuardSkipped) { Write-Host ""; Show-GuardSkipped }
 Write-Host "-----------------------------------------------------------"
 
 @'
@@ -530,6 +571,9 @@ Write-Host "-----------------------------------------------------------"
  5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github\zizmor.yml，寫法見公版 README。
+
+ 6. branch-guard.yml（有給 -Notify 才會建立）會在 main 收到直接 push、強制 push、
+    或 Gate 沒綠就 merge 時開 Issue 通知 notify 裡的人。要守 develop 時把它加進該檔的 on.push.branches。
 
  [i] job id (ci / security) 刻意不動 —— 分支保護的 check 名稱綁著它。
 '@ | Write-Host

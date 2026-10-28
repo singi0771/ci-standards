@@ -10,6 +10,28 @@
 
 ---
 
+## [Unreleased]
+
+新增 Branch Guard。既有呼叫端不受影響；要啟用時重跑導入腳本並加上 `--notify`。
+
+### 新增
+- `branch-guard-reusable.yml`：受保護分支收到 push 時，偵測直接 push、強制 push，
+  以及 required check 未通過即合併的強制 merge；違規時開 Issue（label `branch-guard`），
+  指派並 @ `notify` 指定的人員，該次執行標為失敗。
+  GitHub 內建的失敗通知只寄給觸發者本人，無法用來通知負責人。
+- 呼叫端範本 `templates/consumer-repo/.github/workflows/branch-guard.yml`。權限獨立宣告
+  （`issues: write` 等），CI / Security 的呼叫端維持唯讀。
+- `adopt.sh --notify` / `adopt.ps1 -Notify`：導入時指定通知對象，正規化為 `@a @b` 寫入 `notify`；
+  格式不符時中止。未指定時不建立 `branch-guard.yml` 並於報告提醒；已存在時依既有規則升級，保留既有的 `notify`。
+- 本 repo 以 `uses: ./` 呼叫 Branch Guard，守 `main`。
+
+### 變更
+- 呼叫端範本 `ci.yml`、`security.yml` 移除 `push` 觸發，只在 PR 上檢查；`security.yml` 保留每週排程重掃。
+  PR 檢查的就是合併後的結果，develop → main 的 PR 會再驗一次累積的變更，合併後再跑一輪多半重複。
+  直接 push 與強制 merge 改由 Branch Guard 偵測。一個功能從 develop 到 main 由 4 輪降為 2 輪。
+  既有呼叫端不會被導入腳本改動（升級時不動 `on:`），要套用請自行刪除 `on.push`。
+- 本 repo 的 `ci.yml`、`security.yml`、`adopt-tests.yml` 同步移除 `push` 觸發。
+
 ## [2.0.1] — 2026-10-22
 
 文件與提示文字修正，workflow 行為無變更，呼叫端不需調整。

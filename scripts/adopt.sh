@@ -8,6 +8,7 @@
 #   ./adopt.sh --std ~/ci-standards  # 指定公版 clone 位置
 #   ./adopt.sh --ref v2.0.0          # 釘死特定版本（預設 v2）
 #   ./adopt.sh --uses-repo ORG/ci-standards   # 搬到組織後換掉 uses: 的 owner/repo
+#   ./adopt.sh --notify "@alice @acme/team"   # Branch Guard 違規時通知誰（不給就不建 branch-guard.yml）
 #
 # 相依：只需要 git 與內建 shell（awk / find / cp）。
 #   刻意不用 gh / jq / yq / python / curl —— 受管制的公司 Windows 上
@@ -25,6 +26,7 @@ STD=""
 REF="v2"
 USES_REPO="$DEFAULT_USES_REPO"
 DRY_RUN=false
+NOTIFY=""
 
 die()  { printf '❌ %s\n' "$1" >&2; exit 1; }
 info() { printf '%s\n' "$1"; }
@@ -36,13 +38,30 @@ while [ $# -gt 0 ]; do
     --std)       STD="${2:?--std 需要一個路徑}";           shift 2 ;;
     --ref)       REF="${2:?--ref 需要一個 tag/branch}";    shift 2 ;;
     --uses-repo) USES_REPO="${2:?--uses-repo 需要 owner/repo}"; shift 2 ;;
+    --notify)    NOTIFY="${2?--notify 需要通知對象，例如 @alice @acme/team}"; shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
-    -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,21p' "$0"; exit 0 ;;
     *) die "不認得的參數：$1（用 --help 看用法）" ;;
   esac
 done
 
 command -v git >/dev/null 2>&1 || die "找不到 git。這是唯一的必要相依。"
+
+# --notify：GitHub 帳號（alice）或 team（acme/team），可加 @，空白或逗號隔開。
+# 正規化成「@a @b」再寫進 YAML 的雙引號字串 —— 只放行帳號字元，引號、反斜線進不來。
+if [ -n "$NOTIFY" ]; then
+  _norm=""
+  set -f   # 名稱清單不做檔名展開
+  for _t in $(printf '%s' "$NOTIFY" | tr ',' ' '); do
+    _n="${_t#@}"
+    case "$_n" in
+      ''|*[!A-Za-z0-9/._-]*|*/*/*|/*|*/) die "--notify 裡的「$_t」不是 GitHub 帳號或 team（例如 @alice、@acme/team）" ;;
+    esac
+    _norm="${_norm:+$_norm }@$_n"
+  done
+  set +f
+  NOTIFY="$_norm"
+fi
 
 # 腳本自己的位置要在任何 cd 之前算好 —— $0 可能是相對路徑（./scripts/adopt.sh），
 # cd 到目標 repo 之後再 dirname 就會解到錯的地方（或根本進不去）。
@@ -205,6 +224,7 @@ reusable_for() {
   case "$1" in
     ci.yml)                        echo "$STD/.github/workflows/ci-reusable.yml" ;;
     security.yml)                  echo "$STD/.github/workflows/security-reusable.yml" ;;
+    branch-guard.yml)              echo "$STD/.github/workflows/branch-guard-reusable.yml" ;;
     *) echo "" ;;
   esac
 }
@@ -213,14 +233,14 @@ reusable_for() {
 # 刻意跳過 `uses: ./...` —— 公版自己用相對路徑呼叫自己的 reusable（公版拿自己當第一個使用者），
 # 把它改成 owner/repo@ref 會讓 PR 上跑的不再是「這個 PR 的版本」。
 #
-# 只動指向公版那兩支 reusable 的 uses:（同一個檔案裡呼叫別的 reusable 不關我們的事），
+# 只動指向公版那三支 reusable 的 uses:（同一個檔案裡呼叫別的 reusable 不關我們的事），
 # 而且只換「owner/repo/.github/workflows/<檔名>@<ref>」那一段 ——
 # 行尾的空白與 `# 註解` 原樣保留。舊版用「最後一個非空白字串」去換，
 # 有行尾空白時什麼都沒換卻回報成功、有註解時還會把註解最後一個字蓋掉。
 patch_uses() {
   awk -v repo="$USES_REPO" -v ref="$REF" '
     /^[[:space:]]*uses:[[:space:]]*\.\// { print; next }
-    /^[[:space:]]*uses:/ && match($0, /[^ \t]+\/\.github\/workflows\/(ci|security)-reusable\.ya?ml@[^ \t#]+/) {
+    /^[[:space:]]*uses:/ && match($0, /[^ \t]+\/\.github\/workflows\/(ci|security|branch-guard)-reusable\.ya?ml@[^ \t#]+/) {
       s=substr($0, RSTART, RLENGTH)
       file=s; sub(/^.*\/\.github\/workflows\//, "", file); sub(/@.*$/, "", file)
       $0 = substr($0, 1, RSTART-1) repo "/.github/workflows/" file "@" ref substr($0, RSTART+RLENGTH)
@@ -303,7 +323,7 @@ replace_with_block() {
   mv "$f.tmp" "$f"
 }
 
-CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""; NOWITH_REPORT=""; MISSING_TPL=""
+CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""; NOWITH_REPORT=""; MISSING_TPL=""; GUARD_SKIPPED=false
 
 # 公版 reusable 宣告的 input 清單。讀不到（reusable 不見了、或 inputs: 的縮排變了）時一定要停 ——
 # 空清單會讓 filter_with_block 把使用者 with: 裡的每一個 key 都當成「已廢除」刪掉。
@@ -311,7 +331,7 @@ known_for() {
   _reu="$(reusable_for "$1")"
   if [ -n "$_reu" ] && [ -f "$_reu" ]; then reusable_inputs "$_reu"; fi
 }
-for name in ci.yml security.yml; do
+for name in ci.yml security.yml branch-guard.yml; do
   if [ -z "$(known_for "$name")" ]; then
     die "讀不到 $(reusable_for "$name") 宣告的 inputs。
     公版 clone 不完整，或 reusable 的格式變了 —— 繼續的話會把呼叫端 with: 的設定全部當成已廢除刪掉，所以中止。"
@@ -321,7 +341,8 @@ done
 # ── 兩類檔案，兩種策略 ───────────────────────────────────────
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
-CONFIGURED="ci.yml security.yml"
+# branch-guard.yml 一定要有通知對象：沒給 --notify 又還沒有這支時就不建，報告裡點名。
+CONFIGURED="ci.yml security.yml branch-guard.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
 #   zizmor.yml 也算：使用者會在裡面放自己的放行規則。
 PROJECT_OWNED="pull_request_template.md dependabot.yml zizmor.yml"
@@ -339,11 +360,21 @@ run-shellcheck: $HAS_SH"
 SEC_ADDITIONS="scan-docker-image: $HAS_DOCKERFILE
 run-zizmor: true"
 
+GUARD_ADDITIONS=""
+if [ -n "$NOTIFY" ]; then GUARD_ADDITIONS="notify: \"$NOTIFY\""; fi
+# 還沒有 branch-guard.yml、又沒給 --notify → 不建（建了也沒人收得到通知）
+skip_guard() { [ "$1" = branch-guard.yml ] && [ ! -f ".github/workflows/$1" ] && [ -z "$NOTIFY" ]; }
+warn_guard_skipped() {
+  warn "沒有指定 --notify，未建立 .github/workflows/branch-guard.yml（直接 push / 強制 merge 到 main 時開 Issue 通知）。
+    要啟用請加上通知對象重跑：--notify \"@帳號 @組織/team\""
+}
+
 plan_line() { info "  $1"; }
 
 info "計畫："
 for name in $CONFIGURED; do
-  if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
+  if skip_guard "$name"; then plan_line "－ 略過  .github/workflows/${name}（未指定 --notify）"
+  elif [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -441,12 +472,14 @@ patch_v2_triggers() {
 for name in $CONFIGURED; do
   dst=".github/workflows/$name"
   known="$(known_for "$name")"
+  if skip_guard "$name"; then GUARD_SKIPPED=true; continue; fi
 
   if [ ! -f "$dst" ]; then
     cp "$TPL/workflows/$name" "$dst"
     case "$name" in
       ci.yml)       replace_with_block "$dst" "$(printf '%s\n' "$CI_ADDITIONS"  | sed 's/^/      /')" ;;
       security.yml) replace_with_block "$dst" "$(printf '%s\n' "$SEC_ADDITIONS" | sed 's/^/      /')" ;;
+      branch-guard.yml) replace_with_block "$dst" "      $GUARD_ADDITIONS" ;;
     esac
     patch_uses "$dst"
     CREATED="$CREATED $name"
@@ -458,6 +491,10 @@ for name in $CONFIGURED; do
     case "$name" in
       ci.yml)       filter_with_block "$dst" "$known" "$CI_ADDITIONS" ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
+      branch-guard.yml)
+        filter_with_block "$dst" "$known" "$GUARD_ADDITIONS"
+        # 既有的 notify 有值就保留；是空的而這次有給 --notify，才補上
+        if [ -n "$NOTIFY" ]; then replace_lines "$dst" '      notify: ""' "      $GUARD_ADDITIONS"; fi ;;
     esac
     patch_uses "$dst"
     patch_v2_triggers "$dst" "$name"
@@ -541,6 +578,7 @@ if [ -n "$MISSING_TPL" ]; then
   warn "公版裡找不到這些範本，沒有導入：$MISSING_TPL（公版 clone 可能不完整）"
 fi
 if [ -n "$COPILOT_LEFTOVERS" ]; then info ""; warn_copilot_leftovers; fi
+if [ "$GUARD_SKIPPED" = true ]; then info ""; warn_guard_skipped; fi
 info "───────────────────────────────────────────────────────────"
 
 cat <<'NEXT'
@@ -565,6 +603,9 @@ cat <<'NEXT'
  5. 第一次跑 Security Scan 時，zizmor（workflow 安全檢查）可能會挑你自己寫的
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github/zizmor.yml，寫法見公版 README。
+
+ 6. branch-guard.yml（有給 --notify 才會建立）會在 main 收到直接 push、強制 push、或 Gate 沒綠就 merge 時
+    開 Issue 通知 notify 裡的人。要守 develop 時把它加進該檔的 on.push.branches。
 
  ⓘ job id（ci / security）刻意不動 —— 分支保護的 check 名稱綁著它，
    改了既有 ruleset 就會對不上。

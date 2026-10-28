@@ -48,8 +48,7 @@ flowchart TD
     BOTH -->|是| MERGE[人工 review → merge<br/>有分支保護時，Gate 沒綠按不下去]
 
     SCHED[schedule：每週一 03:00<br/>只跑 Security] --> SEC
-    PUSHMAIN[push 到 main / develop<br/>非 md/docs 變更] --> CI
-    PUSHMAIN --> SEC
+    PUSHMAIN[push 到 main] --> GUARD[Branch Guard<br/>直接 push / 強制 merge → 開 Issue]
 ```
 
 讀這張圖要記住三件事：
