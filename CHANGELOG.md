@@ -32,7 +32,7 @@
   （`issues: write` 等），CI / Security 的呼叫端維持唯讀。
 - `adopt.sh --notify` / `adopt.ps1 -Notify`：導入時指定通知對象，正規化為 `@a @b` 寫入 `notify`；
   格式不符時中止。未指定時不建立 `branch-guard.yml` 並於報告提醒；已存在時依既有規則升級，保留既有的 `notify`。
-- 本 repo 以 `uses: ./` 呼叫 Branch Guard，守 `main`。
+- 本 repo 以 `uses: ./` 呼叫 Branch Guard，守 `main` 與 `develop`。
 
 ### 變更
 - 呼叫端範本 `ci.yml`、`security.yml` 移除 `push` 觸發，只在 PR 上檢查；`security.yml` 保留每週排程重掃。
