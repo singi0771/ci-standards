@@ -101,13 +101,13 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
 ⚠️ **合進 main 不等於生效。** 所有專案指向 `@v2`，沒有移動 tag 的話它們完全不會有感覺。
 
 ```bash
-git tag -a v2.0.1 -m "說明" && git push origin v2.0.1   # 不可變的還原點
-git tag -f v2 && git push -f origin v2                  # 大家指向的別名
-gh release create v2.0.1 --verify-tag --title v2.0.1 --notes-file <該版 CHANGELOG 段落>   # 通知各專案
+git tag -f v2 && git push -f origin v2                  # 大家指向的別名，先移
+git tag -a v2.0.1 -m "說明" && git push origin v2.0.1   # 不可變的還原點，推上後自動建立 Release
 ```
 
 並在 [CHANGELOG.md](CHANGELOG.md) 補上這一版，**一定要有「需要專案動作」一段**（沒有就寫「無」）。
-各專案靠 Watch 公版的 Release 得知更新，只移 tag、不建 Release 的話，需要重跑導入腳本的更新不會有人知道。
+推 `vX.Y.Z` 後由 `release.yml` 建立 GitHub Release（內文取自 CHANGELOG），各專案靠 Watch Releases 得知更新。
+`v2` 未先移動、tag 不在 main 上、CHANGELOG 缺段落時 workflow 會失敗、不建 Release；修正後 Re-run 即可。
 
 > 破壞性變更（改／移除 input、改預設值造成行為改變、改 job 名稱、移除 workflow）開新的主版本（`v3`），
 > 並公告各專案自行把 `@v2` 改成 `@v3`。舊的主版本 tag 之後只收 bug 修補、不再加功能 —— 2.0.0 就是這樣做的：`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補）。
