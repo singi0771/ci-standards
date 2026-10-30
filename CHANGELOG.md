@@ -20,7 +20,7 @@
 ### 變更
 - 新增 `release.yml`（本 repo 自用）：推 `vX.Y.Z` tag 時自動建立 GitHub Release，內文取自 CHANGELOG。
   tag 不在 main、主版本別名未先移動、CHANGELOG 缺該版段落或「需要專案動作」時失敗，不建 Release。
-  發佈順序改為先移 `v2`、再推 `vX.Y.Z`。
+  發佈順序改為先移 `v2`、再推 `vX.Y.Z`；開新主版本時先建立 `v3`、再推 `v3.0.0`。
 
 ## [2.1.0] — 2026-10-30
 
