@@ -1,0 +1,200 @@
+# 中央公版：Branch Guard Reusable Workflow
+# 受保護分支收到 push 時，檢查這次 push 是否「經 PR、且 Gate 綠燈後才合併」，
+# 違規就開一張 Issue 通知指定的人。
+#
+# 為什麼需要它：沒有分支保護（ruleset）的 repo，Gate 紅燈擋不住 merge，
+# 也擋不住直接 push；有分支保護的 repo，admin 的 bypass 一樣能繞過。
+# 公版擋不住這些操作，只能在事後**讓它被看見**：
+#   - 直接 push    —— 這個 commit 不是任何已合併 PR 的合併結果
+#   - 強制 push    —— push 事件的 forced 為 true（改寫了分支歷史）
+#   - 強制 merge   —— 有對應的 PR，但合併當下 required check 不是 success
+#                    （紅燈、還在跑、或根本沒跑）
+#
+# GitHub 內建的「workflow 失敗通知信」只寄給觸發的人，也就是違規者本人，
+# 所以這裡另外開 Issue：被指派、被 @ 的人會收到 GitHub 的站內與 email 通知，
+# Issue 本身也留下紀錄。
+#
+# ⚠️ 呼叫端必須給 issues: write（開 Issue、建 label）、pull-requests: read、checks: read。
+#    這些權限只給這一支，CI / Security 的呼叫端維持唯讀。
+name: Reusable Branch Guard
+
+on:
+  workflow_call:
+    inputs:
+      notify:
+        description: >-
+          違規時要通知的人，空白隔開，例如 "@alice @acme/platform-team"。
+          個人帳號會被指派到 Issue 並 @；team 只能 @（GitHub 不能把 Issue 指派給 team）。
+          由 adopt.sh / adopt.ps1 的 --notify 在導入時寫入
+        type: string
+        default: ""
+      required-checks:
+        description: >-
+          合併前必須是 success 的 check，逗號隔開。要跟分支保護的 required check 用同一組名稱
+          （格式「<呼叫端 job id> / <公版 job 名>」）
+        type: string
+        default: "ci / CI Gate,security / Security Gate"
+      label:
+        description: "違規 Issue 要貼的 label（不存在會自動建立）"
+        type: string
+        default: "branch-guard"
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Branch Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 分支被刪除時 after 是 0000…，沒有 commit 可查
+    if: ${{ github.event_name == 'push' && !github.event.deleted }}
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      issues: write
+    steps:
+      - name: Check how this push landed
+        env:
+          # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          AFTER: ${{ github.event.after }}
+          BEFORE: ${{ github.event.before }}
+          FORCED: ${{ github.event.forced }}
+          ACTOR: ${{ github.actor }}
+          COMPARE: ${{ github.event.compare }}
+          COMMIT_IDS: ${{ join(github.event.commits.*.id, ' ') }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NOTIFY: ${{ inputs.notify }}
+          CHECKS: ${{ inputs.required-checks }}
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          VIOLATIONS=""
+          add() { VIOLATIONS="${VIOLATIONS}- $1"$'\n'; }
+
+          # ── 1. 強制 push ──────────────────────────────────────
+          if [ "$FORCED" = "true" ]; then
+            add "**強制 push**：改寫了 \`$BRANCH\` 的歷史（\`${BEFORE:0:7}\` → \`${AFTER:0:7}\`）"
+          fi
+
+          # ── 2. 找這個 commit 對應的已合併 PR ────────────────────
+          # 三種合併方式的 merge_commit_sha 都等於合併後的分支頂端：
+          #   merge → 合併 commit；squash → 壓縮後的 commit；rebase → 最後一個 rebase 後的 commit。
+          # 所以「頂端 commit = 某個合併進這個分支的 PR 的 merge_commit_sha」才算經 PR 進來。
+          # 只看 base.ref 也很重要：git push origin develop:main 推上來的頂端，
+          # 正是某個合併進 develop 的 PR 的 merge commit，不能把它當成經 PR 合併進 main。
+          # PR 與 commit 的關聯偶爾晚幾秒才建好，查不到就重試。
+          PR_JSON="null"
+          for attempt in 1 2 3; do
+            gh api "repos/$REPO/commits/$AFTER/pulls" > pulls.json
+            PR_JSON="$(jq -c --arg ref "$BRANCH" --arg sha "$AFTER" \
+              '[.[] | select(.merged_at != null and .base.ref == $ref and .merge_commit_sha == $sha)] | first // null' pulls.json)"
+            if [ "$PR_JSON" != "null" ]; then break; fi
+            if [ "$attempt" -lt 3 ]; then sleep 5; fi
+          done
+
+          if [ "$PR_JSON" = "null" ]; then
+            n="$(wc -w <<<"$COMMIT_IDS" | tr -d ' ')"
+            add "**直接 push**：\`${AFTER:0:7}\` 不是任何合併進 \`$BRANCH\` 的 PR 的合併結果（這次 push 含 $n 個 commit）"
+            PR_LINE="（無對應 PR）"
+          else
+            PR_NUM="$(jq -r '.number' <<<"$PR_JSON")"
+            PR_URL="$(jq -r '.html_url' <<<"$PR_JSON")"
+            HEAD_SHA="$(jq -r '.head.sha' <<<"$PR_JSON")"
+            MERGED_AT="$(jq -r '.merged_at' <<<"$PR_JSON")"
+            PR_LINE="[#$PR_NUM]($PR_URL)，合併於 $MERGED_AT"
+
+            # ── 3. 強制 merge：合併當下 required check 是否都是 success ──
+            # 以 PR head commit 上的 check run 判斷；完成時間晚於合併時間的也不算
+            # （先按 merge、事後才跑綠，合併當下就不是綠的）。
+            BAD=""
+            while IFS= read -r c; do
+              c="${c#"${c%%[![:space:]]*}"}"; c="${c%"${c##*[![:space:]]}"}"
+              [ -n "$c" ] || continue
+              enc="$(jq -rn --arg s "$c" '$s|@uri')"
+              gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=$enc&filter=all&per_page=100" > runs.json
+              state="$(jq -r --arg t "$MERGED_AT" '
+                [.check_runs[] | select(.completed_at != null and .completed_at <= $t)]
+                | sort_by(.completed_at) | last
+                | if . == null then "沒有在合併前完成" else .conclusion end' runs.json)"
+              if [ "$state" != "success" ]; then
+                BAD="${BAD}\`$c\`：$state；"
+              fi
+            done <<EOF
+          $(printf '%s' "$CHECKS" | tr ',' '\n')
+          EOF
+            if [ -n "$BAD" ]; then
+              add "**強制 merge**：PR #$PR_NUM 合併時 required check 未通過 —— ${BAD%；}"
+            fi
+          fi
+
+          {
+            echo "## 🛡️ Branch Guard"
+            echo ""
+            echo "| 項目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 分支 | \`$BRANCH\` |"
+            echo "| 推送者 | @$ACTOR |"
+            echo "| commit | \`${AFTER:0:7}\` |"
+            echo "| 對應 PR | $PR_LINE |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$VIOLATIONS" ]; then
+            echo "✅ 經 PR 合併，且合併時 required check 皆為 success" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          printf '❌ 偵測到違規：\n\n%s' "$VIOLATIONS" >> "$GITHUB_STEP_SUMMARY"
+
+          # ── 4. 開 Issue 通知 ─────────────────────────────────
+          # 個人帳號指派 + @；team（含 /）只能 @。格式不對的略過並警告，
+          # 免得一個打錯的名字讓整張 Issue 開不出來。
+          MENTIONS=""; ASSIGNEES=""
+          set -f   # notify 是名稱清單，不要做檔名展開
+          for t in $NOTIFY; do
+            name="${t#@}"
+            if [[ "$name" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
+              MENTIONS="$MENTIONS @$name"
+            elif [[ "$name" =~ ^[A-Za-z0-9-]+$ ]]; then
+              MENTIONS="$MENTIONS @$name"; ASSIGNEES="${ASSIGNEES:+$ASSIGNEES,}$name"
+            else
+              echo "::warning::notify 裡的 \`$t\` 不是 GitHub 帳號或 team，已略過"
+            fi
+          done
+          if [ -z "$MENTIONS" ]; then
+            echo "::warning::沒有設定 notify，Issue 照開但不會通知任何人。請在呼叫端的 with: 填 notify"
+          fi
+
+          {
+            echo "受保護分支 \`$BRANCH\` 收到一筆未經正常 PR 流程的變更。"
+            echo ""
+            printf '%s' "$VIOLATIONS"
+            echo ""
+            echo "| 項目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 推送者 | @$ACTOR |"
+            echo "| commit | $COMPARE |"
+            echo "| 對應 PR | $PR_LINE |"
+            echo "| 偵測紀錄 | $RUN_URL |"
+            echo ""
+            echo "處理方式：確認變更內容；不該進來就 \`git revert\`，修正後重新發 PR。"
+            if [ -n "$MENTIONS" ]; then echo ""; echo "cc:$MENTIONS"; fi
+          } > issue.md
+
+          gh label create "$LABEL" --repo "$REPO" --color B60205 \
+            --description "受保護分支的直接 push / 強制 merge" --force >/dev/null
+          TITLE="[$LABEL] $BRANCH 未經正常 PR 流程的變更（${AFTER:0:7}，@$ACTOR）"
+          # 指派失敗（帳號對 repo 沒有存取權）時退回不指派，靠 @ 通知
+          if [ -z "$ASSIGNEES" ] || ! URL="$(gh issue create --repo "$REPO" --title "$TITLE" \
+                --body-file issue.md --label "$LABEL" --assignee "$ASSIGNEES")"; then
+            URL="$(gh issue create --repo "$REPO" --title "$TITLE" --body-file issue.md --label "$LABEL")"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "已開 Issue 通知：$URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::偵測到違規，已開 Issue：$URL"
+          exit 1

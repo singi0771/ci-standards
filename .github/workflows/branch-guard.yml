@@ -1,0 +1,22 @@
+# 本 repo 自己的 Branch Guard 呼叫端 —— 用 uses: ./ 呼叫自己的 reusable，當自己的第一個使用者。
+# main / develop 收到 push 時檢查是否經 PR、且 Gate 綠燈後才合併；違規就開 Issue 通知 maintainer。
+name: Branch Guard
+
+on:
+  # 不加 paths-ignore：直接 push 一份文件也是直接 push
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    uses: ./.github/workflows/branch-guard-reusable.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      issues: write
+    with:
+      notify: "@singi0771"

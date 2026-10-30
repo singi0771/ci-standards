@@ -4,12 +4,8 @@
 name: CI
 
 on:
-  # push 觸發：列出「合併後要再驗一次」的長壽分支。
-  # GitHub 的 on: 不吃 ${{ }} 運算式，這裡只能寫死分支名 ——
-  # 用什麼分支模型是各專案自己的事，改這一行即可（例如只有 main、或 main + develop）。
-  push:
-    branches: [main, develop]
-    paths-ignore: ["**/*.md", "docs/**"]
+  # 只在 PR 上檢查，合併後不再重跑（理由見範本 templates/consumer-repo/.github/workflows/ci.yml）。
+  # 直接 push、Gate 沒綠就 merge 由 branch-guard.yml 偵測。
   # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。
   # 多列 edited：PR 改 base 分支時要重跑來源分支政策，否則先發到 develop 拿綠燈、

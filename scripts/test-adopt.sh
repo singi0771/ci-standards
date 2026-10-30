@@ -381,12 +381,54 @@ case "$OUT" in
 esac
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 L：Branch Guard（--notify 指定通知對象）\n'
+# ═════════════════════════════════════════════════════════════
+GUARD=".github/workflows/branch-guard.yml"
+new_repo guard-notify
+"$ADOPT" --std "$STD" --notify "alice, @acme/platform-team" >/dev/null
+has "$GUARD" 'notify: "@alice @acme/platform-team"' "--notify 正規化成「@a @b」寫進 with:"
+has "$GUARD" 'branch-guard-reusable.yml@v2'         "branch-guard.yml 指向 @v2"
+has "$GUARD" 'issues: write'                         "branch-guard.yml 給了開 Issue 需要的權限"
+hasnt "$GUARD" 'paths-ignore:'                       "branch-guard.yml 不加 paths-ignore（直接推文件也要抓）"
+
+new_repo guard-none
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+if [ ! -e "$GUARD" ]; then ok "沒給 --notify 時不建 branch-guard.yml"; else bad "沒給 --notify 不該建 branch-guard.yml"; fi
+case "$OUT" in
+  *"沒有指定 --notify"*) ok "沒給 --notify 時報告會點名" ;;
+  *) bad "沒給 --notify 時報告沒有提醒" ;;
+esac
+
+new_repo guard-bad
+if "$ADOPT" --std "$STD" --notify '@a"b' >/dev/null 2>&1; then bad "--notify 含引號時應中止"; else ok "--notify 含引號時中止（不會寫出壞掉的 YAML）"; fi
+if [ ! -d .github ]; then ok "--notify 不合法時沒有動任何檔案"; else bad "--notify 不合法時不該動檔案"; fi
+
+# 升級：既有的 notify 保留；已經有 branch-guard.yml 時不需要再給 --notify
+new_repo guard-upgrade
+mkdir -p .github/workflows
+printf 'jobs:\n  guard:\n    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2.0.0   # 公版\n    with:\n      notify: "@keep-me"\n      obsolete: 1\n' > "$GUARD"
+"$ADOPT" --std "$STD" --notify "@someone-else" >/dev/null
+has   "$GUARD" 'notify: "@keep-me"'                     "升級時保留既有的 notify（不被 --notify 覆寫）"
+has   "$GUARD" 'branch-guard-reusable.yml@v2   # 公版'   "升級時 branch-guard 的 uses: 也更新 ref"
+hasnt "$GUARD" 'obsolete'                               "升級時移除 branch-guard 已廢除的 input"
+"$ADOPT" --std "$STD" >/dev/null
+if [ -f "$GUARD" ]; then ok "已有 branch-guard.yml 時不給 --notify 也照常合併"; else bad "既有 branch-guard.yml 不見了"; fi
+
+# 既有的 notify 是空的（例如手動照範本複製）→ 這次有給 --notify 就補上
+new_repo guard-empty
+mkdir -p .github/workflows
+cp "$STD/templates/consumer-repo/.github/workflows/branch-guard.yml" "$GUARD"
+"$ADOPT" --std "$STD" --notify "@filled" >/dev/null
+has "$GUARD" 'notify: "@filled"' "既有 notify 是空字串時，用 --notify 補上"
+check "notify 只出現一次" "$(grep -c 'notify:' "$GUARD")" "1"
+
+# ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'
 # ═════════════════════════════════════════════════════════════
 FAKE_STD="$WORK/fake-std"
 mkdir -p "$FAKE_STD/.github/workflows"
 cp -R "$STD/templates" "$FAKE_STD/"
-cp "$STD/.github/workflows/security-reusable.yml" "$FAKE_STD/.github/workflows/"
+cp "$STD/.github/workflows/security-reusable.yml" "$STD/.github/workflows/branch-guard-reusable.yml" "$FAKE_STD/.github/workflows/"
 # ci-reusable 的 inputs: 那一行格式變了 → 解析結果是空的
 sed 's/^    inputs:$/    inputs:  # changed/' "$STD/.github/workflows/ci-reusable.yml" > "$FAKE_STD/.github/workflows/ci-reusable.yml"
 new_repo guard

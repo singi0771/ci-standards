@@ -23,10 +23,7 @@
 name: Adopt Script Tests
 
 on:
-  # 跟 ci.yml / security.yml 列同一組長壽分支 —— 少列的話，合併進整合分支之後
-  # 回歸測試不會重跑，那條路徑就沒人守。
-  push:
-    branches: [main, develop]
+  # 跟 ci.yml / security.yml 一樣只在 PR 上跑，合併後不再重跑。
   # pull_request 不加 paths-ignore —— 與本 repo 的 ci.yml 同理（要跑不跑由下面的 changes job 決定）
   pull_request:
 
@@ -197,9 +194,12 @@ jobs:
                 upgrade) mk_upgrade "$P/$kind-$v" ;;
               esac
             done
-            ./scripts/adopt.sh --std . --target "$P/$kind-sh" --uses-repo ACME/ci-standards >/dev/null
+            # --notify 帶逗號、混用有無 @，順便比對兩支的正規化結果
+            ./scripts/adopt.sh --std . --target "$P/$kind-sh" --uses-repo ACME/ci-standards \
+              --notify "alice, @acme/platform-team" >/dev/null
             powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$PWD/scripts/adopt.ps1")" \
-              -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$kind-ps")" -UsesRepo ACME/ci-standards >/dev/null
+              -Std "$(cygpath -w "$PWD")" -Target "$(cygpath -w "$P/$kind-ps")" -UsesRepo ACME/ci-standards \
+              -Notify "alice, @acme/platform-team" >/dev/null
             if diff -r "$P/$kind-sh/.github" "$P/$kind-ps/.github"; then
               echo "$kind：adopt.sh 與 adopt.ps1（PowerShell 5.1）產出 byte-identical ✅"
             else

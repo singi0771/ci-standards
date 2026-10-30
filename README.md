@@ -6,6 +6,7 @@
 - 支援私有 repo，全部使用開源工具，不需要 GitHub Advanced Security。
 - 安全掃描：Semgrep、OSV-Scanner、Trivy、gitleaks、zizmor。
 - CI：Python（ruff、pytest）、.NET（format、build、test）、Docker build 與 hadolint、actionlint、shellcheck、PR 來源分支政策。
+- Branch Guard：main 收到直接 push、強制 push，或 Gate 未通過即 merge 時，開 Issue 通知指定人員。
 - 每條線各有一個總結 job（`Security Gate`、`CI Gate`），分支保護只需設定這兩個 required check。
 
 導入前請先閱讀 [已知限制](docs/KNOWN-LIMITATIONS.md)。
@@ -84,16 +85,17 @@
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/singi0771/ci-standards/v2/scripts/adopt.ps1 -OutFile $env:TEMP\adopt.ps1
-powershell -ExecutionPolicy Bypass -File $env:TEMP\adopt.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\adopt.ps1 -Notify "@帳號 @組織/team"
 ```
 
 **macOS / Linux / Git Bash**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/singi0771/ci-standards/v2/scripts/adopt.sh -o /tmp/adopt.sh
-bash /tmp/adopt.sh
+bash /tmp/adopt.sh --notify "@帳號 @組織/team"
 ```
 
+- `-Notify` / `--notify` 指定 [Branch Guard](#branch-guard) 的通知對象，於導入時決定。未指定則不建立 `branch-guard.yml`。
 - 加上 `-DryRun`（PowerShell）或 `--dry-run`（bash）只列出偵測結果與預計變更，不寫入檔案。
 - `-ExecutionPolicy Bypass` 只作用於該次執行，不變更系統設定。
 - 腳本會以 HTTPS 淺層 clone 公版範本至暫存目錄，結束後自動刪除。
@@ -104,6 +106,7 @@ bash /tmp/adopt.sh
 |---|---|
 | 技術偵測 | 偵測 Python、.NET、Dockerfile、shell script，寫入對應的 `run-*` 參數 |
 | `workflows/ci.yml`、`workflows/security.yml` | 不存在則新增；已存在則升級：`uses:` 改為 `@v2`、移除已廢除的 input、補上新 input，既有設定值保留 |
+| `workflows/branch-guard.yml` | 有指定通知對象才新增，`notify` 寫入正規化後的名單；已存在則依上列規則升級，既有 `notify` 保留 |
 | `zizmor.yml`、`dependabot.yml`、`pull_request_template.md` | 不存在則新增；已存在則不覆蓋，另存 `.new` 供比對 |
 | 其他 | 不刪除檔案、不 commit、不推送 |
 
@@ -115,6 +118,7 @@ bash /tmp/adopt.sh
 | `--ref <tag>` | `-Ref <tag>` | 呼叫端指向的公版版本，預設 `v2` |
 | `--std <path>` | `-Std <path>` | 使用本機既有的公版 clone，不另行下載 |
 | `--uses-repo <owner/repo>` | `-UsesRepo <owner/repo>` | 公版遷移至組織後，替換 `uses:` 的 owner/repo |
+| `--notify "<名單>"` | `-Notify "<名單>"` | Branch Guard 通知對象：GitHub 帳號或 team，空白或逗號分隔，`@` 可省略。格式不符時中止 |
 | `--dry-run` | `-DryRun` | 僅預覽 |
 
 ### 後續步驟
@@ -135,7 +139,7 @@ bash /tmp/adopt.sh
    依[疑難排解](#疑難排解)與[誤判抑制](#誤判抑制)處理。發現項目過多時可先以 `fail-on-findings: false` 過渡，見[導入過渡期](#導入過渡期)。
 4. **設定分支保護**：兩個 Gate 至少執行過一次後，見[分支保護](#分支保護)。無法設定時見[無法設定分支保護時](#無法設定分支保護時)。
 
-採用 develop 流程（功能分支 → develop → main）時，另需調整 `on.push.branches` 與來源分支政策，見[分支模型](#分支模型)。
+採用 develop 流程（功能分支 → develop → main）時，另需設定來源分支政策，見[分支模型](#分支模型)。
 
 ### 導入檢查清單
 
@@ -146,6 +150,7 @@ bash /tmp/adopt.sh
 - [ ] 無殘留 `.new` 檔
 - [ ] PR 上 `ci / CI Gate`、`security / Security Gate` 皆通過
 - [ ] 已設定分支保護，或已於 `CONTRIBUTING.md` / PR 範本註明「兩個 Gate 通過後才可 merge」
+- [ ] `branch-guard.yml` 的 `notify` 為實際負責人；repo 已啟用 Issues
 
 ### 呼叫端範例
 
@@ -188,9 +193,23 @@ jobs:
 
 ## 升級
 
+### 如何得知更新
+
+公版每次發佈都會建立 GitHub Release，內文為該版 CHANGELOG。
+各專案負責人於本 repo 設定 **Watch → Custom → Releases**，即可收到 email 通知。
+
+| 更新類型 | 專案需要的動作 | 如何辨識 |
+|---|---|---|
+| 公版 reusable 修正、規則調整、新增有預設值的 input | 無。`v2` tag 移動後，下次執行即套用 | Release 的「需要專案動作」為「無」，或未列此項 |
+| 範本或導入腳本變更（新增呼叫端、調整觸發條件、新參數） | 重新執行[導入腳本](#執行導入腳本)，或依說明手動修改 `.github/` | Release 的「需要專案動作」列出步驟 |
+| 新主版本（`v3`） | 將 `@v2` 改為 `@v3`，依該版升級步驟處理 | Release 標題為 `v3.0.0`。範本的 Dependabot（github-actions）也可能提出更新 PR |
+
+查詢目前專案落後的版本：比對呼叫端 `uses:` 的 tag 與 [Releases](https://github.com/singi0771/ci-standards/releases) 最新版。
+
 ### 同一主版本內
 
-不需任何動作。`v2` tag 移動後，下次執行即套用新版。新增的 input 皆有預設值；需要使用新參數時重新執行導入腳本即可。
+`v2` tag 移動後，下次執行即套用 reusable 的變更。範本或導入腳本的變更不會自動套用，須依 Release 的「需要專案動作」處理；
+重新執行導入腳本不會覆蓋既有設定值，可放心重跑。
 
 ### 從 v1 升級到 v2
 
@@ -313,7 +332,7 @@ check 名稱格式為 `<呼叫端 job id> / <公版 job 名稱>`，須與 Checks
 
 ### 注意事項
 
-- 呼叫端的 `pull_request` **不可設定 `paths-ignore`**。被過濾的 PR 不會產生 required check，將永遠 pending。`push` 的 `paths-ignore` 不受影響。
+- 呼叫端的 `pull_request` **不可設定 `paths-ignore`**。被過濾的 PR 不會產生 required check，將永遠 pending。
 - 建議於 Settings → Billing 將 Actions 的 spending limit 設為 `$0`，詳見 [`docs/SETUP.md`](docs/SETUP.md)。
 
 ### 無法設定分支保護時
@@ -323,16 +342,65 @@ Free 方案的私有 repo，或由公司統一管理、專案成員無 admin 權
 | 機制 | 狀態 |
 |---|---|
 | PR 上的 CI / Security 與 Summary | 正常執行 |
-| merge 後於 main / develop 再次執行 | 正常執行，可事後追查 |
 | 來源分支政策 | 正常判定，僅無法阻擋 |
 | 每週排程重掃 | 正常執行 |
+| [Branch Guard](#branch-guard) | 正常執行：直接 push、強制 push、強制 merge 時開 Issue 通知 |
 
 補強措施：
 
 1. 於 PR 範本與 `CONTRIBUTING.md` 規定「兩個 Gate 通過後才可 merge」。
-2. merge 後檢查 main 上的執行結果；失敗時 `git revert` 該 merge commit，修正後重新發 PR。
+2. 導入時以 `--notify` 啟用 Branch Guard；收到 Issue 時 `git revert` 該變更，修正後重新發 PR。
 3. 限縮具 Write 權限的成員。
 4. 需要強制阻擋時，改用付費方案、遷移至組織，或改為 public repo，之後執行分支保護腳本即可，呼叫端不需調整。
+
+### Branch Guard
+
+`branch-guard.yml` 於受保護分支（預設 `main`）收到 push 時執行，判定這次 push 的來源。
+分支保護擋不住的操作（無 ruleset 的 repo、admin bypass）由此在事後揭露。
+
+| 情況 | 判定方式 |
+|---|---|
+| 直接 push | 分支頂端 commit 不是任何「合併進該分支的 PR」的 `merge_commit_sha`。`git push origin develop:main` 亦屬此類 |
+| 強制 push | push 事件的 `forced` 為 `true` |
+| 強制 merge | 有對應 PR，但合併當下 `required-checks` 中任一 check 不是 `success`（失敗、未完成或未執行）|
+
+偵測到違規時：
+
+1. 開 Issue（label `branch-guard`，不存在時自動建立），內容含違規項目、推送者、commit 與 PR 連結。
+2. `notify` 中的個人帳號指派為 Issue 負責人並 @；team 僅 @（GitHub 不能指派 team）。GitHub 依此寄送站內與 email 通知。
+3. 該次執行標為失敗。
+
+GitHub 內建的 workflow 失敗通知只寄給觸發者，即違規者本人，因此另以 Issue 通知。
+
+```yaml
+on:
+  push:
+    branches: [main]          # 要守 develop 時改為 [main, develop]；不可加 paths-ignore
+
+jobs:
+  guard:
+    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      issues: write
+    with:
+      notify: "@alice @acme/platform-team"
+```
+
+| input | 預設 | 說明 |
+|---|---|---|
+| `notify` | `""` | 通知對象，空白分隔。空白時照常開 Issue 但不通知任何人 |
+| `required-checks` | `ci / CI Gate,security / Security Gate` | 合併當下須為 `success` 的 check，應與分支保護的 required check 相同 |
+| `label` | `branch-guard` | Issue 的 label |
+
+限制：
+
+- 只能事後揭露，無法阻擋。
+- repo 停用 Issues 時無法開 Issue，僅執行結果標為失敗。
+- 使用 merge queue 時，required check 執行於 merge group 而非 PR head，會誤判為強制 merge。
+- 每次 push 到受保護分支皆執行一次，約耗用 1 分鐘 Actions 額度。
 
 ---
 
@@ -342,16 +410,21 @@ Free 方案的私有 repo，或由公司統一管理、專案成員無 admin 權
 
 ### 觸發條件
 
-範本的 `ci.yml` 對所有 base 分支的 PR 執行：
+範本的 `ci.yml` 只對 PR 執行（所有 base 分支）；`security.yml` 另有每週排程重掃：
 
 ```yaml
 on:
-  push:
-    branches: [main]          # 採用 develop 流程時改為 [main, develop]
-    paths-ignore: ["**/*.md", "docs/**"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
 ```
+
+合併進 main / develop 後不再重跑：
+
+- PR 檢查的是合併後的結果（`refs/pull/N/merge`），合併後再跑多半是同一份程式碼。
+- develop → main 的 PR 會再驗一次 develop 累積的變更。PR 開啟期間 develop 有新 commit 時，PR 收到 `synchronize` 自動重跑，前一輪的結果不再算數。
+- 直接 push 與 Gate 未通過即 merge 由 [Branch Guard](#branch-guard) 偵測。
+
+例外：以 Actions 的 `GITHUB_TOKEN` merge 或 push 時，GitHub 不觸發任何 workflow，PR 不會重跑。自動化流程請使用個人或 GitHub App 的 token。
 
 - `on:` 不支援 `${{ }}` 運算式，分支名稱須直接寫入。
 - 加上 `pull_request.branches` 篩選後，未列入分支的 PR 不會產生 `ci / CI Gate`，這些分支不可設為 required check。
@@ -397,7 +470,7 @@ with:
 |---|---|
 | develop、main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main develop` |
 | main 只接受 develop 的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop"` |
-| merge 後再次驗證 | 兩支呼叫端 `on.push.branches: [main, develop]` |
+| develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` |
 | 新 PR 預設發往 develop | Settings → General → Default branch 設為 `develop` |
 
 分支名稱可自訂，腳本與 input 皆依實際填寫的名稱運作。
@@ -536,7 +609,7 @@ with:
 |---|---|
 | 草稿 PR 不執行 | `scan-docker-image` 無 Dockerfile 時關閉 |
 | 連續推送自動取消前一次執行 | 排程改為每月：`cron: "0 3 1 * *"` |
-| `push` 排除文件變更 | Billing 將 spending limit 設為 `$0` |
+| 只在 PR 上執行，合併後不重跑 | Billing 將 spending limit 設為 `$0` |
 | actionlint 與 shellcheck、hadolint 與 Docker build 合併為同一 job | `dotnet-runner` 非必要不使用 Windows |
 | Trivy 預設不掃 secret；Dependabot docker / actions 每月 | |
 
@@ -576,8 +649,10 @@ ci-standards/
 │   ├── workflows/
 │   │   ├── ci-reusable.yml          公版：CI
 │   │   ├── security-reusable.yml    公版：安全掃描
+│   │   ├── branch-guard-reusable.yml 公版：直接 push / 強制 merge 偵測與通知
 │   │   ├── ci.yml                   本 repo 的呼叫端（以 ./ 呼叫 ci-reusable.yml）
 │   │   ├── security.yml             本 repo 的呼叫端（以 ./ 呼叫 security-reusable.yml）
+│   │   ├── branch-guard.yml         本 repo 的呼叫端（以 ./ 呼叫 branch-guard-reusable.yml）
 │   │   └── adopt-tests.yml          導入腳本測試（ubuntu / macOS / Windows）
 │   ├── zizmor.yml
 │   ├── dependabot.yml
@@ -599,7 +674,7 @@ ci-standards/
 
 **呼叫端與範本的一致性**：`ci.yml` / `security.yml` 以 `./` 呼叫同一 commit 的 reusable workflow，修改公版的 PR 即以修改後的版本執行，兩者無需同步。
 需要保持一致的是本 repo 呼叫端與 `templates/consumer-repo/` 範本：觸發條件、`permissions`、`concurrency`、job 的 `if` 必須相同；
-僅 `uses:`、`push.branches`、`with:` 可不同。修改其中一方時須同步修改另一方。
+僅 `uses:`、`with:` 可不同。修改其中一方時須同步修改另一方。
 
 ---
 

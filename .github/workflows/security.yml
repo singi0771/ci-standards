@@ -2,12 +2,7 @@
 name: Security Scan
 
 on:
-  # push 觸發：列出「合併後要再驗一次」的長壽分支。
-  # GitHub 的 on: 不吃 ${{ }} 運算式，這裡只能寫死分支名 ——
-  # 用什麼分支模型是各專案自己的事，改這一行即可（例如只有 main、或 main + develop）。
-  push:
-    branches: [main, develop]
-    paths-ignore: ["**/*.md", "docs/**"]
+  # 只在 PR 上掃描，合併後不再重跑；新公布的 CVE 由 schedule 每週重掃抓。
   # pull_request 不加 paths-ignore —— Security Gate 是 required check，
   # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑。
@@ -19,7 +14,7 @@ on:
 permissions:
   contents: read
 
-# 排程重掃跟 push 分開一組，免得同一分支上互相取消（被取消的那輪 Gate 是紅的）
+# 排程重掃跟 PR 分開一組，免得互相取消（被取消的那輪 Gate 是紅的）
 concurrency:
   group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
