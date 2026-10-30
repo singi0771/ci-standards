@@ -7,8 +7,43 @@
 不可變的 `vX.Y.Z`（還原點）+ 會移動的 `vX`（大家指向的別名）。
 
 格式參考 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)。
+2.1.0 起每版第一段為「需要專案動作」：只移動 `v2` 就會自動生效的不列；要各專案重跑導入腳本、
+手動改呼叫端或改設定的才列，沒有就寫「無」。發佈時這一版的內容同時是 GitHub Release 的內文。
 
 ---
+
+## [Unreleased]
+
+## [2.1.0] — 2026-10-30
+
+新增 Branch Guard；CI / Security 範本改為只在 PR 上執行。既有呼叫端不受影響。
+
+### 需要專案動作
+- **啟用 Branch Guard**（選配，建議）：重跑導入腳本並加上通知對象：
+  `adopt.sh --notify "@帳號 @組織/team"` 或 `adopt.ps1 -Notify "@帳號 @組織/team"`。
+  repo 需啟用 Issues。走 develop 流程且也要守 develop 時，把 `branch-guard.yml` 的 `on.push.branches` 改為 `[main, develop]`。
+- **移除合併後重跑**（選配）：導入腳本不動 `on:`，要省下合併後那一輪，手動刪除 `ci.yml`、`security.yml` 的 `on.push` 區塊。
+  刪除前建議先啟用 Branch Guard，直接 push 才仍會被發現。
+
+### 新增
+- `branch-guard-reusable.yml`：受保護分支收到 push 時，偵測直接 push、強制 push，
+  以及 required check 未通過即合併的強制 merge；違規時開 Issue（label `branch-guard`），
+  指派並 @ `notify` 指定的人員，該次執行標為失敗。
+  GitHub 內建的失敗通知只寄給觸發者本人，無法用來通知負責人。
+- 呼叫端範本 `templates/consumer-repo/.github/workflows/branch-guard.yml`。權限獨立宣告
+  （`issues: write` 等），CI / Security 的呼叫端維持唯讀。
+- `adopt.sh --notify` / `adopt.ps1 -Notify`：導入時指定通知對象，正規化為 `@a @b` 寫入 `notify`；
+  格式不符時中止。未指定時不建立 `branch-guard.yml` 並於報告提醒；已存在時依既有規則升級，保留既有的 `notify`。
+- 本 repo 以 `uses: ./` 呼叫 Branch Guard，守 `main` 與 `develop`。
+
+### 變更
+- 呼叫端範本 `ci.yml`、`security.yml` 移除 `push` 觸發，只在 PR 上檢查；`security.yml` 保留每週排程重掃。
+  PR 檢查的就是合併後的結果，develop → main 的 PR 會再驗一次累積的變更，合併後再跑一輪多半重複。
+  直接 push 與強制 merge 改由 Branch Guard 偵測。一個功能從 develop 到 main 由 4 輪降為 2 輪。
+  既有呼叫端不會被導入腳本改動（升級時不動 `on:`），要套用請自行刪除 `on.push`。
+- 本 repo 的 `ci.yml`、`security.yml`、`adopt-tests.yml` 同步移除 `push` 觸發。
+- 發佈流程新增建立 GitHub Release（內文取自 CHANGELOG），各專案可 Watch 公版的 Release 得知更新；
+  CHANGELOG 每版新增「需要專案動作」一段。
 
 ## [2.0.1] — 2026-10-22
 

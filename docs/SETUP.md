@@ -125,8 +125,8 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 
 - `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘；沒 Dockerfile 一定關
 - schedule 從每週改每月（改呼叫端 `security.yml` 的 cron，例如 `"0 3 1 * *"`）
-- 呼叫端的 **`push: main`** 有 `paths-ignore: ["**/*.md", "docs/**"]`，直接推文件到 main 不會觸發掃描
-  （**`pull_request` 刻意不加** —— 加了會讓純文件 PR 的 required check 永遠 pending、PR 卡死）
+- 呼叫端只在 PR 上跑 CI / Security，合併進 main / develop 後不再重跑一輪
+  （`pull_request` 刻意不加 `paths-ignore` —— 加了會讓純文件 PR 的 required check 永遠 pending、PR 卡死）
 - 呼叫端已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
 - 還在寫的 PR 開成**草稿**：1.3.0 的範本呼叫端遇到草稿整個跳過，按 Ready for review 才跑
 - Dependabot 的 docker / github-actions 改每月（1.3.0 範本預設）；每個 Dependabot PR 都會跑整套

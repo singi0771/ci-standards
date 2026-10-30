@@ -4,11 +4,8 @@
 name: Security Scan
 
 on:
-  # push 觸發：列出「合併後要再驗一次」的長壽分支（on: 不吃運算式，只能寫死）。
-  # 走 develop 流程的專案改成：branches: [main, develop]
-  push:
-    branches: [main]
-    paths-ignore: ["**/*.md", "docs/**"]
+  # 只在 PR 上掃描，合併後不再重跑一輪（理由見 ci.yml）。
+  # 程式沒動、但新公布的 CVE 由下面的 schedule 每週重掃抓。
   # ⚠️ pull_request 這裡「不要」加 paths-ignore —— 理由同 ci.yml：
   # `security / Security Gate` 是 required check，被 path filter 擋掉就永遠不回報，
   # 純文件 PR 會卡死在 pending。
@@ -22,7 +19,7 @@ on:
 permissions:
   contents: read
 
-# 排程重掃跟 push 分開一組 —— 同一個分支上兩者共用一組的話，會互相取消，
+# 排程重掃跟 PR 分開一組 —— 兩者共用一組的話，會互相取消，
 # 被取消的那一輪 Security Gate 是紅的
 concurrency:
   group: security-${{ github.event_name }}-${{ github.ref }}

@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v2.0.1`（2026-10-22，SHA 以 `git rev-parse v2.0.1^{}` 為準；前一版 2.0.0 在 `dad6a47`）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **2.0.1（2026-10-22）** |
+| 發佈基準 | `v2.1.0`（2026-10-30，SHA 以 `git rev-parse v2.1.0^{}` 為準；前一版 2.0.1 以 `git rev-parse v2.0.1^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.1.0（2026-10-30）**；自 2.1.0 起每版建 GitHub Release |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` tag | ✅ 指向 2.0.1（`v2.0.0^{}` → `dad6a47`）。新導入一律 `@v2` |
-| 最新版本 tag | ✅ `v2.0.1`（驗收：`v2` 與 `v2.0.1^{}` 同一 SHA，`v1` 仍在 `ff5a781`） |
+| `v2` tag | ✅ 指向 2.1.0。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.1.0`（驗收：`v2` 與 `v2.1.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
@@ -452,9 +452,14 @@ git tag -f v2 <同一個完整 SHA>
 git push -f origin v2
 
 git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
+
+# GitHub Release：各專案 Watch → Custom → Releases 就會收到 email。內容取 CHANGELOG 的該版段落
+awk '/^## \[X\.Y\.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/notes.md
+gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file /tmp/notes.md
 ```
 
-**驗收**：最後一行的輸出裡 `refs/tags/v2` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA，`refs/tags/v1` 沒變。
+**驗收**：`ls-remote` 的輸出裡 `refs/tags/v2` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA，`refs/tags/v1` 沒變；
+`gh release view vX.Y.Z` 看得到內文，而且「需要專案動作」那段有出現（沒有的話寫「無」）。
 （annotated tag 自己的物件 SHA 不同是正常的，要看 `^{}` 那一行。）
 
 幾個容易出錯的地方：
@@ -467,6 +472,8 @@ git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
   `ci / CI Gate`、`security / Security Gate`）都算，那要開下一個主版本（`v3`）。判準見 `CONTRIBUTING.md`。
 - **純文件變更可以不發版**，等下次有實質變更再一起發。
 - **雲端 session 推不了 tag**（policy gateway 對 tag ref 回 403），這一步一律在本機做。
+- **Release 只建 `vX.Y.Z`，不建 `v2`** —— `v2` 是會移動的別名，掛 Release 會讓 Release 內文跟實際內容對不上。
+- **`--verify-tag` 不能省** —— 少了它，tag 打錯名字時 gh 會自己在目前的 default branch 頂端建一個新 tag。
 
 ---
 

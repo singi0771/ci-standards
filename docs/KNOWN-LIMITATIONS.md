@@ -71,8 +71,8 @@ Gate 會不會「擋住 merge」完全取決於 GitHub 的分支保護 / ruleset
 GitHub Free 方案的 **private** repo 不能用 ruleset（API 回 `403 Upgrade to GitHub Pro…`），
 公司統一管理的 repo 也可能不讓各專案自己設。
 
-這種 repo 一樣照常導入：Gate 照跑、照樣紅、push 到 main 之後也會再跑一輪，只是紅燈擋不住有寫入權限的人按 merge。
-補位做法（團隊約定、merge 後看 main 那一輪、限縮寫入權限、需要時升級方案）見
+這種 repo 一樣照常導入：Gate 照跑、照樣紅，只是紅燈擋不住有寫入權限的人按 merge。
+補位做法（團隊約定、Branch Guard 事後開 Issue 通知、限縮寫入權限、需要時升級方案）見
 [README — 無法設定分支保護時](../README.md#無法設定分支保護時)。
 
 ---

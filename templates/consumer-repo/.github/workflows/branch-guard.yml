@@ -1,0 +1,29 @@
+# 各專案的「呼叫端」workflow —— 只有這一小段，邏輯全在中央公版。
+# ⚠️ 中央公版在 singi0771/ci-standards；@v2 是版本 tag（要最新可改 @main）。
+#
+# 受保護分支收到 push 時，檢查是否經 PR、且 Gate 綠燈後才合併。
+# 直接 push、強制 push、強制 merge 都會開一張 Issue 通知 notify 裡的人。
+# 沒有分支保護的 repo 擋不住這些操作，這支讓它們至少會被看見。
+name: Branch Guard
+
+on:
+  # 列出要守的長壽分支（on: 不吃運算式，只能寫死）。
+  # 走 develop 流程、也要守 develop 的專案改成：branches: [main, develop]
+  # ⚠️ 不要加 paths-ignore —— 直接 push 一份文件也是直接 push。
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2
+    # 開 Issue、建 label 要 issues: write；查 PR 與 check 結果要另外兩個 read
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      issues: write
+    with:
+      notify: ""
