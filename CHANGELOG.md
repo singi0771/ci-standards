@@ -14,6 +14,8 @@
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-30
+
 新增 Branch Guard；CI / Security 範本改為只在 PR 上執行。既有呼叫端不受影響。
 
 ### 需要專案動作
