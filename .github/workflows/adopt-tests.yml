@@ -109,7 +109,7 @@ jobs:
 
       # 沒有 PyYAML 的話，「所有 workflow YAML 仍可解析」那一項會被跳過。
       # macOS runner 預設就沒有，所以明確裝起來 —— 要的是真的驗到，不是跳過。
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       # 用 `python` 而不是 `python3`：Windows 的 setup-python 只保證前者在 PATH 上。
