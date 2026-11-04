@@ -14,8 +14,18 @@
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-11-04
+
+修正 Trivy 安裝失敗導致 Security Gate 紅燈。
+
 ### 需要專案動作
 無。
+
+### 修正
+- `trivy`、`trivy-image` 改從 GitHub Release 安裝 trivy 0.70.0（釘版本 + sha256），不再經 `setup-trivy`。
+  `setup-trivy` 從 `get.trivy.dev` 下載，該網域自 2026-11-03 無法解析（aquasecurity/setup-trivy#42），
+  沒有 trivy 快取的 PR 在 Install Trivy 失敗（curl exit code 6）。`trivy-action` 改設 `skip-setup-trivy: true`，
+  弱點 DB 下載與快取仍由它處理。
 
 ### 變更
 - 新增 `release.yml`（本 repo 自用）：推 `vX.Y.Z` tag 時自動建立 GitHub Release，內文取自 CHANGELOG。
