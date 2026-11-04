@@ -228,7 +228,8 @@ jobs:
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 掃描時間隨 git 歷史大小成長：約 190 MB 的 repo 需 4～5 分鐘，原本的 5 分鐘會偶發逾時
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
