@@ -130,7 +130,7 @@ Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘�
 | zizmor | `security-reusable.yml` | 抓 `zizmor-x86_64-unknown-linux-gnu.tar.gz` 自己 `sha256sum` |
 | actionlint | `ci-reusable.yml` | release 的 `actionlint_<版本>_checksums.txt` |
 | hadolint | `ci-reusable.yml` | release 的 `checksums.sha256`，找 `linux-x86_64` |
-| trivy CLI（image 掃描） | `security-reusable.yml` 的 `trivy-image` job，`setup-trivy` 的 `version` | 跟 `trivy-action` 內部用的版本保持一致（目前 trivy-action v0.36.0 ↔ trivy v0.70.0），兩邊結果才一致 |
+| trivy CLI | `security-reusable.yml` 的 `trivy`、`trivy-image` 兩個 job 的 Install Trivy（`VERSION` / `SHA256`，兩處同步改） | release 的 `trivy_<版本>_checksums.txt`，找 `Linux-64bit.tar.gz`。`trivy-action` 設 `skip-setup-trivy: true`，直接用這支 |
 | Semgrep image | `security-reusable.yml` 的 `container.image` | `docker buildx imagetools inspect semgrep/semgrep:<版本>` 的 digest |
 | gitleaks image | `security-reusable.yml` 的 `docker run` | `docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本>` 的 digest |
 | ruff | `ci-reusable.yml` 的 `ruff-version` 預設值 | 不用校驗碼（pip 有自己的 hash 機制），但要記得新版可能多規則 |
