@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v2.1.0`（2026-10-30，SHA 以 `git rev-parse v2.1.0^{}` 為準；前一版 2.0.1 以 `git rev-parse v2.0.1^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **2.1.0（2026-10-30）**；自 2.1.0 起每版建 GitHub Release |
+| 發佈基準 | `v2.1.1`（2026-11-04，SHA 以 `git rev-parse v2.1.1^{}` 為準；前一版 2.1.0 以 `git rev-parse v2.1.0^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.1.1（2026-11-04）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` tag | ✅ 指向 2.1.0。新導入一律 `@v2` |
-| 最新版本 tag | ✅ `v2.1.0`（驗收：`v2` 與 `v2.1.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
+| `v2` tag | ✅ 指向 2.1.1。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.1.1`（驗收：`v2` 與 `v2.1.1^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
@@ -436,8 +436,10 @@ copilot-autoreview-reusable.yml@main
 ### 發佈流程（公版每次有實質變更就要做一次）
 
 **合併進 `main` 不是發佈。** 使用端釘主版本 tag（2.0.0 起是 `@v2`），tag 沒移動 = 沒有任何專案會有感覺。
-以下以 2.x 的一般發佈為例（`vX.Y.Z` 填 `v2.0.1` 這種）；**開新主版本**（例如 2.0.0 本身）的做法見 ⑪：
-建立新的 `vN` 而不是 `-f` 移動，舊的主版本 tag 不動。
+以下以 2.x 的一般發佈為例（`vX.Y.Z` 填 `v2.0.1` 這種）；**開新主版本**（例如 `v3.0.0`）時差在別名：
+`git tag v3 <SHA> && git push origin v3` 第一次建立、不加 `-f`，舊的主版本 tag（`v2`）不動。
+同樣先推 `v3`、再推 `v3.0.0`，`release.yml` 會檢查 `v3` 已指向同一個 commit，建立標題為 `v3.0.0` 的 Release 通知各專案。
+Release 的「需要專案動作」須寫明把 `@v2` 改成 `@v3` 及其他升級步驟。（⑪ 是 2.0.0 當時的紀錄，那時還沒有 `release.yml`。）
 
 ```bash
 cd "$CODE_WORK/ci-standards"
@@ -445,21 +447,21 @@ git fetch origin --prune
 git checkout main && git pull
 git log --oneline -1        # 記下這個 SHA，下面用它
 
-git tag -a vX.Y.Z -m "一句話說明這版改了什麼" <上面那個完整 SHA>
-git push origin vX.Y.Z
-
-git tag -f v2 <同一個完整 SHA>
+# 先移 v2，再推 vX.Y.Z：推 vX.Y.Z 會觸發 release.yml 建立 Release，它會檢查 v2 已指向同一個 commit
+git tag -f v2 <上面那個完整 SHA>
 git push -f origin v2
 
-git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
+git tag -a vX.Y.Z -m "一句話說明這版改了什麼" <同一個完整 SHA>
+git push origin vX.Y.Z
 
-# GitHub Release：各專案 Watch → Custom → Releases 就會收到 email。內容取 CHANGELOG 的該版段落
-awk '/^## \[X\.Y\.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/notes.md
-gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file /tmp/notes.md
+git ls-remote --tags origin | grep -E 'refs/tags/v[12]($|\.)'
+gh run list --workflow release.yml -L 1      # 等它跑完
+gh release view vX.Y.Z
 ```
 
 **驗收**：`ls-remote` 的輸出裡 `refs/tags/v2` 與 `refs/tags/vX.Y.Z^{}` 指向同一個 SHA，`refs/tags/v1` 沒變；
-`gh release view vX.Y.Z` 看得到內文，而且「需要專案動作」那段有出現（沒有的話寫「無」）。
+`gh release view vX.Y.Z` 看得到內文，而且「需要專案動作」那段有出現。
+`release.yml` 失敗時看錯誤訊息修正（v2 沒先移、tag 不在 main、CHANGELOG 缺段落），再 `gh run rerun <run id>`。
 （annotated tag 自己的物件 SHA 不同是正常的，要看 `^{}` 那一行。）
 
 幾個容易出錯的地方：
@@ -473,7 +475,9 @@ gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file /tmp/notes.m
 - **純文件變更可以不發版**，等下次有實質變更再一起發。
 - **雲端 session 推不了 tag**（policy gateway 對 tag ref 回 403），這一步一律在本機做。
 - **Release 只建 `vX.Y.Z`，不建 `v2`** —— `v2` 是會移動的別名，掛 Release 會讓 Release 內文跟實際內容對不上。
-- **`--verify-tag` 不能省** —— 少了它，tag 打錯名字時 gh 會自己在目前的 default branch 頂端建一個新 tag。
+  `release.yml` 只對 `vX.Y.Z` 觸發。
+- **Release 由 `release.yml` 建立，不要手動建**（2.1.0 是最後一次手動建）。手動補建時 `--verify-tag` 不能省 ——
+  少了它，tag 打錯名字時 gh 會自己在目前的 default branch 頂端建一個新 tag。
 
 ---
 

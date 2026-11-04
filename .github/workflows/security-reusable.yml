@@ -180,9 +180,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install Trivy
+        run: |
+          # get.trivy.dev 自 2026-11-03 失效（aquasecurity/setup-trivy#42），改從 GitHub Release 安裝。
+          # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
+          VERSION="0.70.0"
+          SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
+          curl --fail -sSL -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+          echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          sudo mv trivy /usr/local/bin/trivy
+          rm trivy.tar.gz
+          trivy --version
       - name: Trivy scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true   # 用上面 Install Trivy 裝好的 trivy
           scan-type: fs
           scanners: ${{ inputs.trivy-scanners }}
           format: table
@@ -197,6 +210,7 @@ jobs:
         if: ${{ !cancelled() && inputs.generate-sbom }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          skip-setup-trivy: true   # 用上面 Install Trivy 裝好的 trivy
           scan-type: fs
           format: cyclonedx
           output: sbom.cdx.json
@@ -287,11 +301,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # 跟 trivy-action v0.36.0 內部用的是同一支 setup-trivy、同一版 trivy，兩邊結果才會一致
-      - uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
-        with:
-          version: v0.70.0
-          cache: true
+      # 跟 trivy job 用同一版 trivy 0.70.0（同一個安裝步驟），兩邊結果才會一致
+      - name: Install Trivy
+        run: |
+          # get.trivy.dev 自 2026-11-03 失效（aquasecurity/setup-trivy#42），改從 GitHub Release 安裝。
+          # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
+          VERSION="0.70.0"
+          SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
+          curl --fail -sSL -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+          echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          sudo mv trivy /usr/local/bin/trivy
+          rm trivy.tar.gz
+          trivy --version
       - name: Build + scan images
         env:
           SHA: ${{ github.sha }}

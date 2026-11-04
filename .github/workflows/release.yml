@@ -1,0 +1,78 @@
+# 發佈時自動建立 GitHub Release —— 本 repo 自己的發佈工具，不是給 consumer 呼叫的公版。
+#
+# 各專案靠 Watch 公版的 Releases 得知更新（README「如何得知更新」）。手動建 Release 容易漏，
+# 漏了也不會有任何地方報錯，所以改成推 vX.Y.Z tag 時自動建立，內文取自 CHANGELOG 的該版段落。
+#
+# 只認不可變的 vX.Y.Z；會移動的主版本別名（v2）不建 Release，內文會跟實際內容對不上。
+# 建立前檢查三件事，任一不符就失敗、不建 Release（修正後 Re-run 即可）：
+#   1. tag 指向的 commit 在 main 上 —— 避免在 feature 分支上誤打 tag 就發出通知
+#   2. 主版本別名（v2）已移到同一個 commit —— Release 寄出時各專案的 @v2 必須已經是新版
+#   3. CHANGELOG 有該版段落，且含「### 需要專案動作」
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions: {}
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release create
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check tag, alias and CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse "HEAD^{commit}")
+          alias="${TAG%%.*}"            # v2.1.0 → v2
+          version="${TAG#v}"            # v2.1.0 → 2.1.0
+
+          # 1. 在 main 上：compare(sha...main) 為 ahead / identical 表示 main 包含 sha
+          status=$(gh api "repos/$REPO/compare/$sha...main" --jq .status)
+          if [ "$status" != "ahead" ] && [ "$status" != "identical" ]; then
+            echo "::error::$TAG 指向的 $sha 不在 main 上（compare 結果：$status）。tag 須打在 main 的合併 commit。"
+            exit 1
+          fi
+
+          # 2. 主版本別名已移動
+          alias_sha=$(gh api "repos/$REPO/commits/$alias" --jq .sha 2>/dev/null || true)
+          if [ "$alias_sha" != "$sha" ]; then
+            echo "::error::$alias 目前指向 ${alias_sha:-（不存在）}，不是 $TAG 的 $sha。先移動 $alias，再 Re-run 這個 workflow。"
+            exit 1
+          fi
+
+          # 3. CHANGELOG 段落：## [X.Y.Z] 到下一個 ## [ 之前
+          awk -v h="## [$version]" 'index($0, h) == 1 { f = 1; next } /^## \[/ { f = 0 } f' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md 找不到 ## [$version] 段落，或段落是空的。"
+            exit 1
+          fi
+          if ! grep -q '^### 需要專案動作' notes.md; then
+            echo "::error::CHANGELOG.md 的 $version 段落缺少「### 需要專案動作」（沒有動作就寫「無」）。"
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            echo "::notice::$TAG 的 Release 已存在，不重建。"
+            exit 0
+          fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" --notes-file notes.md
