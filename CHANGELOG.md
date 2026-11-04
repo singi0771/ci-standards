@@ -14,6 +14,17 @@
 
 ## [Unreleased]
 
+## [2.1.2] — 2026-11-04
+
+修正 gitleaks 在 git 歷史較大的 repo 偶發逾時。
+
+### 需要專案動作
+無。
+
+### 修正
+- `gitleaks` job 的 `timeout-minutes` 由 5 改為 15。gitleaks 連 git 歷史一起掃，約 190 MB 的 repo 需 4～5 分鐘，
+  超過 5 分鐘即被取消，Security Gate 紅燈。
+
 ## [2.1.1] — 2026-11-04
 
 修正 Trivy 安裝失敗導致 Security Gate 紅燈。
