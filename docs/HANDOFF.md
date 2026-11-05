@@ -75,17 +75,17 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v2.1.2`（2026-11-04，SHA 以 `git rev-parse v2.1.2^{}` 為準；前一版 2.1.1 以 `git rev-parse v2.1.1^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **2.1.2（2026-11-04）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
+| 發佈基準 | `v2.2.0`（2026-11-05，SHA 以 `git rev-parse v2.2.0^{}` 為準；前一版 2.1.2 以 `git rev-parse v2.1.2^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.2.0（2026-11-05）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` tag | ✅ 指向 2.1.2。新導入一律 `@v2` |
-| 最新版本 tag | ✅ `v2.1.2`（驗收：`v2` 與 `v2.1.2^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
+| `v2` tag | ✅ 指向 2.2.0。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.2.0`（驗收：`v2` 與 `v2.2.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
 | AdminAutoTools | ✅ **已升到 1.2.1 的呼叫方式**，且 `@main` → `@v1` 與缺 `issues: write` 都已修（**AdminAutoTools#65 已合併**，見 §3 ⑥）。`COPILOT_TRIGGER_PAT` 已於 2026-08-09 設定 |
 | AdminAutoTools 的 CI | 🟠 **Actions 已恢復**（2026-09-05 查證：9/4 的 run 每個 job 都有 steps，不再是 `steps=0`）。但 Dependabot PR 上的 `ci` 與 `security` 是**真的紅**：`Python lint + test`、`SAST (Semgrep)`、`Dependency vuln (OSV-Scanner)` 三個 job 失敗，兩個 Gate 跟著紅。要去那個 repo 看 log，詳見 §3 |
-| adopt.sh | ✅ 回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過）。2.0.0 增為 72 項（本機 Windows Git Bash 跑過：65 過、1 項因沒裝 PyYAML 跳過）；三平台要等 PR 上的 `adopt-tests.yml` 跑完才算驗過 |
+| adopt.sh | ✅ 回歸測試在 **Linux／macOS／Windows(Git Bash) 三個平台都跑過**（1.3.0 起只有動到腳本 / 範本 / workflow 的 PR 才跑，純文件 PR 整個跳過）。2.2.0 增為 126 項（本機 Windows Git Bash：124 過、2 項因沒裝 PyYAML 跳過；PR #58 三平台全過）。2.2.0 起 `--notify` 必填、新增 `--flow`／`--prod` |
 | adopt.ps1 | ✅ PS 5.1 與 pwsh 7 都能跑，產出與 `adopt.sh` byte-identical（1.3.0 又驗過一次）。✅ **1.3.0 起 CI 的 Windows job 會用 5.1 parse 並檢查 BOM**（§3 ⑦ 已完成） |
 
 ### 1.2.1 修了什麼（歷史，2.0.0 後已無對象）
