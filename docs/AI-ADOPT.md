@@ -86,6 +86,20 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 - 不開啟「Automatically delete head branches」。發版 PR 合併後會刪除 develop。
 - Gate 未通過不得合併。無法設定分支保護的 repo 由 Branch Guard 事後開 Issue。
 
+### 選配：合併後刪除來源分支
+
+不開自動刪除時，已合併的分支會留在遠端。詢問使用者是否由 AI 代理於合併後刪除；採用時：
+
+- `develop` 與正式分支一律不刪；`hotfix/*` 合回 develop 後才刪。
+- 來源分支非 develop／正式分支時，以 `gh pr merge <n> --merge --delete-branch` 合併。
+  發版 PR（develop → 正式分支）**不得**加 `--delete-branch`，否則 develop 會被刪除。
+- 本機分支以 `git branch -d` 刪除（未合併者會被拒絕），不使用 `-D`。
+- 既有殘留分支：以下指令列出已合併者，經使用者確認後以 `git push origin --delete <分支>` 刪除。
+  ```bash
+  git fetch --prune
+  git branch -r --merged origin/<正式分支> | grep -vE 'origin/(HEAD|develop|<正式分支>)$'
+  ```
+
 ## 8. 選配：自動 release tag
 
 正式分支每收到一次 push（發版 PR、hotfix），自動打 tag 並建立 GitHub Release。詢問使用者是否需要；需要時：
@@ -113,4 +127,5 @@ bash /tmp/adopt.sh --ref v2 --flow develop      # 既有 branch-guard.yml 的 no
 - [ ] 兩個 Gate 的結果與處理過的掃描項目
 - [ ] 需使用者以 admin 權限處理的項目（Default branch、分支保護、Issues）
 - [ ] 是否啟用自動 release tag
+- [ ] 是否採用合併後刪除來源分支，及已刪除的分支
 - [ ] 建議使用者於本 repo 設定 **Watch → Custom → Releases**，以收到公版更新通知
