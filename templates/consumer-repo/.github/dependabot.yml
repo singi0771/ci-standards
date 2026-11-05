@@ -1,4 +1,5 @@
 # Dependabot（GitHub 內建、免費）—— 已對準 Python + Docker 專案
+# ⓘ 導入腳本不複製這份：它依偵測到的技術與 --flow 另外產生 dependabot.yml。這份供手動導入參考。
 #
 # 每個 Dependabot PR 都會跑一整套 CI + Security（十幾分鐘），所以頻率要看著用：
 #   - pip：每週，但小版本併成一個 PR（等於每週最多 1–2 個 PR）

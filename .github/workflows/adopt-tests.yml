@@ -160,9 +160,11 @@ jobs:
         run: |
           P="$(mktemp -d)"
           mk_fresh() {
-            ( cd "$1" && git init -q . && git commit -q --allow-empty -m init \
+            # develop 分支 → develop 流程；子目錄 Dockerfile 與 package.json → dependabot 的 directories / npm
+            ( cd "$1" && git init -q . && git commit -q --allow-empty -m init && git branch develop \
               && printf 'FROM python:3.12\n' > Dockerfile && printf 'flask\n' > requirements.txt \
-              && mkdir -p bin src/App && printf '#!/bin/sh\ntrue\n' > bin/x.SH \
+              && mkdir -p bin src/App deploy && printf '#!/bin/sh\ntrue\n' > bin/x.SH \
+              && printf 'FROM alpine\n' > deploy/Dockerfile && printf '{}\n' > package.json \
               && printf '<Project/>\n' > src/App/App.csproj \
               && printf '\357\273\2773.11\r\n' > .python-version )
           }

@@ -6,10 +6,10 @@
 - 支援私有 repo，全部使用開源工具，不需要 GitHub Advanced Security。
 - 安全掃描：Semgrep、OSV-Scanner、Trivy、gitleaks、zizmor。
 - CI：Python（ruff、pytest）、.NET（format、build、test）、Docker build 與 hadolint、actionlint、shellcheck、PR 來源分支政策。
-- Branch Guard：main 收到直接 push、強制 push，或 Gate 未通過即 merge 時，開 Issue 通知指定人員。
+- Branch Guard：正式分支（develop 流程含 develop）收到直接 push、強制 push，或 Gate 未通過即 merge 時，開 Issue 通知指定人員。
 - 每條線各有一個總結 job（`Security Gate`、`CI Gate`），分支保護只需設定這兩個 required check。
 
-導入前請先閱讀 [已知限制](docs/KNOWN-LIMITATIONS.md)。
+導入前請先閱讀 [已知限制](docs/KNOWN-LIMITATIONS.md)。由 AI 代理導入時，請其依 [`docs/AI-ADOPT.md`](docs/AI-ADOPT.md) 執行。
 
 ---
 
@@ -85,17 +85,19 @@
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/singi0771/ci-standards/v2/scripts/adopt.ps1 -OutFile $env:TEMP\adopt.ps1
-powershell -ExecutionPolicy Bypass -File $env:TEMP\adopt.ps1 -Notify "@帳號 @組織/team"
+powershell -ExecutionPolicy Bypass -File $env:TEMP\adopt.ps1 -Notify "@帳號 @組織/team" -Flow develop
 ```
 
 **macOS / Linux / Git Bash**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/singi0771/ci-standards/v2/scripts/adopt.sh -o /tmp/adopt.sh
-bash /tmp/adopt.sh --notify "@帳號 @組織/team"
+bash /tmp/adopt.sh --notify "@帳號 @組織/team" --flow develop
 ```
 
-- `-Notify` / `--notify` 指定 [Branch Guard](#branch-guard) 的通知對象，於導入時決定。未指定則不建立 `branch-guard.yml`。
+- `-Notify` / `--notify` **必填**，指定 [Branch Guard](#branch-guard) 的通知對象。未指定時腳本中止；既有 `branch-guard.yml` 的 `notify` 已有值時可省略。
+- `-Flow` / `--flow` 指定分支流程：`develop`（功能分支 → develop → 正式分支）或 `trunk`。未指定時，有 develop 分支即視為 `develop`。見[分支模型](#分支模型)。
+- 正式分支依序取 origin/HEAD、`main`、`master`，可用 `-Prod` / `--prod` 指定。
 - 加上 `-DryRun`（PowerShell）或 `--dry-run`（bash）只列出偵測結果與預計變更，不寫入檔案。
 - `-ExecutionPolicy Bypass` 只作用於該次執行，不變更系統設定。
 - 腳本會以 HTTPS 淺層 clone 公版範本至暫存目錄，結束後自動刪除。
@@ -105,10 +107,12 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team"
 | 項目 | 行為 |
 |---|---|
 | 技術偵測 | 偵測 Python、.NET、Dockerfile、shell script，寫入對應的 `run-*` 參數 |
-| `workflows/ci.yml`、`workflows/security.yml` | 不存在則新增；已存在則升級：`uses:` 改為 `@v2`、移除已廢除的 input、補上新 input，既有設定值保留 |
-| `workflows/branch-guard.yml` | 有指定通知對象才新增，`notify` 寫入正規化後的名單；已存在則依上列規則升級，既有 `notify` 保留 |
-| `zizmor.yml`、`dependabot.yml`、`pull_request_template.md` | 不存在則新增；已存在則不覆蓋，另存 `.new` 供比對 |
-| 其他 | 不刪除檔案、不 commit、不推送 |
+| `workflows/ci.yml`、`workflows/security.yml` | 不存在則新增；已存在則升級：`uses:` 改為 `@v2`、移除已廢除的 input、補上新 input，既有設定值保留。`develop` 流程補上[來源分支政策](#來源分支政策)（正式分支只收 develop、`hotfix/*`） |
+| `workflows/branch-guard.yml` | 不存在則新增，`notify` 寫入正規化後的名單，守護正式分支（`develop` 流程含 develop）；已存在則依上列規則升級，既有 `notify` 與自訂的 `branches` 保留 |
+| `dependabot.yml` | 依偵測結果產生，只列實際使用的生態系（pip、npm、nuget、docker、github-actions）；`develop` 流程每一項設 `target-branch: "develop"`。已存在則不覆蓋，另存 `.new` |
+| `zizmor.yml`、`pull_request_template.md` | 不存在則新增；已存在則不覆蓋，另存 `.new` 供比對 |
+| input 版本核對 | 本機公版查得到 `--ref` 時，核對呼叫端 `with:` 的 input 皆存在於該版；不存在者會造成 `startup_failure`，於報告列出 |
+| 其他 | 不刪除檔案、不 commit、不推送、不連 GitHub API |
 
 參數：
 
@@ -118,8 +122,10 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team"
 | `--ref <tag>` | `-Ref <tag>` | 呼叫端指向的公版版本，預設 `v2` |
 | `--std <path>` | `-Std <path>` | 使用本機既有的公版 clone，不另行下載 |
 | `--uses-repo <owner/repo>` | `-UsesRepo <owner/repo>` | 公版遷移至組織後，替換 `uses:` 的 owner/repo |
-| `--notify "<名單>"` | `-Notify "<名單>"` | Branch Guard 通知對象：GitHub 帳號或 team，空白或逗號分隔，`@` 可省略。格式不符時中止 |
-| `--dry-run` | `-DryRun` | 僅預覽 |
+| `--notify "<名單>"` | `-Notify "<名單>"` | 必填。Branch Guard 通知對象：GitHub 帳號或 team，空白或逗號分隔，`@` 可省略。格式不符時中止 |
+| `--flow <develop\|trunk>` | `-Flow <develop\|trunk>` | 分支流程。預設依有無 develop 分支判斷 |
+| `--prod <branch>` | `-Prod <branch>` | 正式分支名稱。預設依序取 origin/HEAD、`main`、`master` |
+| `--dry-run` | `-DryRun` | 僅預覽。缺少 `--notify` 時只提醒、不中止 |
 
 ### 後續步驟
 
@@ -138,8 +144,11 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team"
 3. **處理首次結果**：首次執行通常會有掃描結果。於 Actions → 該 run → Summary 查看失敗項目，
    依[疑難排解](#疑難排解)與[誤判抑制](#誤判抑制)處理。發現項目過多時可先以 `fail-on-findings: false` 過渡，見[導入過渡期](#導入過渡期)。
 4. **設定分支保護**：兩個 Gate 至少執行過一次後，見[分支保護](#分支保護)。無法設定時見[無法設定分支保護時](#無法設定分支保護時)。
+5. **確認 repo 設定**：啟用 Issues（Branch Guard 需要）；develop 流程將 Default branch 設為 `develop`；
+   不開啟「Automatically delete head branches」（發版 PR 合併後會刪除 develop）。
+6. **合併規則**：develop → 正式分支以 merge commit 合併，不使用 squash（兩分支歷史分岔後，發版 PR 會衝突，衝突中的 PR 不觸發檢查）。
 
-採用 develop 流程（功能分支 → develop → main）時，另需設定來源分支政策，見[分支模型](#分支模型)。
+選配：正式分支收到 push 時自動打 release tag、建立 GitHub Release，範本見 [`templates/optional/release-tag/`](templates/optional/release-tag/.github)，用法見 [`docs/AI-ADOPT.md`](docs/AI-ADOPT.md#8-選配自動-release-tag)。
 
 ### 導入檢查清單
 
@@ -150,7 +159,9 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team"
 - [ ] 無殘留 `.new` 檔
 - [ ] PR 上 `ci / CI Gate`、`security / Security Gate` 皆通過
 - [ ] 已設定分支保護，或已於 `CONTRIBUTING.md` / PR 範本註明「兩個 Gate 通過後才可 merge」
-- [ ] `branch-guard.yml` 的 `notify` 為實際負責人；repo 已啟用 Issues
+- [ ] `branch-guard.yml` 的 `notify` 為實際負責人、`branches` 含正式分支（develop 流程含 develop）；repo 已啟用 Issues
+- [ ] develop 流程：`ci.yml` 設有 `restricted-base-branches`，`dependabot.yml` 每一項設 `target-branch: "develop"`
+- [ ] 報告中沒有「在 vX 不存在」的 input
 
 ### 呼叫端範例
 
@@ -186,7 +197,7 @@ jobs:
 | `workflows/ci.yml` | 呼叫 CI 公版 |
 | `workflows/security.yml` | 呼叫安全掃描公版；每週一 03:00 UTC 另有排程重掃 |
 | `zizmor.yml` | zizmor 放行規則（已放行指向公版的版本 tag） |
-| `dependabot.yml` | pip 每週；docker、github-actions 每月。`nuget`、`npm` 範例在檔尾註解 |
+| `dependabot.yml` | 導入腳本依偵測結果產生：pip、npm、nuget 每週；docker、github-actions 每月。範本為手動導入用的參考 |
 | `pull_request_template.md` | PR 檢查清單 |
 
 ---
@@ -466,12 +477,16 @@ with:
 功能分支 ──PR──▶ develop ──PR──▶ main
 ```
 
-| 目標 | 設定 |
-|---|---|
-| develop、main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main develop` |
-| main 只接受 develop 的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop"` |
-| develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` |
-| 新 PR 預設發往 develop | Settings → General → Default branch 設為 `develop` |
+導入腳本加上 `--flow develop`（或已有 develop 分支）時，下表標示「導入腳本」的項目會自動設定。
+
+| 目標 | 設定 | 由誰設定 |
+|---|---|---|
+| develop、main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main develop` | 手動（需 admin） |
+| main 只接受 develop、hotfix 的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop hotfix/*"` | 導入腳本 |
+| develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` | 導入腳本 |
+| Dependabot PR 發往 develop | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
+| 新 PR 預設發往 develop | Settings → General → Default branch 設為 `develop` | 手動（需 admin） |
+| 發版 PR 不破壞歷史 | develop → main 以 merge commit 合併，不使用 squash；不開「Automatically delete head branches」 | 團隊規則 |
 
 分支名稱可自訂，腳本與 input 皆依實際填寫的名稱運作。
 
@@ -666,6 +681,7 @@ ci-standards/
 │   ├── setup-branch-protection.sh   分支保護設定（需要 gh）
 │   └── test-adopt.sh                導入腳本回歸測試
 ├── templates/consumer-repo/.github/ 呼叫端範本
+├── templates/optional/              選配範本（自動 release tag），導入腳本不使用
 ├── docs/
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
@@ -705,6 +721,7 @@ ci-standards/
 |---|---|
 | [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) | 已知限制 |
 | [`docs/FLOW.md`](docs/FLOW.md) | PR 流程與各檔案職責 |
+| [`docs/AI-ADOPT.md`](docs/AI-ADOPT.md) | 以 AI 代理導入的步驟 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 導入腳本細節、內網與離線環境 |
 | [`docs/SETUP.md`](docs/SETUP.md) | 管理者：發佈、方案與額度 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 遷移至組織 |

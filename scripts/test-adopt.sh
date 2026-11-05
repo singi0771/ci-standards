@@ -14,9 +14,14 @@
 set -euo pipefail
 
 STD="$(cd "$(dirname "$0")/.." && pwd)"
-ADOPT="$STD/scripts/adopt.sh"
+ADOPT_RAW="$STD/scripts/adopt.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+# --notify 是必填（2.2.0 起）。大部分情境測的不是通知，統一由這支包裝補上預設值；
+# 測試自己給的 --notify 在後面，會蓋掉這個預設。要測「沒給 --notify」時直接用 $ADOPT_RAW。
+ADOPT="$WORK/adopt-with-notify"
+printf '#!/usr/bin/env bash\nexec "%s" --notify "@tester" "$@"\n' "$ADOPT_RAW" > "$ADOPT"
+chmod +x "$ADOPT"
 
 # 立刻離開呼叫者的目錄。
 # 2026-08-08 的事故：舊版 new_repo 用命令替換取路徑，cd 只發生在子 shell，
@@ -392,11 +397,16 @@ has "$GUARD" 'issues: write'                         "branch-guard.yml 給了開
 hasnt "$GUARD" 'paths-ignore:'                       "branch-guard.yml 不加 paths-ignore（直接推文件也要抓）"
 
 new_repo guard-none
-OUT="$("$ADOPT" --std "$STD" 2>&1)"
-if [ ! -e "$GUARD" ]; then ok "沒給 --notify 時不建 branch-guard.yml"; else bad "沒給 --notify 不該建 branch-guard.yml"; fi
+if OUT="$("$ADOPT_RAW" --std "$STD" 2>&1)"; then bad "沒給 --notify 時應中止"; else ok "沒給 --notify 時中止（Branch Guard 必須有通知對象）"; fi
 case "$OUT" in
-  *"沒有指定 --notify"*) ok "沒給 --notify 時報告會點名" ;;
-  *) bad "沒給 --notify 時報告沒有提醒" ;;
+  *"必須指定 --notify"*) ok "中止訊息說明要給 --notify" ;;
+  *) bad "中止訊息沒有說明 --notify（實際輸出：${OUT}）" ;;
+esac
+if [ ! -d .github ]; then ok "沒給 --notify 而中止時沒有動任何檔案"; else bad "沒給 --notify 而中止時不該動檔案"; fi
+OUT="$("$ADOPT_RAW" --std "$STD" --dry-run 2>&1)"
+case "$OUT" in
+  *"必須指定 --notify"*"--dry-run"*) ok "--dry-run 不中止，但會先提醒要給 --notify" ;;
+  *) bad "--dry-run 沒有提醒 --notify（實際輸出：${OUT}）" ;;
 esac
 
 new_repo guard-bad
@@ -411,16 +421,103 @@ printf 'jobs:\n  guard:\n    uses: singi0771/ci-standards/.github/workflows/bran
 has   "$GUARD" 'notify: "@keep-me"'                     "升級時保留既有的 notify（不被 --notify 覆寫）"
 has   "$GUARD" 'branch-guard-reusable.yml@v2   # 公版'   "升級時 branch-guard 的 uses: 也更新 ref"
 hasnt "$GUARD" 'obsolete'                               "升級時移除 branch-guard 已廢除的 input"
-"$ADOPT" --std "$STD" >/dev/null
-if [ -f "$GUARD" ]; then ok "已有 branch-guard.yml 時不給 --notify 也照常合併"; else bad "既有 branch-guard.yml 不見了"; fi
+if "$ADOPT_RAW" --std "$STD" >/dev/null 2>&1 && [ -f "$GUARD" ]; then
+  ok "既有 branch-guard.yml 的 notify 有值時，不給 --notify 也照常合併"
+else
+  bad "既有 notify 有值時不給 --notify 應照常合併"
+fi
 
 # 既有的 notify 是空的（例如手動照範本複製）→ 這次有給 --notify 就補上
 new_repo guard-empty
 mkdir -p .github/workflows
 cp "$STD/templates/consumer-repo/.github/workflows/branch-guard.yml" "$GUARD"
+if "$ADOPT_RAW" --std "$STD" >/dev/null 2>&1; then bad "既有 notify 是空字串又沒給 --notify 時應中止"; else ok "既有 notify 是空字串又沒給 --notify 時中止"; fi
 "$ADOPT" --std "$STD" --notify "@filled" >/dev/null
 has "$GUARD" 'notify: "@filled"' "既有 notify 是空字串時，用 --notify 補上"
 check "notify 只出現一次" "$(grep -c 'notify:' "$GUARD")" "1"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 M：分支流程（--flow / --prod）與依偵測產生 dependabot.yml\n'
+# ═════════════════════════════════════════════════════════════
+DEP=".github/dependabot.yml"
+# 有 develop 分支 → 自動判斷為 develop 流程
+new_repo flow-develop
+PRODB="$(git symbolic-ref --short HEAD)"   # git init 的預設分支（main 或 master，看機器設定）
+git branch develop
+mkdir -p svc/a svc/b && printf 'FROM alpine\n' > svc/a/Dockerfile && printf 'FROM alpine\n' > svc/b/Dockerfile
+printf 'flask\n' > requirements.txt
+OUT="$("$ADOPT" --std "$STD" 2>&1)"
+case "$OUT" in *"分支流程     : develop"*) ok "有 develop 分支時自動判斷為 develop 流程" ;; *) bad "沒有判斷成 develop 流程" ;; esac
+has "$CI"    "restricted-base-branches: \"$PRODB\""      "develop 流程：ci.yml 加上 restricted-base-branches（正式分支）"
+has "$CI"    'allowed-head-branches: "develop hotfix/*"' "develop 流程：ci.yml 加上 allowed-head-branches"
+has "$GUARD" "branches: [$PRODB, develop]"               "develop 流程：branch-guard 守正式分支與 develop"
+check "develop 流程：dependabot 每一項都發到 develop" "$(grep -c 'target-branch: "develop"' "$DEP")" "3"
+has "$DEP"   'package-ecosystem: "pip"'                  "有 requirements.txt → dependabot 有 pip"
+has "$DEP"   '      - "/svc/a"'                                "多個 Dockerfile 目錄 → docker 用 directories 列出"
+hasnt "$DEP" 'package-ecosystem: "npm"'                  "沒有 package.json → 不列 npm"
+
+# 沒有 develop 分支 → trunk；--prod 指定正式分支名稱
+new_repo flow-trunk
+"$ADOPT" --std "$STD" --prod release >/dev/null
+hasnt "$CI"  '      restricted-base-branches:'   "trunk 流程：不加來源分支政策"
+has "$GUARD" 'branches: [release]'           "--prod 指定的正式分支寫進 branch-guard"
+hasnt "$DEP" 'target-branch'                 "trunk 流程：dependabot 不加 target-branch"
+has "$DEP"   'package-ecosystem: "github-actions"' "dependabot 一定有 github-actions"
+hasnt "$DEP" 'package-ecosystem: "pip"'      "沒有 Python 相依清單 → 不列 pip"
+yaml_ok() { python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))" "$1" >/dev/null 2>&1; }
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  if yaml_ok "$DEP"; then ok "產生的 dependabot.yml 可解析"; else bad "產生的 dependabot.yml 不是合法 YAML"; fi
+else
+  skip "dependabot.yml YAML 解析檢查（沒有 python3 + PyYAML）"
+fi
+
+# 明確指定 develop 流程，但還沒有 develop 分支 → 照做，並提示建立指令
+new_repo flow-forced
+OUT="$("$ADOPT" --std "$STD" --flow develop --prod main 2>&1)"
+has "$CI" 'restricted-base-branches: "main"' "--flow develop 沒有 develop 分支也照設定"
+case "$OUT" in *"git branch develop origin/main"*) ok "沒有 develop 分支時提示建立指令" ;; *) bad "沒有提示建立 develop" ;; esac
+if "$ADOPT" --std "$STD" --flow gitflow >/dev/null 2>&1; then bad "--flow 不合法時應中止"; else ok "--flow 只接受 develop / trunk"; fi
+
+# 升級：develop 流程補上缺的政策與守 develop；使用者自訂的分支寫法不動
+new_repo flow-upgrade
+git branch develop
+mkdir -p .github/workflows
+printf 'on:\n  push:\n    branches: [main]\njobs:\n  guard:\n    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2\n    with:\n      notify: "@owner"\n' > "$GUARD"
+printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2\n    with:\n      run-python: false\n' > "$CI"
+OUT="$("$ADOPT_RAW" --std "$STD" --prod main 2>&1)"
+has "$GUARD" 'branches: [main, develop]'      "升級：只守正式分支的 branch-guard 補上 develop"
+has "$GUARD" 'notify: "@owner"'               "升級：既有 notify 保留"
+has "$CI"    'restricted-base-branches: "main"' "升級：ci.yml 補上來源分支政策"
+case "$OUT" in *"加上來源分支政策"*"on.push.branches 加上 develop"*) ok "升級時報告列出分支流程的變更" ;; *) bad "升級報告沒有列出分支流程變更（實際輸出：${OUT}）" ;; esac
+new_repo flow-custom
+git branch develop
+mkdir -p .github/workflows
+printf 'on:\n  push:\n    branches: [main, "release/*"]\njobs:\n  guard:\n    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2\n    with:\n      notify: "@owner"\n' > "$GUARD"
+"$ADOPT_RAW" --std "$STD" --prod main >/dev/null
+has "$GUARD" 'branches: [main, "release/*"]'  "使用者自訂的 branches 寫法不動"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 N：with: 的 input 要存在於 --ref 指定的版本\n'
+# ═════════════════════════════════════════════════════════════
+# 本機公版比 --ref 新時，寫進去的 input 可能還沒發佈 → workflow startup_failure。要明確警告。
+REF_STD="$WORK/ref-std"
+mkdir -p "$REF_STD/.github/workflows"
+cp -R "$STD/templates" "$REF_STD/"
+cp "$STD/.github/workflows/ci-reusable.yml" "$STD/.github/workflows/security-reusable.yml" \
+   "$STD/.github/workflows/branch-guard-reusable.yml" "$REF_STD/.github/workflows/"
+( cd "$REF_STD" && git init -q . && git add -A && git -c user.email=t@t -c user.name=t commit -qm base && git tag vT )
+# 工作目錄的 ci-reusable 多一個還沒發佈的 input（vT 沒有）
+awk '{ print } /^    inputs:$/ && !d { print "      brand-new-input:"; print "        type: string"; print "        default: \"\""; d=1 }' \
+  "$STD/.github/workflows/ci-reusable.yml" > "$REF_STD/.github/workflows/ci-reusable.yml"
+new_repo ref-check
+mkdir -p .github/workflows
+printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@vT\n    with:\n      brand-new-input: "x"\n' > "$CI"
+OUT="$("$ADOPT" --std "$REF_STD" --ref vT 2>&1)"
+case "$OUT" in *"brand-new-input（vT 還沒有這個 input）"*) ok "--ref 版本沒有的 input 會被點名" ;; *) bad "沒有點名 --ref 版本沒有的 input（實際輸出：${OUT}）" ;; esac
+has "$CI" 'brand-new-input: "x"' "只警告、不自動刪（公版工作目錄認得這個 input）"
+new_repo ref-unknown
+OUT="$("$ADOPT" --std "$REF_STD" --ref no-such-ref 2>&1)"
+case "$OUT" in *"本機公版查不到 no-such-ref"*) ok "本機查不到 --ref 時說明沒有核對" ;; *) bad "查不到 --ref 時沒有說明（實際輸出：${OUT}）" ;; esac
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 H：公版 reusable 讀不到 inputs 時要中止，不能把使用者的設定全刪掉\n'

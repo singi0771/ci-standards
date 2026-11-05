@@ -8,7 +8,9 @@
 #   ./adopt.sh --std ~/ci-standards  # 指定公版 clone 位置
 #   ./adopt.sh --ref v2.0.0          # 釘死特定版本（預設 v2）
 #   ./adopt.sh --uses-repo ORG/ci-standards   # 搬到組織後換掉 uses: 的 owner/repo
-#   ./adopt.sh --notify "@alice @acme/team"   # Branch Guard 違規時通知誰（不給就不建 branch-guard.yml）
+#   ./adopt.sh --notify "@alice @acme/team"   # Branch Guard 違規時通知誰（必填，已設定過的專案可省略）
+#   ./adopt.sh --flow develop        # 分支流程：develop（功能分支 → develop → 正式分支）或 trunk；預設依有無 develop 分支判斷
+#   ./adopt.sh --prod master         # 正式分支名稱；預設取 origin/HEAD，其次 main、master
 #
 # 相依：只需要 git 與內建 shell（awk / find / cp）。
 #   刻意不用 gh / jq / yq / python / curl —— 受管制的公司 Windows 上
@@ -27,6 +29,8 @@ REF="v2"
 USES_REPO="$DEFAULT_USES_REPO"
 DRY_RUN=false
 NOTIFY=""
+FLOW=""
+PROD=""
 
 die()  { printf '❌ %s\n' "$1" >&2; exit 1; }
 info() { printf '%s\n' "$1"; }
@@ -39,8 +43,10 @@ while [ $# -gt 0 ]; do
     --ref)       REF="${2:?--ref 需要一個 tag/branch}";    shift 2 ;;
     --uses-repo) USES_REPO="${2:?--uses-repo 需要 owner/repo}"; shift 2 ;;
     --notify)    NOTIFY="${2?--notify 需要通知對象，例如 @alice @acme/team}"; shift 2 ;;
+    --flow)      FLOW="${2:?--flow 需要 develop 或 trunk}"; shift 2 ;;
+    --prod)      PROD="${2:?--prod 需要正式分支名稱}";     shift 2 ;;
     --dry-run)   DRY_RUN=true; shift ;;
-    -h|--help)   sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,23p' "$0"; exit 0 ;;
     *) die "不認得的參數：$1（用 --help 看用法）" ;;
   esac
 done
@@ -62,6 +68,11 @@ if [ -n "$NOTIFY" ]; then
   set +f
   NOTIFY="$_norm"
 fi
+case "$FLOW" in ''|develop|trunk) ;; *) die "--flow 只接受 develop 或 trunk（收到：$FLOW）" ;; esac
+case "$PROD" in
+  '') ;;
+  *[!A-Za-z0-9/._-]*|/*|*/) die "--prod 不是合法的分支名稱：$PROD" ;;
+esac
 
 # 腳本自己的位置要在任何 cd 之前算好 —— $0 可能是相對路徑（./scripts/adopt.sh），
 # cd 到目標 repo 之後再 dirname 就會解到錯的地方（或根本進不去）。
@@ -111,9 +122,12 @@ if [ -d "$TARGET_ROOT/templates/consumer-repo/.github" ]; then
 fi
 
 # ── 公版範本 ─────────────────────────────────────────────────
-TMP_CLONE=""
+TMP_CLONE=""; GEN_DIR=""
 # trap 要在 clone 之前裝好：clone 失敗會走 die → exit，EXIT trap 才清得到暫存目錄
-cleanup_tmp() { if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi; }
+cleanup_tmp() {
+  if [ -n "$TMP_CLONE" ]; then rm -rf "$TMP_CLONE"; fi
+  if [ -n "$GEN_DIR" ]; then rm -rf "$GEN_DIR"; fi
+}
 trap cleanup_tmp EXIT
 if [ -z "$STD" ]; then
   CANDS="$SCRIPT_DIR/.."
@@ -185,6 +199,35 @@ PYVER="3.12"
 # 留著的話 python-version 會變成「BOM + 3.11」，setup-python 直接失敗（adopt.ps1 讀檔時會自動去掉）
 # LC_ALL=C：macOS 的 BSD tr 在 UTF-8 locale 下按「字元」處理，\357 這種單一位元組刪不掉
 if [ -f .python-version ]; then PYVER="$(LC_ALL=C tr -d '\357\273\277 \r\n\t' < .python-version)"; fi
+# dependabot.yml 用：根目錄有相依清單才有 pip / npm 可更新（沒有清單時 Dependabot 會報錯）
+HAS_PY_MANIFEST=false
+for f in requirements.txt pyproject.toml setup.py Pipfile; do if [ -f "$f" ]; then HAS_PY_MANIFEST=true; fi; done
+HAS_NPM=false
+if [ -f package.json ]; then HAS_NPM=true; fi
+# Dockerfile 所在目錄（/ 開頭、位元組序排序、去重），給 dependabot 的 docker 項目
+DOCKER_DIRS="$(find . \( -path ./.git -o -name node_modules \) -prune -o -type f \( -name Dockerfile -o -name '*.Dockerfile' -o -name 'Dockerfile.*' \) ! -name '*.dockerignore' -print 2>/dev/null \
+  | sed -e 's|/[^/]*$||' -e 's|^\.||' -e 's|^$|/|' | LC_ALL=C sort -u)"
+
+# ── 分支流程 ─────────────────────────────────────────────────
+# 正式分支：origin/HEAD 指向的分支，其次本機或遠端有的 main、master，都沒有就當 main。
+# 只看本機已有的 ref，不連網路（腳本原則：導入是純檔案操作）。
+has_ref() { git show-ref -q --verify "refs/heads/$1" || git show-ref -q --verify "refs/remotes/origin/$1"; }
+if [ -z "$PROD" ]; then
+  PROD="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  PROD="${PROD#origin/}"
+  if [ -z "$PROD" ]; then
+    for b in main master; do if has_ref "$b"; then PROD="$b"; break; fi; done
+  fi
+  if [ -z "$PROD" ]; then PROD="main"; fi
+fi
+FLOW_HOW="指定"
+if [ -z "$FLOW" ]; then
+  FLOW_HOW="依有無 develop 分支判斷"
+  if has_ref develop; then FLOW=develop; else FLOW=trunk; fi
+fi
+if [ "$FLOW" = develop ] && [ "$PROD" = develop ]; then die "--flow develop 時正式分支不能是 develop（用 --prod 指定 main 或 master）"; fi
+HAS_DEVELOP=false
+if has_ref develop; then HAS_DEVELOP=true; fi
 
 # ── 判斷模式：全新安裝 vs 升級 ───────────────────────────────
 MODE="install"
@@ -200,6 +243,11 @@ info "  shell script : $HAS_SH"
 info "  .NET         : ${HAS_DOTNET}（方案檔 ${DOTNET_SLN}、專案檔 ${DOTNET_PROJ}）"
 if [ "$DOTNET_SLN" -gt 1 ] || { [ "$DOTNET_SLN" -eq 0 ] && [ "$DOTNET_PROJ" -gt 1 ]; }; then
   warn "找到不只一個 .NET 方案 / 專案檔，公版無法自動決定要建置哪一個 —— 導入後請在 ci.yml 的 with: 加上 dotnet-project: \"<路徑>\""
+fi
+info "  正式分支     : $PROD"
+info "  分支流程     : ${FLOW}（${FLOW_HOW}）"
+if [ "$FLOW" = develop ] && [ "$HAS_DEVELOP" = false ]; then
+  warn "還沒有 develop 分支，導入後請建立（指令見最後的「接下來」）"
 fi
 info ""
 
@@ -323,7 +371,7 @@ replace_with_block() {
   mv "$f.tmp" "$f"
 }
 
-CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""; NOWITH_REPORT=""; MISSING_TPL=""; GUARD_SKIPPED=false
+CREATED=""; MERGED=""; KEPT=""; DROPPED_REPORT=""; NOWITH_REPORT=""; MISSING_TPL=""; BRANCH_REPORT=""
 
 # 公版 reusable 宣告的 input 清單。讀不到（reusable 不見了、或 inputs: 的縮排變了）時一定要停 ——
 # 空清單會讓 filter_with_block 把使用者 with: 裡的每一個 key 都當成「已廢除」刪掉。
@@ -341,7 +389,6 @@ done
 # ── 兩類檔案，兩種策略 ───────────────────────────────────────
 # CONFIGURED：真的帶專案設定（severity / python-version / 自訂 cron…）
 #   → 就地合併，保留使用者的值與 on: 區塊。
-# branch-guard.yml 一定要有通知對象：沒給 --notify 又還沒有這支時就不建，報告裡點名。
 CONFIGURED="ci.yml security.yml branch-guard.yml"
 # PROJECT_OWNED：內容是專案專屬的，**絕不覆蓋**。已存在就只放一份 .new 供比對。
 #   zizmor.yml 也算：使用者會在裡面放自己的放行規則。
@@ -354,6 +401,12 @@ run-docker-build: $HAS_DOCKERFILE
 run-hadolint: $HAS_DOCKERFILE
 run-actionlint: true
 run-shellcheck: $HAS_SH"
+# develop 流程：正式分支只收 develop 與 hotfix/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+if [ "$FLOW" = develop ]; then
+  CI_ADDITIONS="$CI_ADDITIONS
+restricted-base-branches: \"$PROD\"
+allowed-head-branches: \"develop hotfix/*\""
+fi
 
 # security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
 # run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
@@ -362,19 +415,24 @@ run-zizmor: true"
 
 GUARD_ADDITIONS=""
 if [ -n "$NOTIFY" ]; then GUARD_ADDITIONS="notify: \"$NOTIFY\""; fi
-# 還沒有 branch-guard.yml、又沒給 --notify → 不建（建了也沒人收得到通知）
-skip_guard() { [ "$1" = branch-guard.yml ] && [ ! -f ".github/workflows/$1" ] && [ -z "$NOTIFY" ]; }
-warn_guard_skipped() {
-  warn "沒有指定 --notify，未建立 .github/workflows/branch-guard.yml（直接 push / 強制 merge 到 main 時開 Issue 通知）。
-    要啟用請加上通知對象重跑：--notify \"@帳號 @組織/team\""
-}
+# Branch Guard 一定要有通知對象：沒有分支保護時，直接 push、強制 merge 只能靠它發現。
+# 既有 branch-guard.yml 的 notify 已有值才可以不給 --notify。
+GUARD_FILE=".github/workflows/branch-guard.yml"
+NEED_NOTIFY=false
+if [ -z "$NOTIFY" ]; then
+  if [ ! -f "$GUARD_FILE" ] || ! grep -qE '^      notify: "[^"]+"' "$GUARD_FILE"; then NEED_NOTIFY=true; fi
+fi
+NOTIFY_MSG="必須指定 --notify：Branch Guard 在直接 push、強制 push、Gate 沒綠就 merge 時開 Issue 通知這些人。
+    例：--notify \"@帳號 @組織/team\"（GitHub 帳號或 team，通常是專案負責人）"
+# 要守的分支：正式分支；develop 流程連 develop 一起守
+GUARD_BRANCHES="[$PROD]"
+if [ "$FLOW" = develop ]; then GUARD_BRANCHES="[$PROD, develop]"; fi
 
 plan_line() { info "  $1"; }
 
 info "計畫："
 for name in $CONFIGURED; do
-  if skip_guard "$name"; then plan_line "－ 略過  .github/workflows/${name}（未指定 --notify）"
-  elif [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
+  if [ -f ".github/workflows/$name" ]; then plan_line "↻ 合併  .github/workflows/${name}（保留既有參數、更新 uses:、移除已廢除的 input）"
   else plan_line "＋ 新增  .github/workflows/$name"; fi
 done
 for rel in $PROJECT_OWNED; do
@@ -402,6 +460,10 @@ warn_copilot_leftovers() {
   info ""
 }
 warn_copilot_leftovers
+
+if [ "$NEED_NOTIFY" = true ]; then
+  if [ "$DRY_RUN" = true ]; then warn "$NOTIFY_MSG"; info ""; else die "$NOTIFY_MSG"; fi
+fi
 
 if [ "$DRY_RUN" = true ]; then
   info "（--dry-run：到此為止，沒有動任何檔案）"
@@ -472,14 +534,15 @@ patch_v2_triggers() {
 for name in $CONFIGURED; do
   dst=".github/workflows/$name"
   known="$(known_for "$name")"
-  if skip_guard "$name"; then GUARD_SKIPPED=true; continue; fi
 
   if [ ! -f "$dst" ]; then
     cp "$TPL/workflows/$name" "$dst"
     case "$name" in
       ci.yml)       replace_with_block "$dst" "$(printf '%s\n' "$CI_ADDITIONS"  | sed 's/^/      /')" ;;
       security.yml) replace_with_block "$dst" "$(printf '%s\n' "$SEC_ADDITIONS" | sed 's/^/      /')" ;;
-      branch-guard.yml) replace_with_block "$dst" "      $GUARD_ADDITIONS" ;;
+      branch-guard.yml)
+        replace_with_block "$dst" "      $GUARD_ADDITIONS"
+        replace_lines "$dst" '    branches: [main]' "    branches: $GUARD_BRANCHES" ;;
     esac
     patch_uses "$dst"
     CREATED="$CREATED $name"
@@ -489,12 +552,25 @@ for name in $CONFIGURED; do
     # 留著 \r 的話，awk 會把它當成 ref 的一部分，換完的那一行就少了 \r、整份檔案行尾混雜。
     tr -d '\r' < "$dst" > "$dst.tmp" && mv "$dst.tmp" "$dst"
     case "$name" in
-      ci.yml)       filter_with_block "$dst" "$known" "$CI_ADDITIONS" ;;
+      ci.yml)
+        _had_policy=false
+        if grep -q '^      restricted-base-branches:' "$dst"; then _had_policy=true; fi
+        filter_with_block "$dst" "$known" "$CI_ADDITIONS"
+        if [ "$FLOW" = develop ] && [ "$_had_policy" = false ] && grep -q '^      restricted-base-branches:' "$dst"; then
+          BRANCH_REPORT="$BRANCH_REPORT
+    ci.yml → 加上來源分支政策：$PROD 只收 develop、hotfix/* 的 PR"
+        fi ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
       branch-guard.yml)
         filter_with_block "$dst" "$known" "$GUARD_ADDITIONS"
         # 既有的 notify 有值就保留；是空的而這次有給 --notify，才補上
-        if [ -n "$NOTIFY" ]; then replace_lines "$dst" '      notify: ""' "      $GUARD_ADDITIONS"; fi ;;
+        if [ -n "$NOTIFY" ]; then replace_lines "$dst" '      notify: ""' "      $GUARD_ADDITIONS"; fi
+        # develop 流程而既有的只守正式分支 → 把 develop 加進去；其他寫法是使用者自訂的，不動
+        if [ "$FLOW" = develop ] && has_line "$dst" "    branches: [$PROD]"; then
+          replace_lines "$dst" "    branches: [$PROD]" "    branches: $GUARD_BRANCHES"
+          BRANCH_REPORT="$BRANCH_REPORT
+    branch-guard.yml → on.push.branches 加上 develop"
+        fi ;;
     esac
     patch_uses "$dst"
     patch_v2_triggers "$dst" "$name"
@@ -531,8 +607,50 @@ patch_zizmor_owner() {
   ' "$1" > "$1.tmp"
   mv "$1.tmp" "$1"
 }
+# dependabot.yml 依偵測結果產生，不直接複製範本：只列真的有的生態系（沒有相依清單的項目
+# Dependabot 會報錯），develop 流程每項都加 target-branch（發到正式分支會被來源分支政策擋住，永遠合不了）。
+# 內容要跟 adopt.ps1 的 New-DependabotText 逐字相同。
+dep_entry() {  # dep_entry <ecosystem> <interval> <group 名稱或空字串> <group 種類 minor|all> <目錄>...
+  _eco="$1"; _int="$2"; _gname="$3"; _gkind="$4"; shift 4
+  printf '\n  - package-ecosystem: "%s"\n' "$_eco"
+  printf '    cooldown:\n      default-days: 7\n'
+  if [ $# -eq 1 ]; then printf '    directory: "%s"\n' "$1"
+  else printf '    directories:\n'; for _d in "$@"; do printf '      - "%s"\n' "$_d"; done; fi
+  if [ "$FLOW" = develop ]; then printf '    target-branch: "develop"\n'; fi
+  printf '    schedule:\n      interval: "%s"\n' "$_int"
+  case "$_gkind" in
+    minor) printf '    open-pull-requests-limit: 5\n    groups:\n      %s:\n        update-types: ["minor", "patch"]\n' "$_gname" ;;
+    all)   printf '    groups:\n      %s:\n        patterns: ["*"]\n' "$_gname" ;;
+  esac
+}
+gen_dependabot() {
+  printf '%s\n' \
+    '# Dependabot（GitHub 內建、免費）—— 由 ci-standards 導入腳本依偵測到的技術產生' \
+    '#' \
+    '# 每個 Dependabot PR 都會跑一整套 CI + Security，頻率要看著用：' \
+    '#   - 套件（pip / npm / nuget）：每週，小版本併成一個 PR，major 單獨開' \
+    '#   - docker / github-actions：每月一次' \
+    '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。' \
+    '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
+  if [ "$FLOW" = develop ]; then
+    printf '%s\n' '# develop 流程：PR 一律發到 develop（正式分支只收 develop、hotfix/* 的 PR）。'
+  fi
+  printf '%s\n' 'version: 2' '' 'updates:'
+  if [ "$HAS_PY_MANIFEST" = true ]; then dep_entry pip weekly pip-minor-patch minor /; fi
+  if [ "$HAS_NPM" = true ];        then dep_entry npm weekly npm-minor-patch minor /; fi
+  if [ "$HAS_DOTNET" = true ];     then dep_entry nuget weekly nuget-minor-patch minor /; fi
+  if [ -n "$DOCKER_DIRS" ]; then
+    # shellcheck disable=SC2086  # 刻意分詞：每個目錄一個參數（目錄名含空白時會被拆開，兩支腳本都一樣，屬已知限制）
+    dep_entry docker monthly "" none $DOCKER_DIRS
+  fi
+  dep_entry github-actions monthly actions-all all /
+}
+GEN_DIR="$(mktemp -d)"
+gen_dependabot > "$GEN_DIR/dependabot.yml"
+
 for rel in $PROJECT_OWNED; do
   src="$TPL/$rel"; dst=".github/$rel"
+  if [ "$rel" = dependabot.yml ]; then src="$GEN_DIR/dependabot.yml"; fi
   # 範本不見了要講出來（多半是公版改了檔名），不能安靜跳過、還印「導入完成」
   if [ ! -f "$src" ]; then MISSING_TPL="$MISSING_TPL $rel"; continue; fi
   mkdir -p "$(dirname "$dst")"
@@ -556,6 +674,43 @@ for rel in $PROJECT_OWNED; do
   fi
 done
 
+# ── 核對 with: 的 input 在 $REF 確實存在 ─────────────────────
+# input 清單是從本機公版的工作目錄讀的，但呼叫端釘的是 $REF。本機公版比 $REF 新（例如在 main 上）時，
+# 寫進去的 input 可能還沒發佈 —— GitHub 會讓整個 workflow startup_failure，Gate 永遠不回報。
+# 臨時 clone 本來就是 $REF，不必核對；本機查不到 $REF（沒 fetch tag）就講出來。
+with_keys() {
+  awk '
+    /^    with:[[:space:]]*(#.*)?$/ { inb=1; next }
+    inb && /^      [A-Za-z0-9_-]+:/ { k=$0; sub(/^ +/, "", k); sub(/:.*$/, "", k); print k; next }
+    inb && (/^[[:space:]]*$/ || /^      /) { next }
+    { inb=0 }
+  ' "$1"
+}
+REF_REPORT=""; REF_UNCHECKED=false
+if [ -z "$TMP_CLONE" ]; then
+  if git -C "$STD" rev-parse -q --verify "$REF^{commit}" >/dev/null 2>&1; then
+    for name in $CONFIGURED; do
+      dst=".github/workflows/$name"
+      [ -f "$dst" ] || continue
+      reu="$(basename "$(reusable_for "$name")")"
+      if ! at_ref="$(git -C "$STD" show "$REF:.github/workflows/$reu" 2>/dev/null)"; then
+        REF_REPORT="$REF_REPORT
+    $name → $REF 沒有 $reu，uses: 會 startup_failure"
+        continue
+      fi
+      known_ref="$(printf '%s\n' "$at_ref" | reusable_inputs -)"
+      for k in $(with_keys "$dst"); do
+        if ! printf '%s\n' "$known_ref" | grep -qxF -- "$k"; then
+          REF_REPORT="$REF_REPORT
+    $name → ${k}（$REF 還沒有這個 input）"
+        fi
+      done
+    done
+  else
+    REF_UNCHECKED=true
+  fi
+fi
+
 # ── 報告 ─────────────────────────────────────────────────────
 info "───────────────────────────────────────────────────────────"
 if [ -n "$CREATED" ];    then info "＋ 新增：$CREATED"; fi
@@ -577,21 +732,41 @@ if [ -n "$MISSING_TPL" ]; then
   info ""
   warn "公版裡找不到這些範本，沒有導入：$MISSING_TPL（公版 clone 可能不完整）"
 fi
+if [ -n "$BRANCH_REPORT" ]; then
+  info ""
+  info "分支流程（${FLOW}）：$BRANCH_REPORT"
+fi
+if [ -n "$REF_REPORT" ]; then
+  info ""
+  warn "以下設定在 $REF 不存在，workflow 會 startup_failure、Gate 永遠不回報。請移除，或等含這些 input 的版本發佈：$REF_REPORT"
+fi
+if [ "$REF_UNCHECKED" = true ]; then
+  info ""
+  info "ⓘ 本機公版查不到 ${REF}，沒有核對 with: 的 input 是否存在於該版（git -C \"$STD\" fetch --tags 後重跑即可核對）。"
+fi
 if [ -n "$COPILOT_LEFTOVERS" ]; then info ""; warn_copilot_leftovers; fi
-if [ "$GUARD_SKIPPED" = true ]; then info ""; warn_guard_skipped; fi
 info "───────────────────────────────────────────────────────────"
 
+if [ "$FLOW" = develop ]; then BASE_BRANCH="develop"; else BASE_BRANCH="$PROD"; fi
+info ""
+info "接下來："
+info ""
+if [ "$FLOW" = develop ] && [ "$HAS_DEVELOP" = false ]; then
+  info " 0. 建立 develop 分支（從正式分支開出）："
+  info "      git branch develop origin/$PROD && git push -u origin develop"
+  info "    並建議把 GitHub 的 Default branch 設為 develop，新 PR 預設就發到 develop。"
+  info ""
+fi
 cat <<'NEXT'
-
-接下來：
-
  1. git diff  ← 先看清楚改了什麼，尤其是升級模式
 
  2. 若有 *.new 檔案：那是新版範本，跟你現有的比對後自行取捨，
     處理完把 .new 刪掉。（zizmor.yml、dependabot.yml 這類是專案專屬內容，
     腳本刻意不覆蓋。）
 
- 3. 送出（不需要 gh，PR 可以用瀏覽器開）
+NEXT
+info " 3. 送出（不需要 gh，PR 可以用瀏覽器開；PR 發到 ${BASE_BRANCH}）"
+cat <<'NEXT'
       git checkout -b chore/adopt-ci-standards
       git add .github && git commit -m "chore: 導入/升級 ci-standards 公版"
       git push -u origin chore/adopt-ci-standards
@@ -604,8 +779,11 @@ cat <<'NEXT'
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github/zizmor.yml，寫法見公版 README。
 
- 6. branch-guard.yml（有給 --notify 才會建立）會在 main 收到直接 push、強制 push、或 Gate 沒綠就 merge 時
-    開 Issue 通知 notify 裡的人。要守 develop 時把它加進該檔的 on.push.branches。
+ 6. Branch Guard 違規時開 Issue 通知 notify 裡的人：repo 要啟用 Issues
+    （Settings → General → Features → Issues），否則 Issue 開不出來、只有執行結果標為失敗。
+
+ 7. 合併規則：develop → 正式分支用 merge commit，不要 squash（兩邊歷史分岔後發版 PR 會衝突、Gate 不跑）；
+    不要開「Automatically delete head branches」（發版 PR 合併後會把 develop 刪掉）。
 
  ⓘ job id（ci / security）刻意不動 —— 分支保護的 check 名稱綁著它，
    改了既有 ruleset 就會對不上。
