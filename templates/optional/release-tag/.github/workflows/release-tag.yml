@@ -1,0 +1,39 @@
+# 選配：正式分支收到 push（合併發版 PR 或 hotfix）時，自動打 release tag 並建立 GitHub Release。
+# 導入腳本不會建立這支；要用時把本目錄的 .github/ 複製到專案，並把下面的 main 改成正式分支名稱。
+# tag 規則與補打舊版本的方法見 .github/scripts/release-tag.sh。
+#
+# 注意：
+# - 用 GITHUB_TOKEN 建的 tag 不會觸發其他 workflow，「push tag 觸發部署」等不到它；部署要掛在正式分支的 push 上。
+# - 不要再手動打 tag 或建 Release，交給這支，格式才一致。
+name: Release Tag
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# 連續合併時依序處理，同一天的流水號才不會撞號
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  release-tag:
+    name: Tag release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write        # git tag + gh release create
+      pull-requests: read    # 取合併進來的 PR 標題與內文
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: bash .github/scripts/release-tag.sh "$SHA"
