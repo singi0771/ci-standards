@@ -40,7 +40,7 @@
                                            ├─ Semgrep          程式碼弱點（SAST）
                                            ├─ OSV-Scanner      相依套件 CVE
                                            ├─ Trivy            檔案系統 / IaC / Dockerfile 設定，可選 SBOM
-                                           ├─ gitleaks         密鑰外洩（含 git 歷史）
+                                           ├─ gitleaks         密鑰外洩（PR 掃新增 commit，排程掃完整歷史）
                                            ├─ zizmor           workflow 安全                    （選用）
                                            ├─ Trivy image      Docker image CVE                 （選用）
                                            └─ Security Gate
@@ -701,7 +701,7 @@ ci-standards/
 | SAST | Semgrep | SQL injection、eval、不安全的反序列化等寫法 | 執行期邏輯漏洞 |
 | 相依套件 CVE | OSV-Scanner、Dependabot | lockfile / manifest 中的已知 CVE | 無 lockfile 時的間接相依 |
 | IaC / Dockerfile 設定 | Trivy | root 執行、privileged、對外全開、授權條款 | 執行期設定漂移 |
-| 密鑰外洩 | gitleaks | token、密碼、私鑰（含歷史） | 無固定格式的密鑰 |
+| 密鑰外洩 | gitleaks | token、密碼、私鑰（PR 掃新增 commit，排程掃完整歷史） | 無固定格式的密鑰 |
 | workflow 安全 | zizmor | 腳本注入、危險觸發器、未釘 SHA、權限過大 | 外部工具本身的漏洞 |
 | Image CVE | Trivy image | OS 與語言套件 CVE | 尚無修正版的 CVE |
 | Dockerfile 寫法 | hadolint | 未釘版本、`latest`、shell 問題 | — |

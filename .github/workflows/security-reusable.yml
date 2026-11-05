@@ -223,28 +223,52 @@ jobs:
           path: sbom.cdx.json
           if-no-files-found: error
 
-  # 4) 密鑰外洩：連 git 歷史一起掃（所以要 fetch-depth: 0）
+  # 4) 密鑰外洩：逐一檢查 commit 新增的程式碼行（git log -p），已刪除但仍留在歷史裡的也抓得到
   #    用 docker 直接跑執行檔，避開 gitleaks-action 對組織帳號的授權要求
+  #    掃描範圍：
+  #    - pull_request：只掃 PR 新增的 commit（base..head）。舊 commit 已在先前的 PR 掃過，
+  #      每次重掃全部歷史會讓歷史大的 repo 每個 PR 多花約 5 分鐘 Actions 分鐘數。
+  #    - 其他事件（schedule、push、workflow_dispatch）：掃完整歷史，補足 PR 以外進入的 commit。
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
-    # 掃描時間隨 git 歷史大小成長：約 190 MB 的 repo 需 4～5 分鐘，原本的 5 分鐘會偶發逾時
+    # 完整歷史掃描的時間隨 git 歷史大小成長：約 190 MB 的 repo 需 4～5 分鐘。
+    # 只是上限，計費依實際執行時間
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # PR 模式也需要：base 與 head 兩個 commit 都要在本機，range 才算得出來
           fetch-depth: 0
           persist-credentials: false
       - name: Run gitleaks (free, no license)
         env:
           # 只控制「找到 leak」時的退出碼；gitleaks 本身出錯一律非零，照樣紅
           LEAK_EXIT_CODE: ${{ inputs.fail-on-findings && '1' || '0' }}
+          # reusable workflow 的 github context 是呼叫端的事件
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set --
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # SHA 會原樣交給 git log，先確認是 40 碼 hex，避免夾帶其他 git 參數
+            for s in "$BASE_SHA" "$HEAD_SHA"; do
+              if ! printf '%s' "$s" | grep -Eq '^[0-9a-f]{40}$'; then
+                echo "::error::pull_request 事件取不到有效的 base/head SHA（'$s'），無法決定掃描範圍。"
+                exit 1
+              fi
+            done
+            echo "掃描範圍：PR 新增的 commit（$BASE_SHA..$HEAD_SHA）"
+            set -- --log-opts="$BASE_SHA..$HEAD_SHA"
+          else
+            echo "掃描範圍：完整 git 歷史（事件：$EVENT_NAME）"
+          fi
           # 版本 + digest 都釘死，理由同 semgrep：latest 升版會新增規則，沒改程式也可能突然變紅。
           # digest 查法：docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本> | head -3
           docker run --rm -v "$PWD:/repo" -w /repo \
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            detect --source=. --redact --no-banner --exit-code="$LEAK_EXIT_CODE"
+            detect --source=. --redact --no-banner --exit-code="$LEAK_EXIT_CODE" "$@"
 
   # 5) （可選）workflow 本身的安全檢查：zizmor
   #    actionlint 只管語法；zizmor 管的是「這支 workflow 會不會被人拿來做壞事」——

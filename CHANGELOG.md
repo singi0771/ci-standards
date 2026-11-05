@@ -14,6 +14,18 @@
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-11-05
+
+gitleaks 在 PR 上只掃 PR 新增的 commit，降低歷史較大的 repo 每個 PR 的 Actions 分鐘數。
+
+### 需要專案動作
+無。
+
+### 變更
+- `gitleaks` job：`pull_request` 事件只掃 `base..head` 範圍的 commit；`schedule` 等其他事件仍掃完整 git 歷史。
+  原本每個 PR 都重掃全部歷史，約 190 MB 的 repo 每次需約 5 分鐘，佔 Security Scan 分鐘數一半以上。
+  舊 commit 已在先前的 PR 掃過，範本的每週排程另做完整掃描。
+
 ## [2.2.0] — 2026-11-05
 
 導入腳本補齊分支流程相關設定，Branch Guard 通知對象改為必填；新增給 AI 代理的導入指引。reusable workflow 不變。
