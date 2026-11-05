@@ -14,6 +14,8 @@
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-11-05
+
 導入腳本補齊分支流程相關設定，Branch Guard 通知對象改為必填；新增給 AI 代理的導入指引。reusable workflow 不變。
 
 ### 需要專案動作
