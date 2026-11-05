@@ -48,7 +48,13 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\adopt.ps1 -Notify "@alice @acme/team"
 
-  -Notify：Branch Guard 違規（直接 push、強制 merge 到 main）時通知誰。不給就不建 branch-guard.yml。
+  -Notify：Branch Guard 違規（直接 push、強制 merge 到正式分支）時通知誰。必填；既有 branch-guard.yml 的 notify 已有值時可省略。
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\adopt.ps1 -Notify "@alice" -Flow develop -Prod master
+
+  -Flow：develop（功能分支 -> develop -> 正式分支）或 trunk；預設依有無 develop 分支判斷。
+  -Prod：正式分支名稱；預設取 origin/HEAD，其次 main、master。
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +63,8 @@ param(
   [string]$Ref      = "v2",
   [string]$UsesRepo = "singi0771/ci-standards",
   [string]$Notify   = "",
+  [string]$Flow     = "",
+  [string]$Prod     = "",
   [switch]$DryRun
 )
 
@@ -106,6 +114,8 @@ if ($Notify) {
   }
   $Notify = $norm -join ' '
 }
+if ($Flow -and $Flow -cne 'develop' -and $Flow -cne 'trunk') { Die "-Flow 只接受 develop 或 trunk（收到：$Flow）" }
+if ($Prod -and ($Prod -cnotmatch '^[A-Za-z0-9/._-]+$' -or $Prod -match '^/' -or $Prod -match '/$')) { Die "-Prod 不是合法的分支名稱：$Prod" }
 
 # -Std / -Target 可能是相對路徑，而下面會 Set-Location 到目標 repo 根目錄。
 if ($Std) {
@@ -219,6 +229,45 @@ if (Test-Path -LiteralPath '.python-version') {
   # ReadAllText 會自動去掉 UTF-8 BOM；Trim 去掉空白與換行（adopt.sh 用 tr 做同一件事）
   $PyVer = ([System.IO.File]::ReadAllText('.python-version')) -replace '[\s\uFEFF]', ''
 }
+# dependabot.yml 用：根目錄有相依清單才有 pip / npm 可更新（沒有清單時 Dependabot 會報錯）
+$HasPyManifest = (Test-Path 'requirements.txt') -or (Test-Path 'pyproject.toml') -or (Test-Path 'setup.py') -or (Test-Path 'Pipfile')
+$HasNpm = Test-Path 'package.json'
+# Dockerfile 所在目錄（/ 開頭、序數排序、去重），給 dependabot 的 docker 項目（與 adopt.sh 一致）
+$rootLen = $TargetRoot.TrimEnd('\', '/').Length
+$dirs = @(Get-RepoFiles '.' 1 -1 | Where-Object {
+  $_.Name -cmatch '^(Dockerfile|.*\.Dockerfile|Dockerfile\..*)$' -and $_.Name -cnotmatch '\.dockerignore$'
+} | ForEach-Object {
+  $rel = $_.DirectoryName.Substring($rootLen) -replace '\\', '/'
+  if ($rel) { $rel } else { '/' }
+})
+[string[]]$DockerDirs = @($dirs | Select-Object -Unique)
+[Array]::Sort($DockerDirs, [System.StringComparer]::Ordinal)
+$DockerDirs = @($DockerDirs | Where-Object { $_ } | Get-Unique)
+
+# ── 分支流程（與 adopt.sh 一致）──────────────────────────────
+# 正式分支：origin/HEAD 指向的分支，其次本機或遠端有的 main、master，都沒有就當 main。只看本機 ref，不連網路。
+function Test-Ref([string]$Name) {
+  $ErrorActionPreference = 'Continue'
+  & git show-ref -q --verify "refs/heads/$Name" 2>$null
+  if ($LASTEXITCODE -eq 0) { return $true }
+  & git show-ref -q --verify "refs/remotes/origin/$Name" 2>$null
+  return ($LASTEXITCODE -eq 0)
+}
+if (-not $Prod) {
+  $ErrorActionPreference = 'Continue'
+  $h = (& git symbolic-ref -q --short refs/remotes/origin/HEAD 2>$null)
+  $ErrorActionPreference = 'Stop'
+  if ($LASTEXITCODE -eq 0 -and $h) { $Prod = ($h.Trim() -replace '^origin/', '') }
+  if (-not $Prod) { foreach ($b in @('main', 'master')) { if (Test-Ref $b) { $Prod = $b; break } } }
+  if (-not $Prod) { $Prod = 'main' }
+}
+$FlowHow = '指定'
+if (-not $Flow) {
+  $FlowHow = '依有無 develop 分支判斷'
+  if (Test-Ref 'develop') { $Flow = 'develop' } else { $Flow = 'trunk' }
+}
+if ($Flow -eq 'develop' -and $Prod -eq 'develop') { Die "-Flow develop 時正式分支不能是 develop（用 -Prod 指定 main 或 master）" }
+$HasDevelop = Test-Ref 'develop'
 
 $Mode = 'install'
 if ((Test-Path '.github\workflows\ci.yml') -or (Test-Path '.github\workflows\security.yml')) {
@@ -234,6 +283,9 @@ Write-Host ("  .NET         : {0} (方案檔 {1}、專案檔 {2})" -f (B $HasDot
 if ($DotnetSln -gt 1 -or ($DotnetSln -eq 0 -and $DotnetProj -gt 1)) {
   Warn '找到不只一個 .NET 方案 / 專案檔，公版無法自動決定要建置哪一個 —— 導入後請在 ci.yml 的 with: 加上 dotnet-project: "<路徑>"'
 }
+Write-Host ("  正式分支     : {0}" -f $Prod)
+Write-Host ("  分支流程     : {0} ({1})" -f $Flow, $FlowHow)
+if ($Flow -eq 'develop' -and -not $HasDevelop) { Warn '還沒有 develop 分支，導入後請建立（指令見最後的「接下來」）' }
 Write-Host ""
 
 # ── 公版宣告了哪些 input（事實來源是公版自己，不在腳本裡寫死清單）──
@@ -377,6 +429,11 @@ $CiAdditions = @(
   'run-actionlint: true',
   ('run-shellcheck: {0}'   -f (B $HasSh))
 )
+# develop 流程：正式分支只收 develop 與 hotfix/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+if ($Flow -eq 'develop') {
+  $CiAdditions += ('restricted-base-branches: "{0}"' -f $Prod)
+  $CiAdditions += 'allowed-head-branches: "develop hotfix/*"'
+}
 # security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
 # run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
 $SecAdditions = @(
@@ -385,18 +442,22 @@ $SecAdditions = @(
 )
 $GuardAdditions = @()
 if ($Notify) { $GuardAdditions = @(('notify: "{0}"' -f $Notify)) }
-# 還沒有 branch-guard.yml、又沒給 -Notify → 不建（建了也沒人收得到通知）
-function Test-SkipGuard([string]$Name) {
-  return ($Name -eq 'branch-guard.yml' -and -not (Test-Path -LiteralPath ".github\workflows\$Name") -and -not $Notify)
+# Branch Guard 一定要有通知對象：沒有分支保護時，直接 push、強制 merge 只能靠它發現。
+# 既有 branch-guard.yml 的 notify 已有值才可以不給 -Notify（與 adopt.sh 一致）。
+$GuardFile = '.github\workflows\branch-guard.yml'
+$NeedNotify = $false
+if (-not $Notify) {
+  if (-not (Test-Path -LiteralPath $GuardFile)) { $NeedNotify = $true }
+  elseif (-not ((Read-Lines $GuardFile) | Where-Object { $_ -cmatch '^      notify: "[^"]+"' })) { $NeedNotify = $true }
 }
-function Show-GuardSkipped {
-  Warn "沒有指定 -Notify，未建立 .github\workflows\branch-guard.yml（直接 push / 強制 merge 到 main 時開 Issue 通知）。"
-  Write-Host '    要啟用請加上通知對象重跑：-Notify "@帳號 @組織/team"'
-}
+$NotifyMsg = "必須指定 -Notify：Branch Guard 在直接 push、強制 push、Gate 沒綠就 merge 時開 Issue 通知這些人。`n" +
+             '    例：-Notify "@帳號 @組織/team"（GitHub 帳號或 team，通常是專案負責人）'
+# 要守的分支：正式分支；develop 流程連 develop 一起守
+$GuardBranches = "[$Prod]"
+if ($Flow -eq 'develop') { $GuardBranches = "[$Prod, develop]" }
 
 # ── 兩類檔案，兩種策略（與 adopt.sh 一致）────────────────────
 # Configured：真的帶專案設定（severity / python-version / 自訂 cron…）→ 就地合併。
-# branch-guard.yml 一定要有通知對象：沒給 -Notify 又還沒有這支時就不建，報告裡點名。
 $Configured = @('ci.yml','security.yml','branch-guard.yml')
 # zizmor.yml 也算專案專屬：使用者會在裡面放自己的放行規則。
 $ProjectOwned = @('pull_request_template.md','dependabot.yml','zizmor.yml')
@@ -416,8 +477,7 @@ foreach ($n in $Configured) {
 
 Write-Host "計畫:"
 foreach ($n in $Configured) {
-  if (Test-SkipGuard $n) { Write-Host "  - 略過  .github\workflows\$n（未指定 -Notify）" }
-  elseif (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
+  if (Test-Path ".github\workflows\$n") { Write-Host "  ~ 合併  .github\workflows\$n" }
   else { Write-Host "  + 新增  .github\workflows\$n" }
 }
 foreach ($r in $ProjectOwned) {
@@ -443,24 +503,35 @@ function Show-CopilotLeftovers {
 }
 Show-CopilotLeftovers
 
+if ($NeedNotify) {
+  if ($DryRun) { Warn $NotifyMsg; Write-Host "" } else { Die $NotifyMsg }
+}
+
 if ($DryRun) { Write-Host "(-DryRun: 到此為止，沒有動任何檔案)"; Remove-TmpClone; exit 0 }
 
 New-Item -ItemType Directory -Force -Path '.github\workflows' | Out-Null
 $Created = @(); $Merged = @(); $Kept = @(); $DroppedReport = @()
-$TriggerReport = @(); $NoWithReport = @(); $MissingTpl = @(); $GuardSkipped = $false
+$TriggerReport = @(); $NoWithReport = @(); $MissingTpl = @(); $BranchReport = @()
+
+# 整行完全相同才換（與 adopt.sh 的 replace_lines 一致）
+function Set-Line([string[]]$Lines, [string]$Old, [string]$New) {
+  return @($Lines | ForEach-Object { if ($_ -ceq $Old) { $New } else { $_ } })
+}
 
 # ── Configured：就地合併 ─────────────────────────────────────
 foreach ($n in $Configured) {
   $dst = ".github\workflows\$n"
   $known = $KnownFor[$n]
-  if (Test-SkipGuard $n) { $GuardSkipped = $true; continue }
 
   if (-not (Test-Path -LiteralPath $dst)) {
     Copy-Item -LiteralPath (Join-Path $Tpl "workflows\$n") -Destination $dst -Force
     $lines = Read-Lines $dst
     if ($n -eq 'ci.yml')       { $lines = Set-WithBlock $lines $CiAdditions }
     if ($n -eq 'security.yml') { $lines = Set-WithBlock $lines $SecAdditions }
-    if ($n -eq 'branch-guard.yml') { $lines = Set-WithBlock $lines $GuardAdditions }
+    if ($n -eq 'branch-guard.yml') {
+      $lines = Set-WithBlock $lines $GuardAdditions
+      $lines = Set-Line $lines '    branches: [main]' "    branches: $GuardBranches"
+    }
     $lines = Update-UsesLines $lines
     Write-TextFile $dst (Join-Lines $lines)
     $Created += $n
@@ -471,12 +542,22 @@ foreach ($n in $Configured) {
     if ($n -eq 'security.yml') { $adds = $SecAdditions }
     if ($n -eq 'branch-guard.yml') { $adds = $GuardAdditions }
     $found = $false
-    $lines = Merge-WithBlock (Read-Lines $dst) $known $adds ([ref]$dropped) ([ref]$found)
+    $before = Read-Lines $dst
+    $hadPolicy = [bool]($before | Where-Object { $_ -cmatch '^      restricted-base-branches:' })
+    $lines = Merge-WithBlock $before $known $adds ([ref]$dropped) ([ref]$found)
+    if ($n -eq 'ci.yml' -and $Flow -eq 'develop' -and -not $hadPolicy -and ($lines | Where-Object { $_ -cmatch '^      restricted-base-branches:' })) {
+      $BranchReport += ("    ci.yml -> 加上來源分支政策：{0} 只收 develop、hotfix/* 的 PR" -f $Prod)
+    }
     $lines = Update-UsesLines $lines
     $lines = Update-V2Triggers $lines $n ([ref]$TriggerReport)
     # 既有的 notify 有值就保留；是空的而這次有給 -Notify，才補上（與 adopt.sh 一致）
     if ($n -eq 'branch-guard.yml' -and $Notify) {
-      $lines = @($lines | ForEach-Object { if ($_ -ceq '      notify: ""') { '      ' + $GuardAdditions[0] } else { $_ } })
+      $lines = Set-Line $lines '      notify: ""' ('      ' + $GuardAdditions[0])
+    }
+    # develop 流程而既有的只守正式分支 → 把 develop 加進去；其他寫法是使用者自訂的，不動
+    if ($n -eq 'branch-guard.yml' -and $Flow -eq 'develop' -and ($lines -ccontains "    branches: [$Prod]")) {
+      $lines = Set-Line $lines "    branches: [$Prod]" "    branches: $GuardBranches"
+      $BranchReport += '    branch-guard.yml -> on.push.branches 加上 develop'
     }
     Write-TextFile $dst (Join-Lines $lines)
     foreach ($k in $dropped) { $DroppedReport += ("    {0} -> 移除已廢除的 input: {1}" -f $n, $k) }
@@ -496,8 +577,46 @@ function Update-ZizmorOwner([string]$Path) {
   [System.IO.File]::WriteAllText($Path, $txt, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+# dependabot.yml 依偵測結果產生，不直接複製範本（與 adopt.sh 的 gen_dependabot 逐字相同）：
+# 只列真的有的生態系；develop 流程每項都加 target-branch（發到正式分支會被來源分支政策擋住）。
+function New-DepEntry([string]$Eco, [string]$Interval, [string]$GName, [string]$GKind, [string[]]$Dirs) {
+  $o = @('', ('  - package-ecosystem: "{0}"' -f $Eco), '    cooldown:', '      default-days: 7')
+  if ($Dirs.Count -eq 1) { $o += ('    directory: "{0}"' -f $Dirs[0]) }
+  else { $o += '    directories:'; foreach ($d in $Dirs) { $o += ('      - "{0}"' -f $d) } }
+  if ($Flow -eq 'develop') { $o += '    target-branch: "develop"' }
+  $o += '    schedule:'
+  $o += ('      interval: "{0}"' -f $Interval)
+  if ($GKind -eq 'minor') { $o += @('    open-pull-requests-limit: 5', '    groups:', ('      {0}:' -f $GName), '        update-types: ["minor", "patch"]') }
+  if ($GKind -eq 'all')   { $o += @('    groups:', ('      {0}:' -f $GName), '        patterns: ["*"]') }
+  return $o
+}
+function New-DependabotText {
+  $o = @(
+    '# Dependabot（GitHub 內建、免費）—— 由 ci-standards 導入腳本依偵測到的技術產生',
+    '#',
+    '# 每個 Dependabot PR 都會跑一整套 CI + Security，頻率要看著用：',
+    '#   - 套件（pip / npm / nuget）：每週，小版本併成一個 PR，major 單獨開',
+    '#   - docker / github-actions：每月一次',
+    '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。',
+    '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
+  )
+  if ($Flow -eq 'develop') { $o += '# develop 流程：PR 一律發到 develop（正式分支只收 develop、hotfix/* 的 PR）。' }
+  $o += @('version: 2', '', 'updates:')
+  if ($HasPyManifest) { $o += New-DepEntry 'pip' 'weekly' 'pip-minor-patch' 'minor' @('/') }
+  if ($HasNpm)        { $o += New-DepEntry 'npm' 'weekly' 'npm-minor-patch' 'minor' @('/') }
+  if ($HasDotnet)     { $o += New-DepEntry 'nuget' 'weekly' 'nuget-minor-patch' 'minor' @('/') }
+  # 目錄名含空白時會被拆開（與 adopt.sh 的分詞相同，屬已知限制）
+  $dockerArgs = @((($DockerDirs -join "`n") -split '\s+') | Where-Object { $_ })
+  if ($dockerArgs.Count) { $o += New-DepEntry 'docker' 'monthly' '' 'none' $dockerArgs }
+  $o += New-DepEntry 'github-actions' 'monthly' 'actions-all' 'all' @('/')
+  return (Join-Lines $o)
+}
+$GenDependabot = Join-Path ([System.IO.Path]::GetTempPath()) ("ci-std-dep-" + [Guid]::NewGuid().ToString('N') + ".yml")
+Write-TextFile $GenDependabot (New-DependabotText)
+
 foreach ($r in $ProjectOwned) {
   $src = Join-Path $Tpl $r
+  if ($r -eq 'dependabot.yml') { $src = $GenDependabot }
   $dst = ".github\$r"
   # 範本不見了要講出來（多半是公版改了檔名），不能安靜跳過、還印「導入完成」
   if (-not (Test-Path -LiteralPath $src)) { $MissingTpl += $r; continue }
@@ -519,6 +638,48 @@ foreach ($r in $ProjectOwned) {
     if ($migrateZizmor) { Update-ZizmorOwner $dst }
     $Created += $r
   }
+}
+Remove-Item -LiteralPath $GenDependabot -Force -ErrorAction SilentlyContinue
+
+# ── 核對 with: 的 input 在 $Ref 確實存在（與 adopt.sh 一致）──
+# input 清單是從本機公版的工作目錄讀的，但呼叫端釘的是 $Ref。本機公版比 $Ref 新時，
+# 寫進去的 input 可能還沒發佈 —— workflow 會 startup_failure，Gate 永遠不回報。
+# 臨時 clone 本來就是 $Ref，不必核對；本機查不到 $Ref（沒 fetch tag）就講出來。
+function Get-WithKeys([string[]]$Lines) {
+  $keys = @(); $inb = $false
+  foreach ($line in $Lines) {
+    if ($line -match '^    with:\s*(#.*)?$') { $inb = $true; continue }
+    if ($inb -and $line -match '^      ([A-Za-z0-9_-]+):') { $keys += $Matches[1]; continue }
+    if ($inb -and ($line -match '^\s*$' -or $line -match '^      ')) { continue }
+    $inb = $false
+  }
+  return $keys
+}
+$RefReport = @(); $RefUnchecked = $false
+if (-not $TmpClone) {
+  $ErrorActionPreference = 'Continue'
+  & git -C $Std rev-parse -q --verify "$Ref^{commit}" 2>$null | Out-Null
+  $refOk = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = 'Stop'
+  if ($refOk) {
+    foreach ($n in $Configured) {
+      $dst = ".github\workflows\$n"
+      if (-not (Test-Path -LiteralPath $dst)) { continue }
+      $reu = $ReusableFor[$n]
+      $ErrorActionPreference = 'Continue'
+      $atRef = @(& git -C $Std show "${Ref}:.github/workflows/$reu" 2>$null)
+      $showOk = ($LASTEXITCODE -eq 0)
+      $ErrorActionPreference = 'Stop'
+      if (-not $showOk) { $RefReport += "    $n -> $Ref 沒有 $reu，uses: 會 startup_failure"; continue }
+      $tmpReu = Join-Path ([System.IO.Path]::GetTempPath()) ("ci-std-reu-" + [Guid]::NewGuid().ToString('N') + ".yml")
+      Write-TextFile $tmpReu (Join-Lines $atRef)
+      $knownRef = @(Get-ReusableInputs $tmpReu)
+      Remove-Item -LiteralPath $tmpReu -Force -ErrorAction SilentlyContinue
+      foreach ($k in (Get-WithKeys (Read-Lines $dst))) {
+        if ($knownRef -notcontains $k) { $RefReport += "    $n -> $k（$Ref 還沒有這個 input）" }
+      }
+    }
+  } else { $RefUnchecked = $true }
 }
 
 Remove-TmpClone
@@ -545,20 +706,43 @@ if ($MissingTpl.Count) {
   Write-Host ""
   Warn ("公版裡找不到這些範本，沒有導入: " + ($MissingTpl -join ' ') + "（公版 clone 可能不完整）")
 }
+if ($BranchReport.Count) {
+  Write-Host ""
+  Write-Host ("分支流程（{0}）:" -f $Flow)
+  $BranchReport | ForEach-Object { Write-Host $_ }
+}
+if ($RefReport.Count) {
+  Write-Host ""
+  Warn "以下設定在 $Ref 不存在，workflow 會 startup_failure、Gate 永遠不回報。請移除，或等含這些 input 的版本發佈:"
+  $RefReport | ForEach-Object { Write-Host $_ }
+}
+if ($RefUnchecked) {
+  Write-Host ""
+  Write-Host "[i] 本機公版查不到 $Ref，沒有核對 with: 的 input 是否存在於該版（git -C `"$Std`" fetch --tags 後重跑即可核對）。"
+}
 if ($CopilotLeftovers) { Write-Host ""; Show-CopilotLeftovers }
-if ($GuardSkipped) { Write-Host ""; Show-GuardSkipped }
 Write-Host "-----------------------------------------------------------"
 
+$BaseBranch = $Prod
+if ($Flow -eq 'develop') { $BaseBranch = 'develop' }
+Write-Host ""
+Write-Host "接下來:"
+Write-Host ""
+if ($Flow -eq 'develop' -and -not $HasDevelop) {
+  Write-Host " 0. 建立 develop 分支（從正式分支開出）:"
+  Write-Host "      git branch develop origin/$Prod; git push -u origin develop"
+  Write-Host "    並建議把 GitHub 的 Default branch 設為 develop，新 PR 預設就發到 develop。"
+  Write-Host ""
+}
 @'
-
-接下來:
-
  1. git diff  <- 先看清楚改了什麼，尤其是升級模式
 
  2. 若有 *.new 檔案: 那是新版範本，跟現有的比對後自行取捨，處理完把 .new 刪掉。
     (zizmor.yml、dependabot.yml 這類是專案專屬內容，腳本刻意不覆蓋。)
 
- 3. 送出（不需要 gh，PR 可以用瀏覽器開）
+'@ | Write-Host
+Write-Host " 3. 送出（不需要 gh，PR 可以用瀏覽器開；PR 發到 $BaseBranch）"
+@'
       git checkout -b chore/adopt-ci-standards
       git add .github
       git commit -m "chore: 導入/升級 ci-standards 公版"
@@ -572,8 +756,11 @@ Write-Host "-----------------------------------------------------------"
     workflow 的毛病（沒釘 SHA 的 action、權限太大…）。那是真的該修；
     確定是誤判才放進 .github\zizmor.yml，寫法見公版 README。
 
- 6. branch-guard.yml（有給 -Notify 才會建立）會在 main 收到直接 push、強制 push、
-    或 Gate 沒綠就 merge 時開 Issue 通知 notify 裡的人。要守 develop 時把它加進該檔的 on.push.branches。
+ 6. Branch Guard 違規時開 Issue 通知 notify 裡的人：repo 要啟用 Issues
+    （Settings -> General -> Features -> Issues），否則 Issue 開不出來、只有執行結果標為失敗。
+
+ 7. 合併規則：develop -> 正式分支用 merge commit，不要 squash（兩邊歷史分岔後發版 PR 會衝突、Gate 不跑）；
+    不要開「Automatically delete head branches」（發版 PR 合併後會把 develop 刪掉）。
 
  [i] job id (ci / security) 刻意不動 —— 分支保護的 check 名稱綁著它。
 '@ | Write-Host

@@ -8,7 +8,7 @@ name: Branch Guard
 
 on:
   # 列出要守的長壽分支（on: 不吃運算式，只能寫死）。
-  # 走 develop 流程、也要守 develop 的專案改成：branches: [main, develop]
+  # 導入腳本依正式分支與 --flow 填好：develop 流程為 [main, develop]，正式分支不是 main 時換成實際名稱。
   # ⚠️ 不要加 paths-ignore —— 直接 push 一份文件也是直接 push。
   push:
     branches: [main]

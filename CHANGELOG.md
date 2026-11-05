@@ -14,6 +14,35 @@
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-11-05
+
+導入腳本補齊分支流程相關設定，Branch Guard 通知對象改為必填；新增給 AI 代理的導入指引。reusable workflow 不變。
+
+### 需要專案動作
+無。已導入的專案下次重跑導入腳本時：
+- 沒有 `branch-guard.yml`，或其 `notify` 為空字串時，須加 `--notify` / `-Notify`，否則腳本中止。
+- 有 develop 分支（或指定 `--flow develop`）時，腳本會在 `ci.yml` 補上來源分支政策、在 `branch-guard.yml` 補守 develop；
+  不採用時加 `--flow trunk`。
+
+### 變更
+- `adopt.sh`、`adopt.ps1`：`--notify` / `-Notify` 改為必填。未指定且既有 `branch-guard.yml` 沒有通知對象時中止，不再略過 Branch Guard；
+  `--dry-run` 只提醒、不中止。
+
+### 新增
+- `adopt.sh`、`adopt.ps1`：`--flow develop|trunk`、`--prod <branch>`。未指定時，有 develop 分支即為 `develop` 流程；
+  正式分支依序取 origin/HEAD、`main`、`master`。`develop` 流程：
+  - `ci.yml` 補上 `restricted-base-branches: "<正式分支>"`、`allowed-head-branches: "develop hotfix/*"`（已設定者不動）。
+  - `branch-guard.yml` 守 `[<正式分支>, develop]`；既有檔案只守正式分支時補上 develop，自訂寫法不動。
+  - 沒有 develop 分支時，於「接下來」列出建立指令。
+- 導入腳本依偵測結果產生 `dependabot.yml`：只列實際使用的生態系（根目錄有相依清單的 pip、npm，.NET 的 nuget，
+  Dockerfile 所在目錄的 docker，github-actions）；`develop` 流程每一項設 `target-branch: "develop"`。
+  原本照抄範本，非 Python 專案會留下報錯的 pip 項目，develop 流程的 Dependabot PR 會被來源分支政策擋住。
+- 導入腳本核對呼叫端 `with:` 的 input 皆存在於 `--ref` 指定的版本（本機公版查得到該 ref 時），不存在者列入報告。
+  本機公版比 `--ref` 新時，寫入未發佈的 input 會使 workflow `startup_failure`。
+- 導入腳本的「接下來」補上：啟用 Issues、Default branch 設為 develop、develop → 正式分支不使用 squash、不開「Automatically delete head branches」。
+- `docs/AI-ADOPT.md`：給 AI 代理依序執行的導入步驟與回報清單。
+- `templates/optional/release-tag/`：選配的自動 release tag 範本（正式分支收到 push 時打 tag 並建立 GitHub Release），導入腳本不使用。
+
 ## [2.1.2] — 2026-11-04
 
 修正 gitleaks 在 git 歷史較大的 repo 偶發逾時。
