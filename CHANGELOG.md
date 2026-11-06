@@ -14,6 +14,15 @@
 
 ## [Unreleased]
 
+### 需要專案動作
+無。開著 Docker 檢查、近期出現下列錯誤而暫時關閉 `run-docker-build`／`scan-docker-image` 的專案，可在新版發佈後改回 `true`。
+
+### 修正
+- `Docker build check`（CI）與 `Docker image (Trivy)`（Security）在 `ubuntu-latest` 上失敗，
+  錯誤為 `ERROR: no builder "." found`。原因是 build context 放在環境變數 `DOCKER_CONTEXT`，
+  與 Docker CLI 用來指定 docker context 的同名變數衝突；改名為 `BUILD_CONTEXT`。
+  `docker-context` input 的用法不變。
+
 ## [2.2.1] — 2026-11-05
 
 gitleaks 在 PR 上只掃 PR 新增的 commit，降低歷史較大的 repo 每個 PR 的 Actions 分鐘數。
