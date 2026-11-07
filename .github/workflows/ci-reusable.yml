@@ -317,7 +317,9 @@ jobs:
         env:
           # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
           SHA: ${{ github.sha }}
-          DOCKER_CONTEXT: ${{ inputs.docker-context }}
+          # 不可命名為 DOCKER_CONTEXT：那是 Docker CLI 自己讀的環境變數（指定 docker context），
+          # 設成 "." 時 docker build 會失敗：ERROR: no builder "." found
+          BUILD_CONTEXT: ${{ inputs.docker-context }}
         run: |
           LIST="$RUNNER_TEMP/dockerfiles.txt"
           if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
@@ -327,7 +329,7 @@ jobs:
             f="${entry%%:*}"
             # context：那一項有寫 :<context> 就用它，否則用 docker-context（預設 repo 根目錄，
             # 跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）
-            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$DOCKER_CONTEXT"; fi
+            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$BUILD_CONTEXT"; fi
             echo "── docker build -f $f $ctx"
             docker build -f "$f" -t "ci-check-$n:$SHA" "$ctx"
           done < "$LIST"
