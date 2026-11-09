@@ -12,10 +12,12 @@
 
 ---
 
-## [Unreleased]
+## [2.2.2] — 2026-11-09
+
+修正 Docker build check 與 Docker image (Trivy) 在 `ubuntu-latest` 上建置失敗。
 
 ### 需要專案動作
-無。開著 Docker 檢查、近期出現下列錯誤而暫時關閉 `run-docker-build`／`scan-docker-image` 的專案，可在新版發佈後改回 `true`。
+無。開著 Docker 檢查、近期出現下列錯誤而暫時關閉 `run-docker-build`／`scan-docker-image` 的專案，可改回 `true`。
 
 ### 修正
 - `Docker build check`（CI）與 `Docker image (Trivy)`（Security）在 `ubuntu-latest` 上失敗，
