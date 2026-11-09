@@ -30,9 +30,12 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: ./.github/workflows/ci-reusable.yml
     with:
-      # 本 repo 沒有 Python、沒有 Dockerfile，真正要檢查的是 workflow 與 shell script
+      # 本 repo 沒有 Python，真正要檢查的是 workflow 與 shell script。
+      # Docker build check 用測試用的 tests/docker/Dockerfile 跑，驗證公版的 Docker 路徑；
+      # 不寫 :<context>，走 docker-context 預設值（repo 根目錄）
       run-python: false
-      run-docker-build: false
+      run-docker-build: true
+      dockerfile: "tests/docker/Dockerfile"
       run-actionlint: true
       run-shellcheck: true
       # 除了本 repo 的 .github/workflows，consumer 範本也要一起檢查 ——
