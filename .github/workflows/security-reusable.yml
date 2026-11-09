@@ -118,11 +118,12 @@ jobs:
           # sha256 也要對：release 的 tag 可以被移動，校驗碼才是真正「釘死」的那一道。
           # --retry：GitHub Releases 偶爾回 504，不重試的話一次就讓整個 job 紅燈。
           # curl 的 --retry 涵蓋 timeout 與 HTTP 408/429/5xx；重試用完仍失敗，--fail 照樣讓步驟失敗。
+          # 504 常連續出現十幾秒以上（2026-11-09 實測：間隔 5 秒重試 4 次仍失敗），所以撐約 1 分鐘。
           # 本檔與 ci-reusable 的每個工具下載都用同一組參數。
           # 升版時一起換：https://github.com/google/osv-scanner/releases/download/<版本>/osv-scanner_SHA256SUMS
           VERSION="2.3.8"
           SHA256="bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
-          curl --fail -sSL --retry 4 --retry-delay 5 -o osv-scanner \
+          curl --fail -sSL --retry 6 --retry-delay 10 -o osv-scanner \
             "https://github.com/google/osv-scanner/releases/download/v${VERSION}/osv-scanner_linux_amd64"
           echo "${SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner && sudo mv osv-scanner /usr/local/bin/osv-scanner
@@ -189,7 +190,7 @@ jobs:
           # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
           VERSION="0.70.0"
           SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-          curl --fail -sSL --retry 4 --retry-delay 5 -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+          curl --fail -sSL --retry 6 --retry-delay 10 -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
           echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
           tar -xzf trivy.tar.gz trivy
           sudo mv trivy /usr/local/bin/trivy
@@ -293,7 +294,7 @@ jobs:
           # https://github.com/zizmorcore/zizmor/releases
           VERSION="1.30.1"
           SHA256="e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a"
-          curl --fail -sSL --retry 4 --retry-delay 5 -o zizmor.tar.gz \
+          curl --fail -sSL --retry 6 --retry-delay 10 -o zizmor.tar.gz \
             "https://github.com/zizmorcore/zizmor/releases/download/v${VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
           echo "${SHA256}  zizmor.tar.gz" | sha256sum -c -
           tar -xzf zizmor.tar.gz zizmor
@@ -336,7 +337,7 @@ jobs:
           # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
           VERSION="0.70.0"
           SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-          curl --fail -sSL --retry 4 --retry-delay 5 -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+          curl --fail -sSL --retry 6 --retry-delay 10 -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
           echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
           tar -xzf trivy.tar.gz trivy
           sudo mv trivy /usr/local/bin/trivy
