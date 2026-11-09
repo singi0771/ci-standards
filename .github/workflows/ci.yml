@@ -30,10 +30,14 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     uses: ./.github/workflows/ci-reusable.yml
     with:
-      # 本 repo 沒有 Python，真正要檢查的是 workflow 與 shell script。
-      # Docker build check 用測試用的 tests/docker/Dockerfile 跑，驗證公版的 Docker 路徑；
-      # 不寫 :<context>，走 docker-context 預設值（repo 根目錄）
-      run-python: false
+      # 本 repo 的產品是 workflow 與 shell script；Python / .NET / Docker 三條路徑
+      # 用 tests/ 底下的最小範例跑，公版每個 job 都要實際執行，不能是 skipped。
+      # Python：ruff 與 pytest 在 repo 根目錄執行，會找到 tests/python
+      run-python: true
+      # .NET：dotnet-version 留空，依 csproj 的 TargetFramework 安裝 SDK
+      run-dotnet: true
+      dotnet-project: "tests/dotnet/CiSelfTest.csproj"
+      # Docker：不寫 :<context>，走 docker-context 預設值（repo 根目錄）
       run-docker-build: true
       dockerfile: "tests/docker/Dockerfile"
       run-actionlint: true
