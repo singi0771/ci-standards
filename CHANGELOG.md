@@ -12,6 +12,23 @@
 
 ---
 
+## [2.2.3] — 2026-11-09
+
+工具下載加上重試與 Actions 快取，減少 GitHub Releases 偶發 504 讓掃描 job 紅燈。
+
+### 需要專案動作
+無。
+
+### 修正
+- 各掃描 job 從 GitHub Releases 下載工具（actionlint、hadolint、OSV-Scanner、Trivy、zizmor）時，
+  GitHub 偶爾回 `curl: (22) The requested URL returned error: 504`，整個 job 與 Gate 跟著紅燈。
+  下載改為失敗時最多重試 6 次（間隔 10 秒，約 1 分鐘）；重試用完仍失敗照樣紅燈，不會在沒掃描的情況下亮綠燈。
+
+### 變更
+- 上述工具改為先從 Actions 快取還原，沒命中才下載（key 為工具版本 + sha256）。快取屬於各專案 repo，
+  第一次執行、升版或 7 天未使用被清除時仍會下載一次。還原的檔案照樣驗 sha256，不符就重新下載。
+  會佔用各專案少量 Actions 快取空間（五個工具合計約 100 MB）。
+
 ## [2.2.2] — 2026-11-09
 
 修正 Docker build check 與 Docker image (Trivy) 在 `ubuntu-latest` 上建置失敗。

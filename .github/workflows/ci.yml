@@ -39,6 +39,7 @@ jobs:
       dotnet-project: "tests/dotnet/CiSelfTest.csproj"
       # Docker：不寫 :<context>，走 docker-context 預設值（repo 根目錄）
       run-docker-build: true
+      run-hadolint: true        # 預設關的選配功能也要打開，否則等於沒測
       dockerfile: "tests/docker/Dockerfile"
       run-actionlint: true
       run-shellcheck: true

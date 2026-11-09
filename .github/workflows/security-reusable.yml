@@ -61,6 +61,31 @@ on:
 permissions:
   contents: read
 
+# ── 從 GitHub Releases 下載的工具 ─────────────────────────────────────
+# 版本 + sha256 一起釘、集中寫在這裡。latest 升版會新增規則，沒改程式也可能突然變紅；
+# release 的 tag 可以被移動，sha256 才是真正「釘死」的那一道。
+# 升版只改這裡的兩個值（sha256 從各工具 release 頁面的 checksums 檔取得，網址見各變數旁）。
+#
+# 下載與快取（每個工具同一套寫法）：
+#   - 先從 Actions 快取還原，沒命中才下載。快取 key 由版本 + sha256 組成，升版時自動換新；
+#     舊快取 7 天沒用 GitHub 會自動刪除。快取屬於各呼叫端 repo，各自第一次跑仍要下載。
+#   - 還原的檔案一樣驗 sha256；校驗不符（損毀或被竄改）就丟掉重新下載，不直接拿來用。
+#   - curl 的 --fail 不能拿掉：沒有它，GitHub 回 404/5xx 時錯誤頁面會被存成「執行檔」，
+#     掃描其實沒跑、Gate 卻可能照樣綠燈。
+#   - --retry 6 --retry-delay 10：GitHub Releases 偶爾連續回 504 十幾秒以上
+#     （2026-11-09 實測：間隔 5 秒重試 4 次仍失敗），撐約 1 分鐘；用完仍失敗照樣紅燈。
+#
+# 變數名一律加 TOOL_ 前綴：工具會把自己前綴的環境變數當設定讀（TRIVY_*、HADOLINT_*），
+# 例如 TRIVY_VERSION 可能被 trivy 當成 --version 旗標 —— 同 2.2.2 修掉的 DOCKER_CONTEXT 衝突。
+env:
+  TOOL_OSV_VERSION: "2.3.8"            # https://github.com/google/osv-scanner/releases（osv-scanner_SHA256SUMS）
+  TOOL_OSV_SHA256: "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
+  # trivy 與 trivy-image 兩個 job 共用，兩邊結果才會一致；快取也共用同一份
+  TOOL_TRIVY_VERSION: "0.70.0"         # https://github.com/aquasecurity/trivy/releases（trivy_<版本>_checksums.txt）
+  TOOL_TRIVY_SHA256: "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
+  TOOL_ZIZMOR_VERSION: "1.30.1"        # https://github.com/zizmorcore/zizmor/releases（對 .tar.gz 重算）
+  TOOL_ZIZMOR_SHA256: "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a"
+
 jobs:
   # 1) SAST：靜態掃程式碼裡的弱點（私有 repo 用不了 CodeQL 時的免費替代）
   semgrep:
@@ -111,20 +136,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore OSV-Scanner from cache
+        id: osv-scanner-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/osv-scanner
+          key: ci-tools-osv-scanner-${{ env.TOOL_OSV_VERSION }}-${{ env.TOOL_OSV_SHA256 }}
       - name: Install OSV-Scanner
+        id: osv-scanner-install
         run: |
-          # --fail 很重要：沒有它，GitHub 回 404/5xx 時 curl 會把錯誤頁面存成「執行檔」，
-          # 後面執行失敗又被當成無害的 warning 放行 → 相依弱點掃描其實沒跑、Gate 卻照樣綠燈。
-          # sha256 也要對：release 的 tag 可以被移動，校驗碼才是真正「釘死」的那一道。
-          # 升版時一起換：https://github.com/google/osv-scanner/releases/download/<版本>/osv-scanner_SHA256SUMS
-          VERSION="2.3.8"
-          SHA256="bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
-          curl --fail -sSL -o osv-scanner \
-            "https://github.com/google/osv-scanner/releases/download/v${VERSION}/osv-scanner_linux_amd64"
-          echo "${SHA256}  osv-scanner" | sha256sum -c -
-          chmod +x osv-scanner && sudo mv osv-scanner /usr/local/bin/osv-scanner
-          # 再驗一次真的是可執行的 osv-scanner，才往下跑
+          F="$HOME/.cache/ci-tools/osv-scanner/osv-scanner_linux_amd64"
+          if [ -f "$F" ] && ! echo "${TOOL_OSV_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 osv-scanner_linux_amd64 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/google/osv-scanner/releases/download/v${TOOL_OSV_VERSION}/osv-scanner_linux_amd64"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_OSV_SHA256}  $F" | sha256sum -c -
+          sudo install -m 755 "$F" /usr/local/bin/osv-scanner
           osv-scanner --version
+      - name: Save OSV-Scanner to cache
+        if: ${{ steps.osv-scanner-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/osv-scanner
+          key: ${{ steps.osv-scanner-cache.outputs.cache-primary-key }}
       - name: Run OSV-Scanner
         env:
           FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
@@ -180,18 +220,36 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore Trivy from cache
+        id: trivy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/trivy
+          key: ci-tools-trivy-${{ env.TOOL_TRIVY_VERSION }}-${{ env.TOOL_TRIVY_SHA256 }}
       - name: Install Trivy
+        id: trivy-install
         run: |
-          # get.trivy.dev 自 2026-11-03 失效（aquasecurity/setup-trivy#42），改從 GitHub Release 安裝。
-          # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
-          VERSION="0.70.0"
-          SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-          curl --fail -sSL -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
-          echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
-          tar -xzf trivy.tar.gz trivy
-          sudo mv trivy /usr/local/bin/trivy
-          rm trivy.tar.gz
+          F="$HOME/.cache/ci-tools/trivy/trivy.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 trivy.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/aquasecurity/trivy/releases/download/v${TOOL_TRIVY_VERSION}/trivy_${TOOL_TRIVY_VERSION}_Linux-64bit.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" trivy
+          sudo mv "$RUNNER_TEMP/trivy" /usr/local/bin/trivy
           trivy --version
+      - name: Save Trivy to cache
+        if: ${{ steps.trivy-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/trivy
+          key: ${{ steps.trivy-cache.outputs.cache-primary-key }}
       - name: Trivy scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -284,18 +342,36 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore zizmor from cache
+        id: zizmor-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/zizmor
+          key: ci-tools-zizmor-${{ env.TOOL_ZIZMOR_VERSION }}-${{ env.TOOL_ZIZMOR_SHA256 }}
       - name: Install zizmor
+        id: zizmor-install
         run: |
-          # 版本 + sha256 一起釘，升版時到 release 頁面對 .tar.gz 重算：
-          # https://github.com/zizmorcore/zizmor/releases
-          VERSION="1.30.1"
-          SHA256="e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a"
-          curl --fail -sSL -o zizmor.tar.gz \
-            "https://github.com/zizmorcore/zizmor/releases/download/v${VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${SHA256}  zizmor.tar.gz" | sha256sum -c -
-          tar -xzf zizmor.tar.gz zizmor
-          sudo mv zizmor /usr/local/bin/zizmor
+          F="$HOME/.cache/ci-tools/zizmor/zizmor.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 zizmor.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/zizmorcore/zizmor/releases/download/v${TOOL_ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" zizmor
+          sudo mv "$RUNNER_TEMP/zizmor" /usr/local/bin/zizmor
           zizmor --version
+      - name: Save zizmor to cache
+        if: ${{ steps.zizmor-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/zizmor
+          key: ${{ steps.zizmor-cache.outputs.cache-primary-key }}
       - name: Run zizmor
         env:
           # 有 token 才能做線上檢查（例如「這個釘死的 SHA 是不是已知有漏洞的版本」）
@@ -326,19 +402,36 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # 跟 trivy job 用同一版 trivy 0.70.0（同一個安裝步驟），兩邊結果才會一致
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore Trivy from cache
+        id: trivy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/trivy
+          key: ci-tools-trivy-${{ env.TOOL_TRIVY_VERSION }}-${{ env.TOOL_TRIVY_SHA256 }}
       - name: Install Trivy
+        id: trivy-install
         run: |
-          # get.trivy.dev 自 2026-11-03 失效（aquasecurity/setup-trivy#42），改從 GitHub Release 安裝。
-          # 版本 + sha256 一起釘，升版時到 release 頁面的 trivy_<版本>_checksums.txt 取值。
-          VERSION="0.70.0"
-          SHA256="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
-          curl --fail -sSL -o trivy.tar.gz             "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
-          echo "${SHA256}  trivy.tar.gz" | sha256sum -c -
-          tar -xzf trivy.tar.gz trivy
-          sudo mv trivy /usr/local/bin/trivy
-          rm trivy.tar.gz
+          F="$HOME/.cache/ci-tools/trivy/trivy.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 trivy.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/aquasecurity/trivy/releases/download/v${TOOL_TRIVY_VERSION}/trivy_${TOOL_TRIVY_VERSION}_Linux-64bit.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" trivy
+          sudo mv "$RUNNER_TEMP/trivy" /usr/local/bin/trivy
           trivy --version
+      - name: Save Trivy to cache
+        if: ${{ steps.trivy-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/trivy
+          key: ${{ steps.trivy-cache.outputs.cache-primary-key }}
       - name: Build + scan images
         env:
           SHA: ${{ github.sha }}

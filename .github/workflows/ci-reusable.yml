@@ -101,6 +101,28 @@ on:
 permissions:
   contents: read
 
+# ── 從 GitHub Releases 下載的工具 ─────────────────────────────────────
+# 版本 + sha256 一起釘、集中寫在這裡。latest 升版會新增規則，沒改程式也可能突然變紅；
+# release 的 tag 可以被移動，sha256 才是真正「釘死」的那一道。
+# 升版只改這裡的兩個值（sha256 從各工具 release 頁面的 checksums 檔取得，網址見各變數旁）。
+#
+# 下載與快取（每個工具同一套寫法）：
+#   - 先從 Actions 快取還原，沒命中才下載。快取 key 由版本 + sha256 組成，升版時自動換新；
+#     舊快取 7 天沒用 GitHub 會自動刪除。快取屬於各呼叫端 repo，各自第一次跑仍要下載。
+#   - 還原的檔案一樣驗 sha256；校驗不符（損毀或被竄改）就丟掉重新下載，不直接拿來用。
+#   - curl 的 --fail 不能拿掉：沒有它，GitHub 回 404/5xx 時錯誤頁面會被存成「執行檔」，
+#     掃描其實沒跑、Gate 卻可能照樣綠燈。
+#   - --retry 6 --retry-delay 10：GitHub Releases 偶爾連續回 504 十幾秒以上
+#     （2026-11-09 實測：間隔 5 秒重試 4 次仍失敗），撐約 1 分鐘；用完仍失敗照樣紅燈。
+#
+# 變數名一律加 TOOL_ 前綴：工具會把自己前綴的環境變數當設定讀（TRIVY_*、HADOLINT_*），
+# 例如 TRIVY_VERSION 可能被 trivy 當成 --version 旗標 —— 同 2.2.2 修掉的 DOCKER_CONTEXT 衝突。
+env:
+  TOOL_HADOLINT_VERSION: "2.15.1"      # https://github.com/hadolint/hadolint/releases（checksums.sha256）
+  TOOL_HADOLINT_SHA256: "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
+  TOOL_ACTIONLINT_VERSION: "1.7.12"    # https://github.com/rhysd/actionlint/releases（actionlint_<版本>_checksums.txt）
+  TOOL_ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
 jobs:
   python:
     name: Python lint + test
@@ -291,20 +313,43 @@ jobs:
       # hadolint：檢查 Dockerfile 的寫法（沒釘版本的 apt 套件、用 latest tag、
       # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
       # hadolint 抓得更廣。放在 build 前面：Dockerfile 寫壞了不必等 build 跑完才知道。
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore hadolint from cache
+        id: hadolint-cache
+        if: ${{ inputs.run-hadolint }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/hadolint
+          key: ci-tools-hadolint-${{ env.TOOL_HADOLINT_VERSION }}-${{ env.TOOL_HADOLINT_SHA256 }}
+      - name: Install hadolint
+        id: hadolint-install
+        if: ${{ inputs.run-hadolint }}
+        run: |
+          if [ ! -s "$RUNNER_TEMP/dockerfiles.txt" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
+          F="$HOME/.cache/ci-tools/hadolint/hadolint-linux-x86_64"
+          if [ -f "$F" ] && ! echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 hadolint-linux-x86_64 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/hadolint/hadolint/releases/download/v${TOOL_HADOLINT_VERSION}/hadolint-linux-x86_64"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c -
+          sudo install -m 755 "$F" /usr/local/bin/hadolint
+          hadolint --version
+      - name: Save hadolint to cache
+        if: ${{ steps.hadolint-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/hadolint
+          key: ${{ steps.hadolint-cache.outputs.cache-primary-key }}
       - name: Dockerfile lint (hadolint)
         if: ${{ inputs.run-hadolint }}
         run: |
           LIST="$RUNNER_TEMP/dockerfiles.txt"
           if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
-          # 版本 + sha256 一起釘，升版時到 release 的 checksums.sha256 重抓：
-          # https://github.com/hadolint/hadolint/releases
-          VERSION="2.15.1"
-          SHA256="c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
-          curl --fail -sSL -o hadolint \
-            "https://github.com/hadolint/hadolint/releases/download/v${VERSION}/hadolint-linux-x86_64"
-          echo "${SHA256}  hadolint" | sha256sum -c -
-          chmod +x hadolint && sudo mv hadolint /usr/local/bin/hadolint
-          hadolint --version
           # warning 以上才算失敗；info / style 只印出來。要忽略某條規則放 .hadolint.yaml 在專案根目錄。
           FAIL=0
           while IFS= read -r entry; do
@@ -346,21 +391,43 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore actionlint from cache
+        id: actionlint-cache
+        if: ${{ inputs.run-actionlint }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/actionlint
+          key: ci-tools-actionlint-${{ env.TOOL_ACTIONLINT_VERSION }}-${{ env.TOOL_ACTIONLINT_SHA256 }}
+      - name: Install actionlint
+        id: actionlint-install
+        if: ${{ inputs.run-actionlint }}
+        run: |
+          F="$HOME/.cache/ci-tools/actionlint/actionlint.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 actionlint.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/rhysd/actionlint/releases/download/v${TOOL_ACTIONLINT_VERSION}/actionlint_${TOOL_ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" actionlint
+          sudo mv "$RUNNER_TEMP/actionlint" /usr/local/bin/actionlint
+          actionlint -version
+      - name: Save actionlint to cache
+        if: ${{ steps.actionlint-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/actionlint
+          key: ${{ steps.actionlint-cache.outputs.cache-primary-key }}
       - name: Run actionlint
         if: ${{ inputs.run-actionlint }}
         env:
           EXTRA_PATHS: ${{ inputs.actionlint-paths }}
         run: |
-          # 版本 + sha256 一起釘，理由同其他工具：latest 升版會新增規則，沒改程式也可能突然變紅。
-          # 升版時到 release 的 actionlint_<版本>_checksums.txt 重抓：https://github.com/rhysd/actionlint/releases
-          VERSION="1.7.12"
-          SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-          curl --fail -sSL -o actionlint.tar.gz \
-            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
-          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
-          tar -xzf actionlint.tar.gz actionlint
-          sudo mv actionlint /usr/local/bin/actionlint
-          actionlint -version
           shellcheck --version | head -2
 
           # 不帶檔案參數時 actionlint 會自動掃 .github/workflows；

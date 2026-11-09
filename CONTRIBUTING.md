@@ -124,15 +124,17 @@ NuGet 快取）、.NET 測試框架、`dotnet-runner: windows-latest`、Docker �
 
 ### 6. 升級某個掃描工具的版本
 
-Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘死**的，要升要自己來：
+Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘死**的，要升要自己來。
+前五個從 GitHub Releases 下載的工具，版本與校驗碼集中在兩個 reusable 檔頭的 `env:`（`TOOL_<工具>_VERSION` / `TOOL_<工具>_SHA256`），
+升版只改那兩個值；快取 key 由這兩個值組成，會自動換新，不用另外改。
 
 | 工具 | 在哪 | 怎麼拿新的校驗碼 |
 |---|---|---|
-| OSV-Scanner | `security-reusable.yml` 的 `VERSION` / `SHA256` | release 頁面的 `osv-scanner_SHA256SUMS`，找 `linux_amd64` 那行 |
-| zizmor | `security-reusable.yml` | 抓 `zizmor-x86_64-unknown-linux-gnu.tar.gz` 自己 `sha256sum` |
-| actionlint | `ci-reusable.yml` | release 的 `actionlint_<版本>_checksums.txt` |
-| hadolint | `ci-reusable.yml` | release 的 `checksums.sha256`，找 `linux-x86_64` |
-| trivy CLI | `security-reusable.yml` 的 `trivy`、`trivy-image` 兩個 job 的 Install Trivy（`VERSION` / `SHA256`，兩處同步改） | release 的 `trivy_<版本>_checksums.txt`，找 `Linux-64bit.tar.gz`。`trivy-action` 設 `skip-setup-trivy: true`，直接用這支 |
+| OSV-Scanner | `security-reusable.yml` 的 `TOOL_OSV_*` | release 頁面的 `osv-scanner_SHA256SUMS`，找 `linux_amd64` 那行 |
+| zizmor | `security-reusable.yml` 的 `TOOL_ZIZMOR_*` | 抓 `zizmor-x86_64-unknown-linux-gnu.tar.gz` 自己 `sha256sum` |
+| actionlint | `ci-reusable.yml` 的 `TOOL_ACTIONLINT_*` | release 的 `actionlint_<版本>_checksums.txt` |
+| hadolint | `ci-reusable.yml` 的 `TOOL_HADOLINT_*` | release 的 `checksums.sha256`，找 `linux-x86_64` |
+| trivy CLI | `security-reusable.yml` 的 `TOOL_TRIVY_*`（`trivy`、`trivy-image` 兩個 job 共用） | release 的 `trivy_<版本>_checksums.txt`，找 `Linux-64bit.tar.gz`。`trivy-action` 設 `skip-setup-trivy: true`，直接用這支 |
 | Semgrep image | `security-reusable.yml` 的 `container.image` | `docker buildx imagetools inspect semgrep/semgrep:<版本>` 的 digest |
 | gitleaks image | `security-reusable.yml` 的 `docker run` | `docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本>` 的 digest |
 | ruff | `ci-reusable.yml` 的 `ruff-version` 預設值 | 不用校驗碼（pip 有自己的 hash 機制），但要記得新版可能多規則 |
