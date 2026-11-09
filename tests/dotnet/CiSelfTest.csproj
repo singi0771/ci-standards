@@ -1,0 +1,16 @@
+<!--
+  公版自我測試用的最小 .NET 專案，讓本 repo 的 CI 實際跑 .NET build + test
+  （restore、dotnet format、build、test）。
+
+  刻意不放任何 PackageReference：沒有 NuGet 相依，OSV / Trivy 不會因為上游新 CVE 變紅。
+  因此也沒有測試框架，dotnet test 步驟會執行但沒有測試可跑。
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
