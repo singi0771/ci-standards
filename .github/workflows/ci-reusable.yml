@@ -300,7 +300,7 @@ jobs:
           # https://github.com/hadolint/hadolint/releases
           VERSION="2.15.1"
           SHA256="c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507"
-          curl --fail -sSL -o hadolint \
+          curl --fail -sSL --retry 4 --retry-delay 5 -o hadolint \
             "https://github.com/hadolint/hadolint/releases/download/v${VERSION}/hadolint-linux-x86_64"
           echo "${SHA256}  hadolint" | sha256sum -c -
           chmod +x hadolint && sudo mv hadolint /usr/local/bin/hadolint
@@ -355,7 +355,7 @@ jobs:
           # 升版時到 release 的 actionlint_<版本>_checksums.txt 重抓：https://github.com/rhysd/actionlint/releases
           VERSION="1.7.12"
           SHA256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
-          curl --fail -sSL -o actionlint.tar.gz \
+          curl --fail -sSL --retry 4 --retry-delay 5 -o actionlint.tar.gz \
             "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
           echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
           tar -xzf actionlint.tar.gz actionlint

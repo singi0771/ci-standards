@@ -12,6 +12,16 @@
 
 ---
 
+## [Unreleased]
+
+### 需要專案動作
+無。
+
+### 修正
+- 各掃描 job 從 GitHub Releases 下載工具（actionlint、hadolint、OSV-Scanner、Trivy、zizmor）時，
+  GitHub 偶爾回 `curl: (22) The requested URL returned error: 504`，整個 job 與 Gate 跟著紅燈。
+  下載改為失敗時最多重試 4 次（間隔 5 秒）；重試用完仍失敗照樣紅燈，不會在沒掃描的情況下亮綠燈。
+
 ## [2.2.2] — 2026-11-09
 
 修正 Docker build check 與 Docker image (Trivy) 在 `ubuntu-latest` 上建置失敗。
