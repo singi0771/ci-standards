@@ -28,5 +28,6 @@ jobs:
       scan-docker-image: true
       dockerfile: "tests/docker/Dockerfile"
       fail-on-findings: true
+      generate-sbom: true       # 選配功能也要實際跑過，公版自己的 CI 不留 skipped 的步驟
       # 本 repo 的內容就是 workflow，zizmor 當然要開；範本目錄會一起被掃到（規則在 .github/zizmor.yml）
       run-zizmor: true
