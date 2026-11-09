@@ -24,7 +24,9 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     uses: ./.github/workflows/security-reusable.yml
     with:
-      scan-docker-image: false   # 本 repo 沒有 Dockerfile
+      # 用測試用的 tests/docker/Dockerfile 驗證公版的 image 掃描路徑（FROM scratch，沒有 OS 套件）
+      scan-docker-image: true
+      dockerfile: "tests/docker/Dockerfile"
       fail-on-findings: true
       # 本 repo 的內容就是 workflow，zizmor 當然要開；範本目錄會一起被掃到（規則在 .github/zizmor.yml）
       run-zizmor: true

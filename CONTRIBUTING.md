@@ -118,7 +118,8 @@ git tag -a v2.0.1 -m "說明" && git push origin v2.0.1   # 不可變的還原�
 
 動到掃描邏輯或 gate 判定時，先在一個真實專案用 `@main` 跑過一輪，
 再移動 `v2`。本 repo 自己的 CI 用 `./` 呼叫公版，PR 上就會用「這個 PR 的版本」跑，
-是第一道保險，但它涵蓋不到 Python / .NET / Docker / hadolint / image 掃描那幾條路徑。
+是第一道保險。Docker build、hadolint 與 image 掃描用測試用的 `tests/docker/Dockerfile` 跑，
+但它涵蓋不到 Python / .NET 那幾條路徑，也只驗證 `docker-context` 預設值，沒有測 `<路徑>:<context>` 寫法。
 
 ### 6. 升級某個掃描工具的版本
 
