@@ -14,7 +14,7 @@
 
 ## [2.2.3] — 2026-11-09
 
-工具下載加上重試與 Actions 快取，GitHub Releases 偶發 504 不再讓掃描 job 紅燈。
+工具下載加上重試與 Actions 快取，減少 GitHub Releases 偶發 504 讓掃描 job 紅燈。
 
 ### 需要專案動作
 無。
