@@ -10,7 +10,7 @@
 # Dependabot 預設把 PR 發到 **default branch**。如果 ci.yml 設了
 # restricted-base-branches（限制誰能 merge 進正式分支），而 default branch 正好是
 # 那個受管制的分支，dependabot/* 的 PR 會被擋下、永遠 merge 不了。
-# 兩個解法擇一：把 default branch 設成整合分支，或在下面每個 updates 項目加
+# 解法：在下面每個 updates 項目加（default branch 維持正式分支，不要改）
 #     target-branch: "develop"
 version: 2
 

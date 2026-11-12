@@ -10,3 +10,10 @@ Icon?
 ~$*
 *.bak
 *.bak[0-9]*
+# .NET 建置產物（tests/dotnet 自測專案）
+bin/
+obj/
+# 簡報、影片等素材不進 repo
+docs/*.pptx
+docs/*.pdf
+docs/素材/

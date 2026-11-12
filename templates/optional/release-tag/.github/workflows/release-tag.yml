@@ -13,10 +13,8 @@ on:
 
 permissions: {}
 
-# 連續合併時依序處理，同一天的流水號才不會撞號
-concurrency:
-  group: release-tag
-  cancel-in-progress: false
+# 刻意不設 concurrency：同一群組 GitHub 只保留一個等待中的 run，連續合併三次時第二次會被取消、漏打 tag。
+# 各次 run 平行執行，撞號由 release-tag.sh 以「建立 tag ref 失敗就換下一號」處理。
 
 jobs:
   release-tag:

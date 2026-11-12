@@ -34,8 +34,6 @@ git branch develop origin/<正式分支>
 git push -u origin develop
 ```
 
-建議使用者將 GitHub 的 Default branch 設為 `develop`，新 PR 預設發往 develop（需 admin 權限）。
-
 ## 4. 執行導入腳本
 
 於功能分支（`develop` 流程從 develop 開出）在專案根目錄執行，先以 dry-run 確認偵測結果：
@@ -69,7 +67,8 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 | 「在 vX 不存在」的 input | workflow 會 `startup_failure`，Gate 永遠不回報。移除該 input |
 | 「觸發條件不是範本原樣」 | 對照 `templates/consumer-repo/.github/workflows/ci.yml` 手動修改。設有來源分支政策時必須處理 |
 | Copilot 呼叫端殘留 | 依輸出的 `git rm` 指令刪除 |
-| 多個 .NET 方案／專案檔 | 於 `ci.yml` 的 `with:` 加 `dotnet-project` |
+| 多個 .NET 方案／專案檔 | 於 `ci.yml` 的 `with:` 加 `dotnet-project`。只有一個方案檔時（含 `docker-compose.dcproj` 的方案亦同）維持空白，勿改指單一專案檔 |
+| `.editorconfig` 與 `.gitattributes` 換行不一致 | 依提示於 `.gitattributes` 加 `*.cs text eol=<值>`，執行 `git add --renormalize .` 後一併提交（見 README「dotnet format 回報 ENDOFLINE」） |
 
 ## 6. 開 PR 與處理首次掃描
 
@@ -125,7 +124,7 @@ bash /tmp/adopt.sh --ref v2 --flow develop      # 既有 branch-guard.yml 的 no
 - [ ] 分支流程、正式分支、Branch Guard 通知對象
 - [ ] repo 是否已啟用 Issues
 - [ ] 兩個 Gate 的結果與處理過的掃描項目
-- [ ] 需使用者以 admin 權限處理的項目（Default branch、分支保護、Issues）
+- [ ] 需使用者以 admin 權限處理的項目（分支保護、Issues）
 - [ ] 是否啟用自動 release tag
 - [ ] 是否採用合併後刪除來源分支，及已刪除的分支
 - [ ] 建議使用者於本 repo 設定 **Watch → Custom → Releases**，以收到公版更新通知

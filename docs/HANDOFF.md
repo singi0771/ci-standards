@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v2.2.3`（2026-11-09，SHA 以 `git rev-parse v2.2.3^{}` 為準；前一版 2.2.2 以 `git rev-parse v2.2.2^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **2.2.3（2026-11-09）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
+| 發佈基準 | `v2.3.0`（2026-11-12，SHA 以 `git rev-parse v2.3.0^{}` 為準；前一版 2.2.3 以 `git rev-parse v2.2.3^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.3.0（2026-11-12）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` tag | ✅ 指向 2.2.3。新導入一律 `@v2` |
-| 最新版本 tag | ✅ `v2.2.3`（驗收：`v2` 與 `v2.2.3^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
+| `v2` tag | ✅ 指向 2.3.0。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.3.0`（驗收：`v2` 與 `v2.3.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
@@ -162,10 +162,7 @@
 而 `joshisman12` / `joshisman0925` 兩個帳號對本 repo 都是 `admin: false` ——
 下面這幾步必須用 `singi0771` 本人的帳號做：
 
-1. **Settings → General → Default branch 改成 `develop`**
-   新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
-
-2. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
+1. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
 
    ```bash
    REQUIRED_CHECKS="ci / CI Gate,security / Security Gate,adopt regression gate" \
@@ -185,16 +182,16 @@
 
    > 沒有 admin 權限的人可以先跑 `--dry-run` 把 payload 印出來交給有權限的人。
 
-3. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
+2. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
    `develop`。**已經開著的 PR #31 是發到 `main` 的**，要嘛把它的 base 改成 `develop`、
    要嘛關掉讓 Dependabot 重開一份。留著不動的話，等政策生效後它會被 branch-policy 擋住。
 
-4. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
+3. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
    `ci / CI Gate` 應該紅，Summary 會說「不能直接合併進 main，允許的來源只有 develop」。
    把 base 改成 `develop` 之後應該轉綠。（這一步到目前為止**還沒實證過** ——
    失敗路徑只在本機用抽出來的判定邏輯跑過七種情境，沒有在真的 PR 上驗收。）
 
-> ⚠️ 第 2 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
+> ⚠️ 第 1 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
 > 做了這步就不必再另外手動加。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）

@@ -224,6 +224,28 @@ $HasSh = Test-AnyFile '\.sh$' -1
 $DotnetSln  = Measure-Files '\.(sln|slnx)$' -1
 $DotnetProj = Measure-Files '\.(csproj|fsproj|vbproj)$' -1
 $HasDotnet  = ($DotnetSln -gt 0) -or ($DotnetProj -gt 0)
+# dotnet format 換行檢查（與 adopt.sh 一致）：.editorconfig 對 .cs / .vb 規定的 end_of_line
+# 與 Linux runner 簽出的換行不一致時，CI 的 format 步驟會整片 ENDOFLINE。
+$EolWarn = ''
+if ($HasDotnet -and (Test-Path -LiteralPath '.editorconfig')) {
+  $EditorEol = ''
+  $hit = $false
+  foreach ($l in (Read-Lines '.editorconfig')) {
+    if ($l -match '^\s*\[') { $hit = ($l -match '^\s*\[\*\]\s*$') -or ($l -match '(\.|\{|,)cs(\]|,|\})'); continue }
+    if ($hit -and $l -match '^\s*end_of_line\s*=\s*([A-Za-z]*)') { $EditorEol = $Matches[1].ToLower() }
+  }
+  $ErrorActionPreference = 'Continue'
+  $csFile = @(& git ls-files -- '*.cs' '*.vb' 2>$null) | Select-Object -First 1
+  if (($EditorEol -eq 'crlf' -or $EditorEol -eq 'lf') -and $csFile) {
+    $csAttr = ((& git check-attr eol -- $csFile 2>$null) -replace '^.*: eol: ', '')
+    if ($csAttr -ne $EditorEol) {
+      # crlf：repo 內存的多半是 LF，Linux 簽出就是 LF → 一定紅。lf：只有 repo 內存了 CRLF 才會紅。
+      $idxCrlf = [bool](@(& git ls-files --eol -- '*.cs' '*.vb' 2>$null) | Where-Object { $_ -match '^i/(crlf|mixed)' } | Select-Object -First 1)
+      if ($EditorEol -eq 'crlf' -or $idxCrlf) { $EolWarn = $EditorEol }
+    }
+  }
+  $ErrorActionPreference = 'Stop'
+}
 $PyVer = '3.12'
 if (Test-Path -LiteralPath '.python-version') {
   # ReadAllText 會自動去掉 UTF-8 BOM；Trim 去掉空白與換行（adopt.sh 用 tr 做同一件事）
@@ -282,6 +304,9 @@ Write-Host ("  shell script : {0}" -f (B $HasSh))
 Write-Host ("  .NET         : {0} (方案檔 {1}、專案檔 {2})" -f (B $HasDotnet), $DotnetSln, $DotnetProj)
 if ($DotnetSln -gt 1 -or ($DotnetSln -eq 0 -and $DotnetProj -gt 1)) {
   Warn '找到不只一個 .NET 方案 / 專案檔，公版無法自動決定要建置哪一個 —— 導入後請在 ci.yml 的 with: 加上 dotnet-project: "<路徑>"'
+}
+if ($EolWarn) {
+  Warn (".editorconfig 規定 .cs 用 {0} 換行，但 .gitattributes 沒讓 .cs 以 {0} 簽出 —— Linux runner 上 dotnet format 會整片 ENDOFLINE。請在 .gitattributes 加上「*.cs text eol={0}」（有 .vb 也加），再 git add --renormalize . 後 commit（見 README 疑難排解）" -f $EolWarn)
 }
 Write-Host ("  正式分支     : {0}" -f $Prod)
 Write-Host ("  分支流程     : {0} ({1})" -f $Flow, $FlowHow)
@@ -731,7 +756,6 @@ Write-Host ""
 if ($Flow -eq 'develop' -and -not $HasDevelop) {
   Write-Host " 0. 建立 develop 分支（從正式分支開出）:"
   Write-Host "      git branch develop origin/$Prod; git push -u origin develop"
-  Write-Host "    並建議把 GitHub 的 Default branch 設為 develop，新 PR 預設就發到 develop。"
   Write-Host ""
 }
 @'
