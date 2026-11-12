@@ -12,6 +12,33 @@
 
 ---
 
+## [2.3.0] — 2026-11-12
+
+選配範本 `release-tag` 修正連續合併漏打 tag；導入腳本新增 .NET 換行設定不一致的提醒。
+
+### 需要專案動作
+- 已複製選配範本 `release-tag` 的專案：以新版 `templates/optional/release-tag/.github/` 覆蓋
+  `release-tag.yml` 與 `release-tag.sh`（正式分支名稱照原本修改）。
+- .NET 專案的 dotnet format 在 Linux 上整片 `ENDOFLINE` 者：依 README「dotnet format 回報 ENDOFLINE」補 `.gitattributes`。
+
+### 修正
+- 選配範本 `release-tag`：連續合併三次以上時，中間那次的 run 被 concurrency 取消，漏打 tag。
+  GitHub 同一 concurrency 群組只保留一個等待中的 run，新的會取消舊的等待者。
+  改為不設 concurrency、各次 run 平行執行；tag 改以 API 建立 ref（同名已存在即失敗，不會覆蓋），
+  日期流水號撞號時往下一號重試。tag 已建立但 Release 未建成時，Re-run 會補建 Release。
+  平行執行時流水號順序可能與合併順序相反。
+
+### 新增
+- 導入腳本（`adopt.sh` / `adopt.ps1`）偵測 `.editorconfig` 對 `.cs` 規定的 `end_of_line`
+  與 `.gitattributes` 的 `eol` 不一致時提醒（`crlf` 未設 `eol=crlf`；或 `lf` 未設 `eol=lf` 且 repo 內存有 CRLF）。
+
+### 文件
+- README 疑難排解：dotnet format 整片 `ENDOFLINE` 時，本機 Windows 執行 `dotnet format` 無法修正，
+  改以 `.gitattributes` 指定 `eol` 並 `git add --renormalize .`。
+- `dotnet-project`：方案內含 `docker-compose.dcproj` 時不需處理，維持空白；勿改指單一專案檔。
+- 移除「將 GitHub Default branch 設為 `develop`」的建議（README、導入指引、導入腳本輸出、Dependabot 範本註解）。
+  Default branch 維持正式分支；develop 流程由來源分支政策與 Dependabot `target-branch` 處理。
+
 ## [2.2.3] — 2026-11-09
 
 工具下載加上重試與 Actions 快取，減少 GitHub Releases 偶發 504 讓掃描 job 紅燈。
