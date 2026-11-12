@@ -121,7 +121,7 @@ jobs:
         # 拿掉它的話後續步驟會被 GitHub 跳過 —— 變成「只有什麼都沒掃到才上傳報告」，
         # 最需要報告的時候反而不傳。（2026-08-09 PR #15 一度改錯成這樣。）
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -275,7 +275,7 @@ jobs:
           exit-code: "0"
       - name: Upload SBOM as artifact
         if: ${{ !cancelled() && inputs.generate-sbom }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
