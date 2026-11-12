@@ -162,10 +162,7 @@
 而 `joshisman12` / `joshisman0925` 兩個帳號對本 repo 都是 `admin: false` ——
 下面這幾步必須用 `singi0771` 本人的帳號做：
 
-1. **Settings → General → Default branch 改成 `develop`**
-   新開的 PR base 就會預設是它，不會有人不小心發到 `main`。
-
-2. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
+1. **套用 ruleset**（腳本可重複執行，同名會更新而不是新增一份）：
 
    ```bash
    REQUIRED_CHECKS="ci / CI Gate,security / Security Gate,adopt regression gate" \
@@ -185,16 +182,16 @@
 
    > 沒有 admin 權限的人可以先跑 `--dry-run` 把 payload 印出來交給有權限的人。
 
-3. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
+2. **Dependabot**：`.github/dependabot.yml` 已加 `target-branch: "develop"`，新的更新 PR 會發到
    `develop`。**已經開著的 PR #31 是發到 `main` 的**，要嘛把它的 base 改成 `develop`、
    要嘛關掉讓 Dependabot 重開一份。留著不動的話，等政策生效後它會被 branch-policy 擋住。
 
-4. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
+3. **驗收**：開一個測試 PR 從隨便一個分支發到 `main`，
    `ci / CI Gate` 應該紅，Summary 會說「不能直接合併進 main，允許的來源只有 develop」。
    把 base 改成 `develop` 之後應該轉綠。（這一步到目前為止**還沒實證過** ——
    失敗路徑只在本機用抽出來的判定邏輯跑過七種情境，沒有在真的 PR 上驗收。）
 
-> ⚠️ 第 2 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
+> ⚠️ 第 1 步會把 `adopt regression gate` 一起設成 required —— 那正是 ④ 裡一直沒做的事，
 > 做了這步就不必再另外手動加。
 
 ### ~~① 用 AdminAutoTools 測 adopt~~ ✅ 已完成（2026-08-13 查證）

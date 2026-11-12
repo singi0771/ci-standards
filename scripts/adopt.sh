@@ -780,7 +780,6 @@ info ""
 if [ "$FLOW" = develop ] && [ "$HAS_DEVELOP" = false ]; then
   info " 0. 建立 develop 分支（從正式分支開出）："
   info "      git branch develop origin/$PROD && git push -u origin develop"
-  info "    並建議把 GitHub 的 Default branch 設為 develop，新 PR 預設就發到 develop。"
   info ""
 fi
 cat <<'NEXT'

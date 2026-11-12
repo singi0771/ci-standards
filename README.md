@@ -144,7 +144,7 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team" --flow develop
 3. **處理首次結果**：首次執行通常會有掃描結果。於 Actions → 該 run → Summary 查看失敗項目，
    依[疑難排解](#疑難排解)與[誤判抑制](#誤判抑制)處理。發現項目過多時可先以 `fail-on-findings: false` 過渡，見[導入過渡期](#導入過渡期)。
 4. **設定分支保護**：兩個 Gate 至少執行過一次後，見[分支保護](#分支保護)。無法設定時見[無法設定分支保護時](#無法設定分支保護時)。
-5. **確認 repo 設定**：啟用 Issues（Branch Guard 需要）；develop 流程將 Default branch 設為 `develop`；
+5. **確認 repo 設定**：啟用 Issues（Branch Guard 需要）；Default branch 維持正式分支，不改為 `develop`；
    不開啟「Automatically delete head branches」（發版 PR 合併後會刪除 develop）。
 6. **合併規則**：develop → 正式分支以 merge commit 合併，不使用 squash（兩分支歷史分岔後，發版 PR 會衝突，衝突中的 PR 不觸發檢查）。
 
@@ -485,7 +485,6 @@ with:
 | main 只接受 develop、hotfix 的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop hotfix/*"` | 導入腳本 |
 | develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` | 導入腳本 |
 | Dependabot PR 發往 develop | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
-| 新 PR 預設發往 develop | Settings → General → Default branch 設為 `develop` | 手動（需 admin） |
 | 發版 PR 不破壞歷史 | develop → main 以 merge commit 合併，不使用 squash；不開「Automatically delete head branches」 | 團隊規則 |
 
 分支名稱可自訂，腳本與 input 皆依實際填寫的名稱運作。
