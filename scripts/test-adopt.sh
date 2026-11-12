@@ -102,6 +102,27 @@ has "$CI"  'run-docker-build: true'    "子目錄的 Dockerfile 也算有 Docker
 has "$CI"  'python-version: "3.11"'    ".python-version 的 BOM 與 CRLF 被去掉"
 
 # ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 A3：.editorconfig 規定 CRLF，.gitattributes 沒跟上（dotnet format 會整片 ENDOFLINE）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo dotnet-eol
+git config core.autocrlf false
+mkdir -p src/App
+printf '<Project Sdk="Microsoft.NET.Sdk"></Project>\n' > src/App/App.csproj
+printf 'class A {}\n' > src/App/A.cs
+printf 'root = true\n\n[*]\nend_of_line = lf\n\n[*.{cs,vb}]\nend_of_line = crlf\n' > .editorconfig
+git add -A && git commit -q -m code
+OUT="$WORK/eol-out.txt"
+"$ADOPT" --std "$STD" --dry-run > "$OUT"
+has "$OUT" '*.cs text eol=crlf'        "[*.{cs,vb}] 規定 crlf、沒有 .gitattributes → 提醒加 eol=crlf"
+printf '*.cs text eol=crlf\n' > .gitattributes
+"$ADOPT" --std "$STD" --dry-run > "$OUT"
+hasnt "$OUT" 'ENDOFLINE'               ".gitattributes 已設 eol=crlf → 不提醒"
+printf '[*]\nend_of_line = lf\n' > .editorconfig
+rm .gitattributes
+"$ADOPT" --std "$STD" --dry-run > "$OUT"
+hasnt "$OUT" 'ENDOFLINE'               "規定 lf 且 repo 內存的是 LF → 不提醒"
+
+# ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 B：升級既有的舊版呼叫端\n'
 # ═════════════════════════════════════════════════════════════
 new_repo upgrade

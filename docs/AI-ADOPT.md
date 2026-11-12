@@ -69,7 +69,8 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 | 「在 vX 不存在」的 input | workflow 會 `startup_failure`，Gate 永遠不回報。移除該 input |
 | 「觸發條件不是範本原樣」 | 對照 `templates/consumer-repo/.github/workflows/ci.yml` 手動修改。設有來源分支政策時必須處理 |
 | Copilot 呼叫端殘留 | 依輸出的 `git rm` 指令刪除 |
-| 多個 .NET 方案／專案檔 | 於 `ci.yml` 的 `with:` 加 `dotnet-project` |
+| 多個 .NET 方案／專案檔 | 於 `ci.yml` 的 `with:` 加 `dotnet-project`。只有一個方案檔時（含 `docker-compose.dcproj` 的方案亦同）維持空白，勿改指單一專案檔 |
+| `.editorconfig` 與 `.gitattributes` 換行不一致 | 依提示於 `.gitattributes` 加 `*.cs text eol=<值>`，執行 `git add --renormalize .` 後一併提交（見 README「dotnet format 回報 ENDOFLINE」） |
 
 ## 6. 開 PR 與處理首次掃描
 

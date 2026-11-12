@@ -285,7 +285,7 @@ Semgrep 結果一律存為 artifact `semgrep-sarif`，不上傳 Security 分頁�
 | `ruff-version` | string | `0.16.0` | 固定的 ruff 版本。lint 規則由專案的 `pyproject.toml` 設定 |
 | `run-dotnet` | boolean | `false` | 執行 `dotnet restore` → `format --verify-no-changes` → `build -c Release` → `test` |
 | `dotnet-version` | string | `""` | SDK 版本，多個以換行分隔。空白時依序採用 `global.json`、專案檔的 `TargetFramework(s)`、`10.0.x` |
-| `dotnet-project` | string | `""` | `.sln` / `.slnx` / `.csproj` 路徑。空白時自動搜尋；找到兩個以上時失敗 |
+| `dotnet-project` | string | `""` | `.sln` / `.slnx` / `.csproj` 路徑。空白時自動搜尋；找到兩個以上時失敗。方案內含 `docker-compose.dcproj` 時不需處理，維持空白；勿改指單一專案檔，否則方案內其他專案不會被建置與測試 |
 | `run-dotnet-format` | boolean | `true` | 執行 `dotnet format --verify-no-changes`（依 `.editorconfig`） |
 | `dotnet-runner` | string | `ubuntu-latest` | WPF、WinForms、.NET Framework 專案設為 `windows-latest`（分鐘數 2 倍） |
 | `run-docker-build` | boolean | `true` | 驗證 image 可 build（不推送） |
@@ -608,9 +608,31 @@ with:
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | 上游檔案變更或校驗碼未更新 | 至本 repo 開 Issue |
 | `.NET build + test`：找到多個方案 / 專案檔 | 無法自動決定建置目標 | 設定 `dotnet-project` |
 | `.NET build + test` format 步驟失敗 | 不符 `.editorconfig` | 本機執行 `dotnet format` 後 commit |
+| `.NET build + test` format 步驟整片 `ENDOFLINE`，本機 Windows 執行 `dotnet format` 無變更 | `.editorconfig` 的 `end_of_line` 與 Linux runner 簽出的換行不一致；Windows 的 `core.autocrlf` 會轉換換行，本機重現不了 | 見 [dotnet format 回報 ENDOFLINE](#dotnet-format-回報-endofline) |
 | `.NET build + test` 找不到 WindowsDesktop SDK | 目標為 `net*-windows` 或 .NET Framework | 設定 `dotnet-runner: windows-latest` |
 | `fail-on-findings: false` 仍失敗 | 掃描工具本身錯誤或 OSV-Scanner 異常結束 | 檢查 log，多為暫時性網路問題，重新執行 |
 | `setup-branch-protection.sh` 回傳 403 | Free 方案私有 repo | 見[無法設定分支保護時](#無法設定分支保護時) |
+
+### dotnet format 回報 ENDOFLINE
+
+`.editorconfig` 規定 `end_of_line = crlf`，而 repo 內的檔案以 LF 儲存（Windows 預設 `core.autocrlf=true` 提交時轉成 LF）。
+Linux runner 簽出得到 LF，每個檔案都不符規定。本機 Windows 簽出時已轉回 CRLF，執行 `dotnet format` 不會有變更，無從修正。
+
+以 `.gitattributes` 指定 C# 檔案簽出時的換行，值與 `.editorconfig` 的 `end_of_line` 相同：
+
+```gitattributes
+*.cs text eol=crlf
+*.vb text eol=crlf
+```
+
+```bash
+git add .gitattributes
+git add --renormalize .
+git commit -m "chore: 以 .gitattributes 固定 C# 檔案換行"
+```
+
+`.editorconfig` 規定 `lf` 而 repo 內存的是 CRLF 時，同樣改為 `eol=lf` 後執行上述指令。
+導入腳本偵測到 `.editorconfig` 與 `.gitattributes` 不一致時會提醒。
 
 ---
 

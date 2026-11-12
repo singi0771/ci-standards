@@ -194,6 +194,29 @@ DOTNET_SLN="$(count_files "" '*.sln' '*.slnx')"
 DOTNET_PROJ="$(count_files "" '*.csproj' '*.fsproj' '*.vbproj')"
 HAS_DOTNET=false
 if [ "$DOTNET_SLN" -gt 0 ] || [ "$DOTNET_PROJ" -gt 0 ]; then HAS_DOTNET=true; fi
+# dotnet format 換行檢查：.editorconfig 對 .cs / .vb 規定的 end_of_line（[*] 或含 cs 的區段，後者優先）
+# 與 Linux runner 簽出的換行不一致時，CI 的 format 步驟會整片 ENDOFLINE。
+# Windows 本機有 core.autocrlf 幫忙轉換，跑 dotnet format 看不出問題，只能靠 .gitattributes 修。
+EOL_WARN=""
+if [ "$HAS_DOTNET" = true ] && [ -f .editorconfig ]; then
+  EDITOR_EOL="$(tr -d '\r' < .editorconfig | awk '
+    /^[[:space:]]*\[/ { hit = ($0 ~ /^[[:space:]]*\[\*\][[:space:]]*$/ || $0 ~ /(\.|\{|,)cs(\]|,|\})/); next }
+    hit && tolower($0) ~ /^[[:space:]]*end_of_line[[:space:]]*=/ {
+      v = tolower($0); sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[^a-z].*$/, "", v); eol = v
+    }
+    END { print eol }')"
+  CS_FILE="$(git ls-files -- '*.cs' '*.vb' 2>/dev/null | head -n 1 || true)"
+  if { [ "$EDITOR_EOL" = crlf ] || [ "$EDITOR_EOL" = lf ]; } && [ -n "$CS_FILE" ]; then
+    CS_ATTR="$(git check-attr eol -- "$CS_FILE" 2>/dev/null | sed 's/^.*: eol: //' || true)"
+    if [ "$CS_ATTR" != "$EDITOR_EOL" ]; then
+      # crlf：repo 內存的多半是 LF，Linux 簽出就是 LF → 一定紅。
+      # lf：只有 repo 內存了 CRLF 才會紅。
+      if [ "$EDITOR_EOL" = crlf ] || git ls-files --eol -- '*.cs' '*.vb' 2>/dev/null | grep -q '^i/\(crlf\|mixed\)'; then
+        EOL_WARN="$EDITOR_EOL"
+      fi
+    fi
+  fi
+fi
 PYVER="3.12"
 # 連 UTF-8 BOM（EF BB BF）一起去掉：PowerShell 5.1 的 Set-Content -Encoding UTF8 會寫 BOM，
 # 留著的話 python-version 會變成「BOM + 3.11」，setup-python 直接失敗（adopt.ps1 讀檔時會自動去掉）
@@ -243,6 +266,9 @@ info "  shell script : $HAS_SH"
 info "  .NET         : ${HAS_DOTNET}（方案檔 ${DOTNET_SLN}、專案檔 ${DOTNET_PROJ}）"
 if [ "$DOTNET_SLN" -gt 1 ] || { [ "$DOTNET_SLN" -eq 0 ] && [ "$DOTNET_PROJ" -gt 1 ]; }; then
   warn "找到不只一個 .NET 方案 / 專案檔，公版無法自動決定要建置哪一個 —— 導入後請在 ci.yml 的 with: 加上 dotnet-project: \"<路徑>\""
+fi
+if [ -n "$EOL_WARN" ]; then
+  warn ".editorconfig 規定 .cs 用 ${EOL_WARN} 換行，但 .gitattributes 沒讓 .cs 以 ${EOL_WARN} 簽出 —— Linux runner 上 dotnet format 會整片 ENDOFLINE。請在 .gitattributes 加上「*.cs text eol=${EOL_WARN}」（有 .vb 也加），再 git add --renormalize . 後 commit（見 README 疑難排解）"
 fi
 info "  正式分支     : $PROD"
 info "  分支流程     : ${FLOW}（${FLOW_HOW}）"
