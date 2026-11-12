@@ -150,7 +150,7 @@ job 的 `if` 與 `concurrency` 跟著改（只改標題 / 內文的 edited 不�
 | Dockerfile | 全 repo 任何一層有 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`）；有好幾個也照開，公版會逐一 build | `run-docker-build`、`run-hadolint`、`scan-docker-image`（2.0.0 起**不寫 `dockerfile:`** —— 公版留空就會自己找全 repo；你原本寫好的 `dockerfile:` 升級時原樣保留） |
 | Python | `requirements.txt` / `pyproject.toml` / `setup.py` / 有 `.py` | `run-python`（2.0.0 起公版預設 `false`，所以一定會明確寫出 `true` 或 `false`） |
 | Python 版本 | `.python-version`（UTF-8 BOM 與 CRLF 會去掉），沒有就用 `3.12` | `python-version`（只有 `ci.yml`；`security-reusable` 2.0.0 起已沒有這個 input） |
-| .NET | 全 repo 任何一層有 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj` | `run-dotnet`。方案檔不只一個（或沒有方案檔、專案檔不只一個）時會提醒你補 `dotnet-project` |
+| .NET | 全 repo 任何一層有 `.sln` / `.slnx` / `.csproj` / `.fsproj` / `.vbproj` | `run-dotnet`。方案檔不只一個（或沒有方案檔、專案檔不只一個）時會提醒你補 `dotnet-project`；方案內有 `docker-compose.dcproj` 不影響判斷。`.editorconfig` 規定的 `end_of_line` 與 `.gitattributes` 不一致時，提醒補 `eol`（否則 dotnet format 在 Linux 上整片 `ENDOFLINE`） |
 | shell script | 全 repo 任何一層有 `.sh` | `run-shellcheck` |
 
 偵測範圍刻意跟公版 reusable「實際會檢查的範圍」一致：全 repo、不限深度、略過 `.git` 與 `node_modules`，
