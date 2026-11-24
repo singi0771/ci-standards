@@ -9,14 +9,22 @@
 #   release: 2026-10-30 <重點>   → v2026.10.30；同一天第二次起 v2026.10.30.2、.3…
 #   其他（hotfix 等）             → 台北時間今天的日期 tag，規則同上
 # 同一個 commit 已經有 v 開頭的 tag 就不重打（只有 Release 沒建成時補建）。
+#
+# 發版標題格式不同時，以環境變數 RELEASE_VERSION_PATTERN 指定版號規則（bash ERE，第 1 組＝版號 X.Y.Z），例如：
+#   RELEASE_VERSION_PATTERN=' Ver ([0-9]+\.[0-9]+\.[0-9]+)'   # 「系統更新 Ver 1.2.3」→ v1.2.3
+# 符合的整段會從 Release 標題移除。標題含 X.Y.Z 卻不符規則時發 notice，改打日期 tag。
 set -euo pipefail
 
 sha="${1:?用法：release-tag.sh <commit sha>}"
 : "${REPO:?需要 REPO=owner/name}"
+version_pattern="${RELEASE_VERSION_PATTERN:-^release: v?([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$)}"
 
 sha=$(gh api "repos/$REPO/commits/$sha" --jq .sha)
 
-existing=$(gh api "repos/$REPO/tags" --paginate --jq ".[] | select(.commit.sha == \"$sha\") | .name" | grep '^v' | head -n 1 || true)
+# 先存下 API 結果：查詢失敗時腳本中止。寫成一條 pipeline 再接 || true 的話，
+# gh 失敗也會被吞掉、誤判為「沒有 tag」，同一個 commit 會被重複打 tag。
+tags=$(gh api "repos/$REPO/tags" --paginate --jq ".[] | select(.commit.sha == \"$sha\") | .name")
+existing=$(printf '%s\n' "$tags" | grep '^v' | head -n 1 || true)
 tag=""
 if [ -n "$existing" ]; then
   if gh release view "$existing" --repo "$REPO" > /dev/null 2>&1; then
@@ -40,6 +48,14 @@ else
 fi
 sed -i '/^🤖 Generated with/d' "$notes"
 
+# 版號：標題符合 version_pattern 時取第 1 組；符合的整段從標題移除，剩下的當 Release 標題
+version=""
+rest="$subject"
+if [[ "$subject" =~ $version_pattern ]]; then
+  version="${BASH_REMATCH[1]}"
+  rest="${subject/"${BASH_REMATCH[0]}"/ }"
+fi
+
 # 建立 tag ref。GitHub 建立 ref 是原子操作：同名 ref 已存在時回 422，不會覆蓋。
 # 連續合併時各次 run 平行執行（workflow 刻意不設 concurrency），靠這裡避免兩次 run 拿到同一個流水號。
 create_tag() {
@@ -48,13 +64,17 @@ create_tag() {
 
 if [ -n "$tag" ]; then
   :   # 沿用既有 tag
-elif [[ "$subject" =~ ^release:\ v?([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$) ]]; then
-  tag="v${BASH_REMATCH[1]}"
+elif [ -n "$version" ]; then
+  tag="v$version"
   if ! create_tag "$tag"; then
     echo "::error::$tag 已存在且指向別的 commit（或建立失敗）。發版標題的版號要往上加。"
     exit 1
   fi
 else
+  if [[ "$subject" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    # 依賴更新等標題也可能含 X.Y.Z，所以只發 notice 不中止
+    echo "::notice::標題「$subject」含 ${BASH_REMATCH[0]}，但不符版號規則，改打日期 tag。若這是發版，請設定 RELEASE_VERSION_PATTERN。"
+  fi
   if [[ "$subject" =~ ^release:\ ([0-9]{4})-([0-9]{2})-([0-9]{2}) ]]; then
     day="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
   else
@@ -77,7 +97,7 @@ else
 fi
 
 # 標題：release: 2026-10-30 加速停車資料載入 (#16) → v2026.10.30 加速停車資料載入
-title=$(printf '%s\n' "$subject" | sed -E 's/^release: (v?[0-9]+\.[0-9]+\.[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}) *//; s/ *\(#[0-9]+\)$//')
+title=$(printf '%s\n' "$rest" | sed -E 's/^release: [0-9]{4}-[0-9]{2}-[0-9]{2} *//; s/ *\(#[0-9]+\)$//; s/^ +//; s/ +$//')
 title="$tag${title:+ $title}"
 
 # tag 已在上面建立，這裡用 --verify-tag 掛到同一個 tag 上

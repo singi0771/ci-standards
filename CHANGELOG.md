@@ -12,6 +12,33 @@
 
 ---
 
+## [未發佈]
+
+Dependabot 資安更新不再被來源分支政策擋住；選配範本 `release-tag` 修正查詢失敗時重複打 tag，
+版號規則可自訂；文件更正 PR 重跑時機。
+
+### 需要專案動作
+- develop 流程的專案：`ci.yml` 的 `allowed-head-branches` 加上 `dependabot/*`
+  （例：`"develop hotfix/* dependabot/*"`）。導入腳本不改既有設定值，需手動修改。
+  資安更新合併進正式分支後，比照 hotfix 將正式分支合回 develop。
+- 已複製選配範本 `release-tag` 的專案：以新版覆蓋 `release-tag.sh`；發版標題不是 `release: vX.Y.Z …` 者，
+  於 `release-tag.yml` 的 `env:` 設定 `RELEASE_VERSION_PATTERN`。
+
+### 變更
+- 導入腳本 develop 流程的 `allowed-head-branches` 預設改為 `"develop hotfix/* dependabot/*"`。
+  Dependabot 資安更新不套用 `target-branch`，固定發往預設分支，來源分支為 `dependabot/...`，原設定下 CI Gate 永遠失敗。
+- 選配範本 `release-tag`：新增環境變數 `RELEASE_VERSION_PATTERN`（bash ERE，第 1 組為版號），
+  支援 `… Ver X.Y.Z` 等標題格式；符合的整段自 Release 標題移除。標題含 `X.Y.Z` 但不符規則時發 notice，改打日期 tag。
+
+### 修正
+- 選配範本 `release-tag`：查詢既有 tag 的 `gh api … | grep … || true` 在 pipefail 下會連同 API 失敗一起吞掉，
+  誤判為無 tag 而重複打 tag。改為先存 API 結果，`|| true` 只套用於 grep。
+
+### 文件
+- 更正「目標分支有新 commit 時 PR 自動重跑」的說法（呼叫端範本 `ci.yml` 註解、README）：
+  `synchronize` 只在來源分支有新 commit 時觸發。feature → develop 的 PR 在 develop 前進後仍顯示先前結果；
+  需要時以 `STRICT_CHECKS=true` 要求分支同步後才可 merge，否則由 develop → main 的發版 PR 驗證合併後結果。
+
 ## [2.3.0] — 2026-11-12
 
 選配範本 `release-tag` 修正連續合併漏打 tag；導入腳本新增 .NET 換行設定不一致的提醒。

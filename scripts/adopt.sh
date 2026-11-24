@@ -427,11 +427,12 @@ run-docker-build: $HAS_DOCKERFILE
 run-hadolint: $HAS_DOCKERFILE
 run-actionlint: true
 run-shellcheck: $HAS_SH"
-# develop 流程：正式分支只收 develop 與 hotfix/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+# develop 流程：正式分支只收 develop、hotfix/*、dependabot/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+# dependabot/*：Dependabot 資安更新不看 target-branch，固定發到 repo 的預設分支（正式分支），不放行會永遠紅燈。
 if [ "$FLOW" = develop ]; then
   CI_ADDITIONS="$CI_ADDITIONS
 restricted-base-branches: \"$PROD\"
-allowed-head-branches: \"develop hotfix/*\""
+allowed-head-branches: \"develop hotfix/* dependabot/*\""
 fi
 
 # security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
@@ -584,7 +585,7 @@ for name in $CONFIGURED; do
         filter_with_block "$dst" "$known" "$CI_ADDITIONS"
         if [ "$FLOW" = develop ] && [ "$_had_policy" = false ] && grep -q '^      restricted-base-branches:' "$dst"; then
           BRANCH_REPORT="$BRANCH_REPORT
-    ci.yml → 加上來源分支政策：$PROD 只收 develop、hotfix/* 的 PR"
+    ci.yml → 加上來源分支政策：$PROD 只收 develop、hotfix/*、dependabot/* 的 PR"
         fi ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
       branch-guard.yml)
@@ -659,7 +660,8 @@ gen_dependabot() {
     '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。' \
     '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
   if [ "$FLOW" = develop ]; then
-    printf '%s\n' '# develop 流程：PR 一律發到 develop（正式分支只收 develop、hotfix/* 的 PR）。'
+    printf '%s\n' '# develop 流程：版本更新 PR 一律發到 develop。資安更新不看 target-branch，固定發到預設分支（正式分支），' \
+      '# 合併後比照 hotfix 把正式分支合回 develop。'
   fi
   printf '%s\n' 'version: 2' '' 'updates:'
   if [ "$HAS_PY_MANIFEST" = true ]; then dep_entry pip weekly pip-minor-patch minor /; fi

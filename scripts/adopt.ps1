@@ -454,10 +454,11 @@ $CiAdditions = @(
   'run-actionlint: true',
   ('run-shellcheck: {0}'   -f (B $HasSh))
 )
-# develop 流程：正式分支只收 develop 與 hotfix/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+# develop 流程：正式分支只收 develop、hotfix/*、dependabot/* 的 PR。升級時只補缺的 key，使用者已設定的值不動。
+# dependabot/*：Dependabot 資安更新不看 target-branch，固定發到 repo 的預設分支（正式分支），不放行會永遠紅燈。
 if ($Flow -eq 'develop') {
   $CiAdditions += ('restricted-base-branches: "{0}"' -f $Prod)
-  $CiAdditions += 'allowed-head-branches: "develop hotfix/*"'
+  $CiAdditions += 'allowed-head-branches: "develop hotfix/* dependabot/*"'
 }
 # security-reusable 的 python-version 其實沒有任何步驟用到，新導入的專案不再傳它。
 # run-zizmor 預設打開：workflow 的安全檢查很便宜，而且範本附的 zizmor.yml 已把公版的例外放行。
@@ -571,7 +572,7 @@ foreach ($n in $Configured) {
     $hadPolicy = [bool]($before | Where-Object { $_ -cmatch '^      restricted-base-branches:' })
     $lines = Merge-WithBlock $before $known $adds ([ref]$dropped) ([ref]$found)
     if ($n -eq 'ci.yml' -and $Flow -eq 'develop' -and -not $hadPolicy -and ($lines | Where-Object { $_ -cmatch '^      restricted-base-branches:' })) {
-      $BranchReport += ("    ci.yml -> 加上來源分支政策：{0} 只收 develop、hotfix/* 的 PR" -f $Prod)
+      $BranchReport += ("    ci.yml -> 加上來源分支政策：{0} 只收 develop、hotfix/*、dependabot/* 的 PR" -f $Prod)
     }
     $lines = Update-UsesLines $lines
     $lines = Update-V2Triggers $lines $n ([ref]$TriggerReport)
@@ -625,7 +626,10 @@ function New-DependabotText {
     '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。',
     '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
   )
-  if ($Flow -eq 'develop') { $o += '# develop 流程：PR 一律發到 develop（正式分支只收 develop、hotfix/* 的 PR）。' }
+  if ($Flow -eq 'develop') {
+    $o += '# develop 流程：版本更新 PR 一律發到 develop。資安更新不看 target-branch，固定發到預設分支（正式分支），'
+    $o += '# 合併後比照 hotfix 把正式分支合回 develop。'
+  }
   $o += @('version: 2', '', 'updates:')
   if ($HasPyManifest) { $o += New-DepEntry 'pip' 'weekly' 'pip-minor-patch' 'minor' @('/') }
   if ($HasNpm)        { $o += New-DepEntry 'npm' 'weekly' 'npm-minor-patch' 'minor' @('/') }
