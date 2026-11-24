@@ -34,4 +34,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          # 發版標題不是「release: vX.Y.Z …」時，在這裡指定版號規則（第 1 組＝X.Y.Z），例如：
+          # RELEASE_VERSION_PATTERN: ' Ver ([0-9]+\.[0-9]+\.[0-9]+)'
         run: bash .github/scripts/release-tag.sh "$SHA"

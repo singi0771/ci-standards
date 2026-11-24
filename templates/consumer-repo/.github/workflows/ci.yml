@@ -6,9 +6,10 @@
 # 在下面 jobs.ci.with 加這兩個 input（不加＝不檢查）：
 #
 #     restricted-base-branches: "main"              # 要管的 base，空白隔開，支援 glob
-#     allowed-head-branches: "develop hotfix/*"     # 允許的來源分支
+#     allowed-head-branches: "develop hotfix/* dependabot/*"   # 允許的來源分支
 #
-# 這組的意思是「main 只接受從 develop 或 hotfix/* 發來的 PR」，其他分支發到 main 會被擋下。
+# 這組的意思是「main 只接受從 develop、hotfix/*、dependabot/* 發來的 PR」，其他分支發到 main 會被擋下。
+# dependabot/*：Dependabot 資安更新不看 target-branch，固定發到預設分支；不放行的話這類 PR 永遠紅燈。
 # 檢查結果收進 `ci / CI Gate`，所以分支保護的 ruleset 不必加新的 required check。
 # ⚠️ 它擋的是誤操作。repo 能設分支保護時，要跟 ruleset（必須開 PR、禁止 force push）一起設；
 #    不能設分支保護的 repo（例如 Free 方案的 private repo），紅燈只能提醒、擋不住 merge。
@@ -18,7 +19,11 @@ on:
   # 只在 PR 上檢查，合併進 main / develop 後不再重跑一輪：
   #   - PR 檢查的就是「合併後的結果」（refs/pull/N/merge），合併後再跑多半是同一份程式碼
   #   - develop → main 的 PR 會把 develop 累積的變更一起再驗一次；
-  #     PR 開著時 develop 又有新 commit，PR 會收到 synchronize 而自動重跑
+  #     PR 開著時 develop 又有新 commit，因為 develop 是這個 PR 的來源分支，PR 會收到 synchronize 而重跑
+  # ⚠️ synchronize 只在「來源分支」有新 commit 時觸發；「目標分支」有新 commit 不會重跑。
+  #   例如 feature → develop 的 PR 開著時 develop 被合併了別的 PR，這個 PR 仍掛著舊的綠燈。
+  #   要擋就用分支保護的「Require branches to be up to date」（setup-branch-protection.sh 的 STRICT_CHECKS=true）；
+  #   不開的話，develop → main 的發版 PR 仍會驗一次合併後的結果，正式分支不受影響。
   #   - 直接 push、Gate 沒綠就 merge，由 branch-guard.yml 偵測並開 Issue 通知
   # ⚠️ pull_request 這裡「不要」加 paths-ignore。
   # 分支保護把 `ci / CI Gate` 設成 required check 後，被 path filter 擋掉的 PR

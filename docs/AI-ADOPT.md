@@ -54,7 +54,7 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 
 | 檔案 | 內容 |
 |---|---|
-| `ci.yml`、`security.yml` | `run-*` 開關；`develop` 流程另設來源分支政策（正式分支只收 develop、`hotfix/*` 的 PR） |
+| `ci.yml`、`security.yml` | `run-*` 開關；`develop` 流程另設來源分支政策（正式分支只收 develop、`hotfix/*`、`dependabot/*` 的 PR） |
 | `branch-guard.yml` | `notify`；守護分支為正式分支，`develop` 流程另加 develop |
 | `dependabot.yml` | 只列專案實際使用的生態系；`develop` 流程每一項設 `target-branch: "develop"` |
 | `zizmor.yml`、`pull_request_template.md` | 範本 |

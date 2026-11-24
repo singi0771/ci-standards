@@ -107,7 +107,7 @@ bash /tmp/adopt.sh --notify "@帳號 @組織/team" --flow develop
 | 項目 | 行為 |
 |---|---|
 | 技術偵測 | 偵測 Python、.NET、Dockerfile、shell script，寫入對應的 `run-*` 參數 |
-| `workflows/ci.yml`、`workflows/security.yml` | 不存在則新增；已存在則升級：`uses:` 改為 `@v2`、移除已廢除的 input、補上新 input，既有設定值保留。`develop` 流程補上[來源分支政策](#來源分支政策)（正式分支只收 develop、`hotfix/*`） |
+| `workflows/ci.yml`、`workflows/security.yml` | 不存在則新增；已存在則升級：`uses:` 改為 `@v2`、移除已廢除的 input、補上新 input，既有設定值保留。`develop` 流程補上[來源分支政策](#來源分支政策)（正式分支只收 develop、`hotfix/*`、`dependabot/*`） |
 | `workflows/branch-guard.yml` | 不存在則新增，`notify` 寫入正規化後的名單，守護正式分支（`develop` 流程含 develop）；已存在則依上列規則升級，既有 `notify` 與自訂的 `branches` 保留 |
 | `dependabot.yml` | 依偵測結果產生，只列實際使用的生態系（pip、npm、nuget、docker、github-actions）；`develop` 流程每一項設 `target-branch: "develop"`。已存在則不覆蓋，另存 `.new` |
 | `zizmor.yml`、`pull_request_template.md` | 不存在則新增；已存在則不覆蓋，另存 `.new` 供比對 |
@@ -432,10 +432,15 @@ on:
 合併進 main / develop 後不再重跑：
 
 - PR 檢查的是合併後的結果（`refs/pull/N/merge`），合併後再跑多半是同一份程式碼。
-- develop → main 的 PR 會再驗一次 develop 累積的變更。PR 開啟期間 develop 有新 commit 時，PR 收到 `synchronize` 自動重跑，前一輪的結果不再算數。
+- develop → main 的 PR 會再驗一次 develop 累積的變更。PR 開啟期間 develop（此 PR 的來源分支）有新 commit 時，PR 收到 `synchronize` 自動重跑，前一輪的結果不再算數。
 - 直接 push 與 Gate 未通過即 merge 由 [Branch Guard](#branch-guard) 偵測。
 
 例外：以 Actions 的 `GITHUB_TOKEN` merge 或 push 時，GitHub 不觸發任何 workflow，PR 不會重跑。自動化流程請使用個人或 GitHub App 的 token。
+
+`synchronize` 只在來源分支有新 commit 時觸發，目標分支有新 commit 不會重跑。feature → develop 的 PR 開啟期間 develop 合併了其他 PR，此 PR 仍顯示先前的結果，未驗證與新 develop 合併後的程式碼。處理方式：
+
+- 以 `STRICT_CHECKS=true` 執行 `setup-branch-protection.sh`（Require branches to be up to date）：目標分支前進後須先更新 PR 分支才可 merge，更新即觸發重跑。代價是每次目標分支前進，所有開啟中的 PR 都要更新並重跑。
+- 不開 strict：develop → main 的發版 PR 仍會驗證合併後的結果，正式分支不受影響；develop 可能短暫處於未驗證的組合。
 
 - `on:` 不支援 `${{ }}` 運算式，分支名稱須直接寫入。
 - 加上 `pull_request.branches` 篩選後，未列入分支的 PR 不會產生 `ci / CI Gate`，這些分支不可設為 required check。
@@ -482,10 +487,12 @@ with:
 | 目標 | 設定 | 由誰設定 |
 |---|---|---|
 | develop、main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main develop` | 手動（需 admin） |
-| main 只接受 develop、hotfix 的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop hotfix/*"` | 導入腳本 |
+| main 只接受 develop、hotfix、Dependabot 資安更新的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop hotfix/* dependabot/*"` | 導入腳本 |
 | develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` | 導入腳本 |
-| Dependabot PR 發往 develop | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
+| Dependabot 版本更新 PR 發往 develop | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
 | 發版 PR 不破壞歷史 | develop → main 以 merge commit 合併，不使用 squash；不開「Automatically delete head branches」 | 團隊規則 |
+
+Dependabot 資安更新（security updates）不套用 `target-branch`，固定發往 repo 的預設分支（通常為 main），來源分支為 `dependabot/...`。導入腳本因此將 `dependabot/*` 列入 `allowed-head-branches`，資安更新比照 hotfix 直接合併進 main，合併後將 main 合回 develop。不希望資安更新直接進 main 時，自 `allowed-head-branches` 移除 `dependabot/*`，改以 cherry-pick 將修正帶到 develop 並關閉原 PR。
 
 分支名稱可自訂，腳本與 input 皆依實際填寫的名稱運作。
 
