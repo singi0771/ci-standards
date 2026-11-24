@@ -470,7 +470,7 @@ printf 'flask\n' > requirements.txt
 OUT="$("$ADOPT" --std "$STD" 2>&1)"
 case "$OUT" in *"分支流程     : develop"*) ok "有 develop 分支時自動判斷為 develop 流程" ;; *) bad "沒有判斷成 develop 流程" ;; esac
 has "$CI"    "restricted-base-branches: \"$PRODB\""      "develop 流程：ci.yml 加上 restricted-base-branches（正式分支）"
-has "$CI"    'allowed-head-branches: "develop hotfix/*"' "develop 流程：ci.yml 加上 allowed-head-branches"
+has "$CI"    'allowed-head-branches: "develop hotfix/* dependabot/*"' "develop 流程：ci.yml 加上 allowed-head-branches"
 has "$GUARD" "branches: [$PRODB, develop]"               "develop 流程：branch-guard 守正式分支與 develop"
 check "develop 流程：dependabot 每一項都發到 develop" "$(grep -c 'target-branch: "develop"' "$DEP")" "3"
 has "$DEP"   'package-ecosystem: "pip"'                  "有 requirements.txt → dependabot 有 pip"
