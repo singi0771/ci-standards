@@ -522,6 +522,7 @@ printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reus
 OUT="$("$ADOPT_RAW" --std "$STD" --prod main 2>&1)"
 has "$GUARD" 'branches: [main, develop]'      "升級：只守正式分支的 branch-guard 補上 develop"
 has "$GUARD" 'notify: "@owner"'               "升級：既有 notify 保留"
+# shellcheck disable=SC2016  # 故意不展開：比對的是檔案裡的 ${{ }} 原文
 has "$GUARD" '      required-checks: ${{ github.ref_name != '"'develop'" "升級：develop 流程的 branch-guard 補上 required-checks"
 check "升級：notify 仍只有一行" "$(grep -c 'notify:' "$GUARD")" "1"
 has "$CI"    'restricted-base-branches: "main"' "升級：ci.yml 補上來源分支政策"

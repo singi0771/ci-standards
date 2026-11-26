@@ -615,11 +615,9 @@ patch_v2_triggers() {
       if add_pr_branches "$f"; then
         TRIGGER_REPORT="$TRIGGER_REPORT
     $name → pull_request 只在發到 $PROD 的 PR 執行（branches: [$PROD]；要每個 PR 都跑改成 ['**']）"
-        PR_BRANCHES_ADDED=true
       fi ;;
   esac
 }
-PR_BRANCHES_ADDED=false
 
 # ── CONFIGURED：就地合併 ─────────────────────────────────────
 for name in $CONFIGURED; do
