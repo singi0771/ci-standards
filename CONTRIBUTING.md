@@ -72,8 +72,10 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
       consumer 的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate` 這些字串，
       改名會讓既有專案的 required check 永遠 pending；移除 input 會讓還在傳它的呼叫端 `invalid input` 起不來。
       這種改動要開新的主版本（目前是 `v2`，下一個是 `v3`），不能移目前的主版本 tag
-- [ ] **新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？**
-      沒加＝這個檢查不會擋 PR，形同虛設
+- [ ] **新增的檢查有沒有做成 Gate job 的步驟，並加進最後 Evaluate 的判定？**
+      2.5.0 起 CI、Security 各只有一個 job（`ci-gate`、`security-gate`），檢查都是其中的步驟：
+      步驟要有 `id` 與 `continue-on-error: true`，Evaluate 依 `steps.<id>.outcome` 判定。
+      沒加進 Evaluate＝這個檢查不會擋 PR，形同虛設
 - [ ] **有 `if` 條件的新 job 有沒有被設成 required check？**
       不可以。被跳過的 required check，GitHub 要嘛當通過（等於沒檢查）、要嘛永遠 pending。
       只把它加進 gate 的 `needs`，由 gate 判斷（開了就必須 success）
@@ -84,7 +86,8 @@ zizmor 可以 `pip install zizmor`。沒裝也沒關係 —— PR 上的 CI 跑�
 - [ ] **掃描工具「執行失敗」有沒有被當成「通過」？**
       下載用 `curl --fail`，`sha256sum -c` 對校驗碼，執行前先驗 `--version`，未預期的 exit code 一律擋下
 - [ ] **有沒有多開一個不必要的 job？**
-      每個 job 不滿一分鐘也算一分鐘。跑不到 30 秒的檢查併進既有 job 當步驟
+      每個 job 不滿一分鐘也算一分鐘（[ACTIONS-MINUTES.md](docs/ACTIONS-MINUTES.md)）。新檢查一律做成 Gate job 的步驟，
+      只有必須換 runner 時才另開 job（例如 Windows 的 .NET）
 - [ ] **`actions/checkout` 有沒有 `persist-credentials: false`？**
       這個 repo 沒有任何 job 需要 push，token 不該留在磁碟上（zizmor 會抓）
 - [ ] **外部輸入有沒有先過 `env:`？**
@@ -134,8 +137,8 @@ Dependabot 只會幫 `uses:` 的 action 升版。下面這幾個是**人工釘�
 | zizmor | `security-reusable.yml` 的 `TOOL_ZIZMOR_*` | 抓 `zizmor-x86_64-unknown-linux-gnu.tar.gz` 自己 `sha256sum` |
 | actionlint | `ci-reusable.yml` 的 `TOOL_ACTIONLINT_*` | release 的 `actionlint_<版本>_checksums.txt` |
 | hadolint | `ci-reusable.yml` 的 `TOOL_HADOLINT_*` | release 的 `checksums.sha256`，找 `linux-x86_64` |
-| trivy CLI | `security-reusable.yml` 的 `TOOL_TRIVY_*`（`trivy`、`trivy-image` 兩個 job 共用） | release 的 `trivy_<版本>_checksums.txt`，找 `Linux-64bit.tar.gz`。`trivy-action` 設 `skip-setup-trivy: true`，直接用這支 |
-| Semgrep image | `security-reusable.yml` 的 `container.image` | `docker buildx imagetools inspect semgrep/semgrep:<版本>` 的 digest |
+| trivy CLI | `security-reusable.yml` 的 `TOOL_TRIVY_*`（檔案系統掃描、SBOM、image 掃描共用） | release 的 `trivy_<版本>_checksums.txt`，找 `Linux-64bit.tar.gz`。`trivy-action` 設 `skip-setup-trivy: true`，直接用這支 |
+| Semgrep image | `security-reusable.yml` 的 `SAST (Semgrep)` 步驟（`docker run`） | `docker buildx imagetools inspect semgrep/semgrep:<版本>` 的 digest |
 | gitleaks image | `security-reusable.yml` 的 `docker run` | `docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本>` 的 digest |
 | ruff | `ci-reusable.yml` 的 `ruff-version` 預設值 | 不用校驗碼（pip 有自己的 hash 機制），但要記得新版可能多規則 |
 

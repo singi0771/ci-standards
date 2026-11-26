@@ -69,89 +69,70 @@ flowchart TD
 
 ## 2. CI Gate 裡面（`ci-reusable.yml`）
 
+2.5.0 起所有檢查都是 `CI Gate` 這**一個 job** 裡的步驟（每個 job 不滿一分鐘也算一分鐘，見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。
+只有 `dotnet-runner` 不是 `ubuntu-latest` 時，.NET 改在另一個 job 跑，CI Gate 等它結束再一起判定。
+
 ```mermaid
 flowchart TD
-    CALL[呼叫端 ci.yml<br/>uses: ci-reusable.yml] --> P{run-python<br/>預設 false}
-    CALL --> N{run-dotnet<br/>預設 false}
-    CALL --> D{run-docker-build}
-    CALL --> L{run-actionlint 或 run-shellcheck}
+    CALL[呼叫端 ci.yml<br/>uses: ci-reusable.yml] --> GATE
 
-    P -->|true| PJ[Python lint + test<br/>ruff 釘 0.16.0 → pytest<br/>pytest exit 5 沒測試 = 過但警告]
-    P -->|false| PS[skipped]
+    subgraph GATE[CI Gate job：依序執行，各步驟 continue-on-error]
+        direction TB
+        S1[PR source branch policy<br/>restricted-base-branches 有值且是 PR 才跑] --> S2
+        S2[actionlint 1.7.12 / shellcheck<br/>run-actionlint、run-shellcheck] --> S3
+        S3[Python：ruff 釘 0.16.0 → pytest<br/>run-python，pytest exit 5 沒測試 = 過但警告] --> S4
+        S4[.NET：restore → dotnet format → build Release → test<br/>run-dotnet 且 runner 是 ubuntu-latest] --> S5
+        S5[Docker：hadolint 可選 → docker build，不推送<br/>run-docker-build] --> EV
+        EV[Evaluate：依各步驟 outcome 判定]
+    end
 
-    N -->|true| NJ[.NET build + test<br/>restore → dotnet format → build Release → test<br/>ubuntu 或 windows runner]
-    N -->|false| NS[skipped]
+    CALL -.->|dotnet-runner 不是 ubuntu-latest| DN[.NET build + test job<br/>例如 windows-latest]
+    DN -.->|needs| EV
 
-    D -->|true| DJ[Docker build check<br/>找全 repo 的 Dockerfile 或照 dockerfile<br/>hadolint 可選 → docker build，不推送]
-    D -->|false| DS[skipped]
-
-    L -->|true| LJ[Workflow + shell lint<br/>actionlint 1.7.12 + shellcheck<br/>兩個併成一個 job 省分鐘]
-    L -->|false| LS[skipped]
-
-    CALL --> B2{restricted-base-branches<br/>有值 且 是 PR?}
-    B2 -->|是| BJ[PR source branch policy<br/>base 受管制時檢查 head]
-    B2 -->|否| BS[skipped]
-
-    PJ --> G[CI Gate<br/>needs 五個 job、always 執行]
-    PS --> G
-    NJ --> G
-    NS --> G
-    DJ --> G
-    DS --> G
-    LJ --> G
-    LS --> G
-    BJ --> G
-    BS --> G
-
-    G --> RULE{白名單判定}
-    RULE -->|啟用 且 result 是 success| OK[✅ CI Gate 通過]
-    RULE -->|啟用 但 result 不是 success| NG[❌ 擋下<br/>cancelled / skipped / 空值 一律擋]
-    RULE -->|未啟用 但 failure 或 cancelled| NG
+    EV --> RULE{白名單判定}
+    RULE -->|啟用 且 outcome 是 success| OK[✅ CI Gate 通過]
+    RULE -->|啟用 但不是 success| NG[❌ 擋下<br/>failure / cancelled / skipped / 空值 一律擋]
 ```
+
+**一項失敗不會讓後面的檢查被跳過**：每個檢查步驟都設 `continue-on-error`，結果一次看完；
+同一項檢查裡的後續步驟要前一步 `outcome == success` 才跑（例如 pip install 失敗就不跑 pytest），
+被跳過的步驟是 `skipped`，判定時一樣擋。失敗的步驟在畫面上仍是紅叉，job summary 列出各項結果。
 
 **Gate 的判定原則**：「**開了就必須 success**」，不是「只擋 failure」。
 原因記在 `ci-reusable.yml` 的註解（2026-08-06 實測）：runner 排隊過久被 GitHub 取消時，
-`needs.<job>.result` 拿到的值並不是 `cancelled`，舊寫法因此判定通過 —— Gate 是綠的，
+拿到的結果並不是 `cancelled`，舊寫法因此判定通過 —— Gate 是綠的，
 但 actionlint 與 shellcheck 一行都沒跑。required check 形同虛設。
 
-**為什麼要有 Gate 這個 job**：子 job 都有 `if` 條件，關掉時會變 `skipped`，
-而 skipped 的 required check，GitHub 要嘛當它通過（等於沒檢查）、要嘛一直 pending。
-所以分支保護只認 `CI Gate` / `Security Gate` 這兩個總結 job，公版日後增減工具也不必回頭改各專案的 ruleset。
+**分支保護只認 Gate**：分支保護只要求 `CI Gate` / `Security Gate` 這兩個 check，公版日後增減工具也不必回頭改各專案的 ruleset。
+2.4.x 以前各項檢查是獨立 job，2.5.0 合併後 Gate 的名稱維持不變。
 
-> ⚠️ 改公版時的坑：**在 `ci-reusable.yml` 新增 job，一定要加進 `ci-gate` 的 `needs`**，否則那個 job 失敗也擋不住任何東西。
+> ⚠️ 改公版時的坑：**新增檢查時，步驟要有 `id` 與 `continue-on-error`，並加進最後 Evaluate 的判定**，否則那項檢查失敗也擋不住任何東西。
 
 ---
 
 ## 3. Security Gate 裡面（`security-reusable.yml`）
 
+與 CI Gate 相同，2.5.0 起所有掃描都是 `Security Gate` 這一個 job 裡的步驟，判定方式也相同。
+
 ```mermaid
 flowchart TD
-    CALL[呼叫端 security.yml<br/>uses: security-reusable.yml] --> A[SAST Semgrep<br/>一定跑]
-    CALL --> B[Dependency OSV-Scanner<br/>一定跑]
-    CALL --> C[FS / IaC Trivy<br/>vuln,misconfig，可選 SBOM<br/>一定跑]
-    CALL --> E[Secret scan gitleaks<br/>含 git 歷史，一定跑]
-    CALL --> F{run-zizmor}
-    CALL --> H{scan-docker-image}
+    CALL[呼叫端 security.yml<br/>uses: security-reusable.yml] --> GATE
 
-    F -->|true| FJ[Workflow security zizmor]
-    F -->|false| FS[skipped]
-    H -->|true| HJ[每個 Dockerfile 各 build 一個 image → Trivy 掃 image]
-    H -->|false| HS[skipped]
+    subgraph GATE[Security Gate job：依序執行，各步驟 continue-on-error]
+        direction TB
+        E[Secret scan gitleaks<br/>PR 掃新增 commit、其他事件掃完整歷史，一定跑] --> A
+        A[SAST Semgrep<br/>docker run 釘 digest，一定跑] --> F
+        F[Workflow security zizmor<br/>run-zizmor] --> B
+        B[Dependency OSV-Scanner<br/>一定跑] --> C
+        C[FS / IaC Trivy<br/>vuln,misconfig，一定跑] --> SB
+        SB[SBOM CycloneDX<br/>generate-sbom] --> H
+        H[每個 Dockerfile 各 build 一個 image → Trivy 掃 image<br/>scan-docker-image] --> EV
+        EV[Evaluate：依各步驟 outcome 判定]
+    end
 
-    A --> G[Security Gate<br/>needs 六個 job、always 執行]
-    B --> G
-    C --> G
-    E --> G
-    FJ --> G
-    FS --> G
-    HJ --> G
-    HS --> G
-
-    G --> R1{四個必跑項<br/>全部 success?}
+    EV --> R1{必跑項全部 success<br/>且開了的可選項也 success?}
     R1 -->|否| NG[❌ 擋下]
-    R1 -->|是| R2{兩個可選項<br/>開了就必須 success}
-    R2 -->|否| NG
-    R2 -->|是| OK[✅ Security Gate 通過]
+    R1 -->|是| OK[✅ Security Gate 通過]
 ```
 
 | 掃描 | 抓什麼 | 開關 |
@@ -168,7 +149,7 @@ flowchart TD
 所以 2.0.0 把 `upload-sarif` 整個拿掉，改成存 artifact（`semgrep-sarif`）+ 用 job 成敗當關卡，**私有 repo 不需要 GHAS 也能跑**。
 
 **`fail-on-findings: false` 放行的是什麼**：只有「有找到問題」。掃描工具本身出錯（規則、弱點資料庫下載失敗、當掉）
-照樣讓那個 job 紅 —— 沒掃成不能當成掃過。
+照樣讓那個步驟紅、Gate 擋下 —— 沒掃成不能當成掃過。
 
 ---
 
@@ -181,7 +162,7 @@ flowchart TD
 代價是呼叫端的 `uses:` 指向會移動的 `v2`（不是釘死的 SHA）——
 這是有意的取捨，`.github/zizmor.yml` 對公版的 `uses:` 只要求 ref-pin，其餘第三方 action 一律 hash-pin。
 
-唯一需要回頭改專案的情況是**破壞性變更**（input 改名或移除、改預設值、改 job 名稱）。那種改動開新的主版本，
+唯一需要回頭改專案的情況是**破壞性變更**（input 改名或移除、改預設值、改 Gate job 名稱）。那種改動開新的主版本，
 舊的主版本 tag 不會吃到破壞性變更，既有專案不會被動到 —— 2.0.0 就是這樣：`v1` 停在 1.4.x（1.4.0 是 v1 最後一個功能版，之後只收 bug 修補），各專案自行改成 `@v2`。
 見 README「版本策略」。
 
@@ -192,7 +173,7 @@ flowchart TD
 建議順序（由外而內）：
 
 1. [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)（四十幾行，多半是註解）—— 呼叫端長什麼樣，一眼看完。
-2. [`.github/workflows/ci-reusable.yml`](../.github/workflows/ci-reusable.yml) 的 `ci-gate` job —— Gate 判定的核心，註解寫了為什麼這樣寫。
+2. [`.github/workflows/ci-reusable.yml`](../.github/workflows/ci-reusable.yml) 的 `ci-gate` job —— 所有檢查與 Gate 判定都在這裡，註解寫了為什麼這樣寫。
 3. [`.github/workflows/security-reusable.yml`](../.github/workflows/security-reusable.yml) 的 `inputs` 區塊 —— 可調的旋鈕全在這裡。
 4. [`templates/consumer-repo/`](../templates/consumer-repo/) —— 別人導入時實際會拿到的整包檔案（五個，沒有邏輯）。
 5. [`scripts/adopt.sh`](../scripts/adopt.sh) / [`adopt.ps1`](../scripts/adopt.ps1) —— 把上面那包複製過去的一鍵導入腳本（兩支輸出 byte-identical，CI 會三平台對拍）。

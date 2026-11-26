@@ -12,6 +12,39 @@
 
 ---
 
+## [2.5.0] — 2026-11-26
+
+CI 與 Security 各合併為一個 job，降低私有 repo 的 Actions 分鐘數；新增分鐘數計費說明，導入腳本印出預估。
+
+### 需要專案動作
+- 無。`ci / CI Gate`、`security / Security Gate` 名稱不變，移動 `v2` 後自動生效。
+- 例外：分支保護的 required check 若設了 Gate 以外的子 job（例如 `ci / Python lint + test`、
+  `security / SAST (Semgrep)`），這些 check 不再出現、PR 會卡在 pending。改為只要求兩個 Gate。
+
+### 變更
+- `ci-reusable.yml`：Python、.NET、Docker build（含 hadolint）、actionlint／shellcheck、PR 來源分支政策
+  改為 `CI Gate` job 的步驟，不再各自一個 job。`dotnet-runner` 不是 `ubuntu-latest` 時，.NET 仍為獨立 job，CI Gate 等它結束後一併判定。
+- `security-reusable.yml`：gitleaks、Semgrep、zizmor、OSV-Scanner、Trivy（檔案系統、SBOM、image）
+  改為 `Security Gate` job 的步驟。Semgrep 由 container job 改為 `docker run` 同一個釘死 digest 的 image。
+- 計費依據：每個 job 不滿一分鐘以一分鐘計。以某私有專案 2026-11 前 26 天為例，實際執行 137 分鐘、計費 406 分鐘，
+  94% 的 job 不到 1 分鐘。每次 PR 推送最少由 6～10 分鐘降為 2 分鐘。
+- 一項檢查失敗不再讓同 job 的其他檢查被跳過：各步驟設 `continue-on-error`，最後的 Evaluate 依各步驟 `outcome`
+  判定，「開了就必須 success」的規則不變。各項結果列在 job summary。
+- 同一項檢查內前一步失敗時，後續步驟不執行並判定失敗（例如 pip install 失敗不跑 pytest）。
+  hadolint 失敗時仍執行 docker build、dotnet format 失敗時仍執行 build 與 test，結果一次列出。
+- 代價：原本並行的檢查改為依序執行，單次等待時間變長。
+
+### 新增
+- `docs/ACTIONS-MINUTES.md`：計費規則（每個 job 進位、同一擁有者的私有 repo 共用額度、公開 repo 免費、runner 單價）、
+  各情境的最低分鐘數、查詢實際用量的指令。
+- 導入腳本（`adopt.sh` / `adopt.ps1`）結束時印出 Actions 分鐘數預估（每次 PR 推送、發版、排程重掃）。
+- `tests/python/test_reusable_sync.py`：檢查 CI Gate 與獨立 .NET job 的 `.NET:` 步驟腳本一致。
+
+### 文件
+- README「Actions 用量」、SETUP、FLOW、CONTRIBUTING、DEVSECOPS-NOTES、KNOWN-LIMITATIONS 依新結構更新；
+  Windows／macOS 改以單價比（約 1.7 倍、10 倍）說明，取代舊的 2 倍、10 倍乘數。
+- 版本策略：會開新主版本的是變更 **Gate** job 名稱。
+
 ## [2.4.0] — 2026-11-24
 
 Dependabot 資安更新不再被來源分支政策擋住；選配範本 `release-tag` 修正查詢失敗時重複打 tag，

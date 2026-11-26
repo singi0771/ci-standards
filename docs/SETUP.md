@@ -61,8 +61,8 @@ git tag -a v3.0.0 -m "..." && git tag v3 && git push origin v3.0.0 v3   # 下一
 
 ### 改動公版的自我檢查
 
-- [ ] 有沒有改名／移除 input、改了會讓行為變的預設值、或改 job 名稱？（會打壞既有 repo → 該開新的主版本，例如 v3）
-- [ ] 新增的 job 有沒有加進 `security-gate` / `ci-gate` 的 `needs`？（沒加＝這個檢查不會擋 PR，形同虛設）
+- [ ] 有沒有改名／移除 input、改了會讓行為變的預設值、或改 Gate job 名稱？（會打壞既有 repo → 該開新的主版本，例如 v3）
+- [ ] 新增的檢查有沒有做成 Gate job 的步驟（`id` + `continue-on-error`），並加進最後 Evaluate 的判定？（沒加＝這個檢查不會擋 PR，形同虛設）
 - [ ] 新 action 有沒有釘 commit SHA？（不要用 `@master` / `@main`，供應鏈風險）
 - [ ] 新 **container image** 有沒有釘 tag + digest？（`:latest` 的話沒改程式的 repo 會隨上游新規則突然變紅，
       只釘 tag 的話上游重推同一個 tag 你不會知道）
@@ -70,7 +70,7 @@ git tag -a v3.0.0 -m "..." && git tag v3 && git push origin v3.0.0 v3   # 下一
 - [ ] 有 `if` 條件的新 job **不要**設成 required check（被跳過時 GitHub 要嘛當通過、要嘛一直 pending），
       只把它加進 gate 的 `needs`，由 gate 判斷「開了就必須 success」
 - [ ] 掃描工具「執行失敗」有沒有被當成「通過」？（下載用 `curl --fail` + `sha256sum -c` + 跑前先驗 `--version`）
-- [ ] 跑不到 30 秒的新檢查有沒有併進既有 job？（每個 job 不滿一分鐘也算一分鐘）
+- [ ] 新檢查有沒有另開 job？（每個 job 不滿一分鐘也算一分鐘，一律做成 Gate job 的步驟）
 - [ ] 先在一個專案用 `@main` 試跑過，再移動 `v2`
 
 ---
@@ -117,11 +117,12 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 
 | 項目 | 免費額度 | 備註 |
 |---|---|---|
-| Actions 分鐘（private repo） | 每月 3,000 分鐘（Team） | **public repo 不計費**，所以 ci-standards 自己不吃額度 |
+| Actions 分鐘（private repo） | 每月 $18（Team，約 Linux 3,000 分鐘） | **public repo 不計費**，所以 ci-standards 自己不吃額度；組織底下所有私有 repo 共用這份額度 |
 
 ### 省額度的做法
 
-計費規則只有一條要記：**每個 job 不滿一分鐘也算一分鐘**，macOS runner 算 10 倍、Windows 算 2 倍。
+計費規則只有一條要記：**每個 job 不滿一分鐘也算一分鐘**；Windows 單價約 Linux 的 1.7 倍、macOS 約 10 倍。
+詳細規則與估算見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)。
 
 - `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘；沒 Dockerfile 一定關
 - schedule 從每週改每月（改呼叫端 `security.yml` 的 cron，例如 `"0 3 1 * *"`）
@@ -130,8 +131,8 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 - 呼叫端已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
 - 還在寫的 PR 開成**草稿**：1.3.0 的範本呼叫端遇到草稿整個跳過，按 Ready for review 才跑
 - Dependabot 的 docker / github-actions 改每月（1.3.0 範本預設）；每個 Dependabot PR 都會跑整套
-- 1.3.0 公版自己已經把 actionlint + shellcheck 合成一個 job、hadolint 併進 Docker build
-  —— 這些不用你設定，移了 `v1` 就生效
+- 2.5.0 公版把 CI、Security 各合併成一個 job（每次 PR 推送最少從 6～10 分鐘降到 2 分鐘）
+  —— 不用你設定，`v2` 移動後就生效
 
 完整清單見 [README — 省 Actions 分鐘](../README.md#actions-用量)。
 
