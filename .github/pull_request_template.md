@@ -18,13 +18,13 @@
 ## 相容性（動到公版邏輯時必填）
 
 - [ ] 沒有改／移除任何 input 名稱，也沒有改會讓行為變的預設值
-- [ ] 沒有改任何 job 名稱（使用端的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate`）
+- [ ] 沒有改 Gate job 名稱（使用端的 ruleset 綁著 `ci / CI Gate`、`security / Security Gate`）
 - [ ] 若有以上任一項 → **這是破壞性變更，要開新的主版本（下一個是 `v3`），不能移目前的主版本 tag**
 
 ## 公版自我檢查
 <!-- 每一條都對應過去真的踩過的雷，詳見 CONTRIBUTING.md -->
 
-- [ ] 新增的 job 已加進 `ci-gate` / `security-gate` 的 `needs`
+- [ ] 新增的檢查做成 Gate job 的步驟（`id` + `continue-on-error`），並加進 Evaluate 的判定；沒有另開 job
 - [ ] 有 `if` 條件的 job **沒有**被設成 required check
 - [ ] 新 action 釘了 commit SHA、新 image 釘了 digest、新下載的執行檔有 sha256（不用 `@main`、`:latest`）
 - [ ] 掃描工具「執行失敗」會擋下，不會被當成通過
