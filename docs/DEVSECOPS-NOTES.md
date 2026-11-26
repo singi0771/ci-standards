@@ -5,7 +5,7 @@
 
 1. **免費、開源、private repo 不需要 GHAS 也能跑。**
 2. **一個問題一個工具，不重疊。** 重疊的檢查抓到同一個問題兩次，除了多付一分鐘沒有好處。
-3. **每個 job 至少算一分鐘。** 跑不到 30 秒的檢查併進既有 job，不另開。
+3. **每個 job 至少算一分鐘。** 新檢查一律做成 Gate job 的步驟，不另開 job（2.5.0 起 CI、Security 各只有一個 job，見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。
 
 最後更新：2026-09-14（1.3.0）。
 
@@ -22,7 +22,7 @@
 | **zizmor**（workflow 安全，1.3.0 新增） | `.github/workflows` 本身：把 PR 標題塞進 `run:` 的腳本注入、`pull_request_target` / `workflow_run` 這類危險觸發器、沒釘 SHA 的 action、權限給太大、checkout 留下 token 又上傳 artifact | 這是 actionlint 管不到的一整類問題（actionlint 只看語法）。tj-actions/changed-files 那次供應鏈事件之後，這類檢查變成必備。Rust 寫的，跑完不用一秒 |
 | **Trivy image**（可選） | build 出來的 image 裡 OS 套件與語言套件的 CVE | 跟檔案系統掃描是同一支工具，不用多學一套。預設只擋上游已修的 CVE（`ignore-unfixed`），不然 base image 永遠紅 |
 | **hadolint**（可選，1.3.0 新增） | Dockerfile 的寫法：沒釘版本的 apt 套件、用 `latest`、`RUN` 裡的 shell 問題 | Trivy 的 misconfig 只抓「會出資安問題」的那幾條，hadolint 抓得更廣。放在 Docker build 那個 job 裡當一個步驟，不多付一分鐘 |
-| **actionlint + shellcheck** | workflow 語法、`run:` 區塊與 `.sh` 的 bash 問題 | 兩個都是各自領域的標準工具。1.3.0 起合成一個 job、actionlint 改抓執行檔不拉 docker image |
+| **actionlint + shellcheck** | workflow 語法、`run:` 區塊與 `.sh` 的 bash 問題 | 兩個都是各自領域的標準工具。actionlint 抓執行檔不拉 docker image；2.5.0 起與其他檢查同在 CI Gate 一個 job |
 | **ruff + pytest** | Python lint 與測試 | ruff 一支取代 flake8 + isort + 大部分 bandit（開 `S` 規則）；版本釘死避免規則漂移 |
 
 ---

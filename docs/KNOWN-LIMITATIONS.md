@@ -56,7 +56,7 @@
 
 **現在的做法**：在專案自己的呼叫端 workflow 寫一個 job 跑 `npm ci` / lint / test / build，
 用不同的 job id（例如 `node`），範例見 [README — 前端](../README.md#前端專案)。
-**下一個要補的**就是公版的 `ci-node` job（加進 `ci-gate` 的 `needs`，呼叫端用一個 `run-node` 打開）。
+**下一個要補的**就是公版的 Node 檢查（做成 `CI Gate` job 的步驟並加進 Evaluate 判定，呼叫端用一個 `run-node` 打開）。
 
 > 推廣到更多專案之前，先盤點一次組織內的語言分布。
 > 如果前端專案佔比高，`ci-node` 的優先度會高於其他所有待辦。
