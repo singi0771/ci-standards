@@ -5,6 +5,8 @@ name: CI
 
 on:
   # 只在 PR 上檢查，合併後不再重跑（理由見範本 templates/consumer-repo/.github/workflows/ci.yml）。
+  # 與範本不同：不加 pull_request.branches，發往 develop 的 PR 也跑。本 repo 是公開 repo、Actions 不計費，
+  # 而公版改壞要在功能 PR 上就紅，不能等到發版 PR。
   # 直接 push、Gate 沒綠就 merge 由 branch-guard.yml 偵測。
   # pull_request 不加 paths-ignore —— 見 ci-reusable 的 CI Gate 說明。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑，省分鐘。

@@ -36,16 +36,17 @@
 實際只跑 137 分鐘，計費是 406 分鐘。主因是 2.4.x 以前 Security Scan 每次 6～7 個 job、CI 每次 3～5 個 job，每個都只跑 10～30 秒。
 2.5.0 把兩者各合併為一個 job（見下節）。
 
-## 公版各 workflow 的 job 數（2.5.0 起）
+## 公版各 workflow 的 job 數（2.5.0 起）與觸發時機（2.6.0 起）
 
 | Workflow | 觸發 | job 數 | 最低計費 |
 |---|---|---|---|
-| CI（`ci / CI Gate`） | 每次 PR 推送（草稿除外） | 1；`dotnet-runner` 不是 `ubuntu-latest` 時多 1 個 .NET job | 1 分鐘（Windows .NET 另計） |
-| Security Scan（`security / Security Gate`） | 每次 PR 推送（草稿除外）、每週排程 | 1 | 1 分鐘 |
+| CI（`ci / CI Gate`） | 發往正式分支的 PR 每次推送（草稿除外） | 1；`dotnet-runner` 不是 `ubuntu-latest` 時多 1 個 .NET job | 1 分鐘（Windows .NET 另計） |
+| Security Scan（`security / Security Gate`） | 發往正式分支的 PR 每次推送（草稿除外）、每週排程 | 1 | 1 分鐘 |
 | Branch Guard | push 到受保護分支（含 PR 合併） | 1 | 1 分鐘 |
 | Release Tag（選配） | push 到正式分支 | 1 | 1 分鐘 |
 
 2.4.x 以前 CI 為「每項檢查 1 個 job＋Gate」、Security 為「每項掃描 1 個 job＋Gate」，每次 PR 推送最少 6～10 分鐘。
+2.5.x 以前的範本對發往任何分支的 PR 都執行；2.6.0 起功能分支 → develop 的 PR 不執行（見 README「觸發條件」）。
 
 ## 估算方式
 
@@ -57,13 +58,15 @@
 
 | 情境 | 最低 |
 |---|---|
-| 每次 PR 推送（CI Gate＋Security Gate） | 2 分鐘 |
-| 一個 PR 推送 1 次後合併（＋Branch Guard） | 3 分鐘 |
-| 一個 PR 推送 N 次後合併 | 2N＋1 分鐘 |
-| develop 流程的一個功能：功能分支 → develop（推送 1 次）＋發版 develop → 正式分支（推送 1 次） | 6 分鐘（另加 Release Tag 1 分鐘） |
+| 發往正式分支的 PR 每次推送（CI Gate＋Security Gate） | 2 分鐘 |
+| 發往正式分支的 PR 推送 1 次後合併（＋Branch Guard） | 3 分鐘 |
+| 發往正式分支的 PR 推送 N 次後合併 | 2N＋1 分鐘 |
+| 功能分支 → develop 合併（PR 不執行，合併後 Branch Guard） | 1 分鐘 |
+| develop 流程發版一次（發版 PR 推送 1 次後合併） | 3 分鐘（另加 Release Tag 1 分鐘） |
 | 每週排程重掃 | 每次 1 分鐘，約 5 分鐘／月 |
 
-月用量粗估：`(PR 推送次數 × 2) + (合併次數 × 1) + 5`，有 Dockerfile 時 PR 推送次數改乘 4～6。
+月用量粗估：`(發往正式分支的 PR 推送次數 × 2) + (合併次數 × 1) + 5`，有 Dockerfile 時推送次數改乘 4～6。
+develop 流程下，功能 PR 只計合併時的 Branch Guard；發版 PR 開著時 develop 每次前進都會讓它重跑一次。
 同一帳號底下的私有 repo 用量相加，與每月額度比較。
 
 ## 查看實際用量
@@ -91,6 +94,7 @@ print(f"jobs={len(secs)} 實際={sum(secs)/60:.0f} 分鐘 計費={sum(max(1, mat
 | 公版已採用 | 專案可自行調整 |
 |---|---|
 | CI、Security 各合併為一個 job（2.5.0） | 無 Dockerfile 時 `scan-docker-image: false` |
+| 只在 PR 發往正式分支時執行（2.6.0） | 發版 PR 不要太早開：開著時 develop 每次前進都會重跑 |
 | 草稿 PR 不執行 | 排程改為每月：`cron: "0 3 1 * *"` |
 | 連續推送自動取消前一次執行 | 本機先跑 lint／測試再推送，減少 PR 推送次數 |
 | 只在 PR 上執行，合併後不重跑 | `dotnet-runner` 非必要不使用 Windows |

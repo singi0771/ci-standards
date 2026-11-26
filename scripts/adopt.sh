@@ -440,8 +440,21 @@ fi
 SEC_ADDITIONS="scan-docker-image: $HAS_DOCKERFILE
 run-zizmor: true"
 
-GUARD_ADDITIONS=""
-if [ -n "$NOTIFY" ]; then GUARD_ADDITIONS="notify: \"$NOTIFY\""; fi
+GUARD_NOTIFY_LINE=""
+if [ -n "$NOTIFY" ]; then GUARD_NOTIFY_LINE="notify: \"$NOTIFY\""; fi
+GUARD_ADDITIONS="$GUARD_NOTIFY_LINE"
+# develop 流程（2.6.0 起）：發到 develop 的 PR 不跑 CI／Security，合併進 develop 時只檢查是否經 PR、不檢查 Gate。
+# 必須寫成 != 'develop' && '<check>' || ''：反過來寫的話 '' 是 false，永遠拿到 || 後面那串。
+# shellcheck disable=SC2016  # 故意不展開：寫進 workflow 的就是 ${{ }} 原文
+GUARD_REQ_LINE="required-checks: \${{ github.ref_name != 'develop' && 'ci / CI Gate,security / Security Gate' || '' }}"
+if [ "$FLOW" = develop ]; then
+  if [ -n "$GUARD_ADDITIONS" ]; then
+    GUARD_ADDITIONS="$GUARD_ADDITIONS
+$GUARD_REQ_LINE"
+  else
+    GUARD_ADDITIONS="$GUARD_REQ_LINE"
+  fi
+fi
 # Branch Guard 一定要有通知對象：沒有分支保護時，直接 push、強制 merge 只能靠它發現。
 # 既有 branch-guard.yml 的 notify 已有值才可以不給 --notify。
 GUARD_FILE=".github/workflows/branch-guard.yml"
@@ -515,6 +528,33 @@ V2_IF="    if: \${{ github.event_name != 'pull_request' || (!github.event.pull_r
 V1_SEC_CONC='  group: security-${{ github.ref }}'
 # shellcheck disable=SC2016  # 故意不展開：要比對的就是 workflow 原文裡的 ${{ }}
 V2_SEC_CONC='  group: security-${{ github.event_name }}-${{ github.ref }}'
+# 2.6.0：security.yml 也聽 edited（PR 先發到 develop、再把 base 改成正式分支時要掃描），改標題的 edited 另開一組
+V3_SEC_CONC="  group: \${{ github.event.action == 'edited' && github.event.changes.base == null && format('security-edit-{0}', github.run_id) || format('security-{0}-{1}', github.event_name, github.ref) }}"
+PR_BRANCHES_LINE="    branches: [$PROD]"
+
+# 2.6.0：pull_request 只在發到正式分支時觸發。只認兩格縮排的「  pull_request:」，
+# 區塊內已有 branches / branches-ignore（使用者自訂，例如 ['**']）就不動。插入了回傳 0。
+add_pr_branches() {
+  _f="$1"
+  ADOPT_INS="$PR_BRANCHES_LINE" awk '
+    { L[NR]=$0 }
+    END {
+      ins=ENVIRON["ADOPT_INS"]; p=0
+      for (i=1; i<=NR; i++) if (L[i] == "  pull_request:") { p=i; break }
+      has=0
+      if (p) for (i=p+1; i<=NR; i++) {
+        s=L[i]
+        if (s ~ /^[[:space:]]*$/ || s ~ /^[[:space:]]*#/) continue
+        if (s !~ /^    /) break
+        if (s ~ /^    branches(-ignore)?:/) has=1
+      }
+      for (i=1; i<=NR; i++) { print L[i]; if (i == p && !has) print ins }
+      exit ((p && !has) ? 0 : 1)
+    }
+  ' "$_f" > "$_f.tmp" && _rc=0 || _rc=1
+  mv "$_f.tmp" "$_f"
+  return "$_rc"
+}
 
 # replace_lines <檔案> <舊行> <新行> [<舊行> <新行>]... → 整行完全相同才換
 replace_lines() {
@@ -536,8 +576,9 @@ patch_v2_triggers() {
       # 三行各自要是「v1 原樣」或「已經是 v2」其中之一；全是 v2 就沒事可做。
       # 不能只看 types 有沒有 edited 就收工 —— 使用者手動加了 edited、卻沒改 if 與 concurrency，
       # 改個 PR 標題就會重跑整套、還把正在跑的那輪取消掉，這種半套的也要補齊。
-      if has_line "$f" "$V2_TYPES" && has_line "$f" "$V2_CI_CONC" && has_line "$f" "$V2_IF"; then return 0; fi
-      if { has_line "$f" "$V1_TYPES"   || has_line "$f" "$V2_TYPES"; } \
+      if has_line "$f" "$V2_TYPES" && has_line "$f" "$V2_CI_CONC" && has_line "$f" "$V2_IF"; then
+        :
+      elif { has_line "$f" "$V1_TYPES"   || has_line "$f" "$V2_TYPES"; } \
          && { has_line "$f" "$V1_CI_CONC" || has_line "$f" "$V2_CI_CONC"; } \
          && { has_line "$f" "$V1_IF"      || has_line "$f" "$V2_IF"; }; then
         replace_lines "$f" "$V1_TYPES" "$V2_TYPES" "$V1_CI_CONC" "$V2_CI_CONC" "$V1_IF" "$V2_IF"
@@ -549,10 +590,31 @@ patch_v2_triggers() {
              （有設 restricted-base-branches 時一定要做，否則 PR 改 base 就能繞過來源分支政策）"
       fi ;;
     security.yml)
-      if has_line "$f" "$V1_SEC_CONC"; then
-        replace_lines "$f" "$V1_SEC_CONC" "$V2_SEC_CONC"
+      # 跟 ci.yml 同一套：三行各自是舊範本原樣或已是新版，才一起換
+      if has_line "$f" "$V2_TYPES" && has_line "$f" "$V3_SEC_CONC" && has_line "$f" "$V2_IF"; then
+        :
+      elif { has_line "$f" "$V1_TYPES" || has_line "$f" "$V2_TYPES"; } \
+         && { has_line "$f" "$V1_SEC_CONC" || has_line "$f" "$V2_SEC_CONC" || has_line "$f" "$V3_SEC_CONC"; } \
+         && { has_line "$f" "$V1_IF" || has_line "$f" "$V2_IF"; }; then
+        replace_lines "$f" "$V1_TYPES" "$V2_TYPES" "$V1_SEC_CONC" "$V3_SEC_CONC" "$V2_SEC_CONC" "$V3_SEC_CONC" "$V1_IF" "$V2_IF"
         TRIGGER_REPORT="$TRIGGER_REPORT
+    security.yml → pull_request 加上 edited（PR 改 base 到正式分支時掃描），job if 與 concurrency 一併更新"
+      else
+        if has_line "$f" "$V1_SEC_CONC"; then
+          replace_lines "$f" "$V1_SEC_CONC" "$V2_SEC_CONC"
+          TRIGGER_REPORT="$TRIGGER_REPORT
     security.yml → concurrency 依事件分組（排程重掃不再跟 push 互相取消）"
+        fi
+        TRIGGER_REPORT="$TRIGGER_REPORT
+    security.yml → ⚠️ 觸發條件不是範本原樣，沒有自動加上 edited。PR 先發到 develop 再把 base 改成正式分支時
+                   Security Gate 不會回報，請照公版範本手動加上 edited 與對應的 if / concurrency"
+      fi ;;
+  esac
+  case "$name" in
+    ci.yml|security.yml)
+      if add_pr_branches "$f"; then
+        TRIGGER_REPORT="$TRIGGER_REPORT
+    $name → pull_request 只在發到 $PROD 的 PR 執行（branches: [$PROD]；要每個 PR 都跑改成 ['**']）"
       fi ;;
   esac
 }
@@ -565,10 +627,14 @@ for name in $CONFIGURED; do
   if [ ! -f "$dst" ]; then
     cp "$TPL/workflows/$name" "$dst"
     case "$name" in
-      ci.yml)       replace_with_block "$dst" "$(printf '%s\n' "$CI_ADDITIONS"  | sed 's/^/      /')" ;;
-      security.yml) replace_with_block "$dst" "$(printf '%s\n' "$SEC_ADDITIONS" | sed 's/^/      /')" ;;
+      ci.yml)
+        replace_with_block "$dst" "$(printf '%s\n' "$CI_ADDITIONS"  | sed 's/^/      /')"
+        replace_lines "$dst" '    branches: [main]' "    branches: [$PROD]" ;;
+      security.yml)
+        replace_with_block "$dst" "$(printf '%s\n' "$SEC_ADDITIONS" | sed 's/^/      /')"
+        replace_lines "$dst" '    branches: [main]' "    branches: [$PROD]" ;;
       branch-guard.yml)
-        replace_with_block "$dst" "      $GUARD_ADDITIONS"
+        replace_with_block "$dst" "$(printf '%s\n' "$GUARD_ADDITIONS" | sed 's/^/      /')"
         replace_lines "$dst" '    branches: [main]' "    branches: $GUARD_BRANCHES" ;;
     esac
     patch_uses "$dst"
@@ -589,9 +655,15 @@ for name in $CONFIGURED; do
         fi ;;
       security.yml) filter_with_block "$dst" "$known" "$SEC_ADDITIONS" ;;
       branch-guard.yml)
+        _had_req=false
+        if grep -q '^      required-checks:' "$dst"; then _had_req=true; fi
         filter_with_block "$dst" "$known" "$GUARD_ADDITIONS"
+        if [ "$_had_req" = false ] && grep -q '^      required-checks:' "$dst"; then
+          BRANCH_REPORT="$BRANCH_REPORT
+    branch-guard.yml → 合併進 develop 時不檢查 Gate（發到 develop 的 PR 不跑 CI／Security）"
+        fi
         # 既有的 notify 有值就保留；是空的而這次有給 --notify，才補上
-        if [ -n "$NOTIFY" ]; then replace_lines "$dst" '      notify: ""' "      $GUARD_ADDITIONS"; fi
+        if [ -n "$NOTIFY" ]; then replace_lines "$dst" '      notify: ""' "      $GUARD_NOTIFY_LINE"; fi
         # develop 流程而既有的只守正式分支 → 把 develop 加進去；其他寫法是使用者自訂的，不動
         if [ "$FLOW" = develop ] && has_line "$dst" "    branches: [$PROD]"; then
           replace_lines "$dst" "    branches: [$PROD]" "    branches: $GUARD_BRANCHES"
@@ -654,14 +726,14 @@ gen_dependabot() {
   printf '%s\n' \
     '# Dependabot（GitHub 內建、免費）—— 由 ci-standards 導入腳本依偵測到的技術產生' \
     '#' \
-    '# 每個 Dependabot PR 都會跑一整套 CI + Security，頻率要看著用：' \
+    '# 發到正式分支的 Dependabot PR 會跑 CI + Security，頻率要看著用：' \
     '#   - 套件（pip / npm / nuget）：每週，小版本併成一個 PR，major 單獨開' \
     '#   - docker / github-actions：每月一次' \
     '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。' \
     '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
   if [ "$FLOW" = develop ]; then
-    printf '%s\n' '# develop 流程：版本更新 PR 一律發到 develop。資安更新不看 target-branch，固定發到預設分支（正式分支），' \
-      '# 合併後比照 hotfix 把正式分支合回 develop。'
+    printf '%s\n' '# develop 流程：版本更新 PR 一律發到 develop，不跑 CI／Security，於 develop → 正式分支的發版 PR 一併檢查。' \
+      '# 資安更新不看 target-branch，固定發到預設分支（正式分支）並照常檢查，合併後比照 hotfix 把正式分支合回 develop。'
   fi
   printf '%s\n' 'version: 2' '' 'updates:'
   if [ "$HAS_PY_MANIFEST" = true ]; then dep_entry pip weekly pip-minor-patch minor /; fi
@@ -782,9 +854,9 @@ info ""
 info "Actions 分鐘數預估（私有 repo 才計費；公開 repo 使用 GitHub 代管 runner 免費）："
 info "  計費：每個 job 不滿 1 分鐘以 1 分鐘計；同一帳號（或組織）的所有私有 repo 共用每月額度"
 info "        （Free 方案約 2,000 分鐘 Linux）。"
-info "  每次 PR 推送（CI Gate＋Security Gate）              ：最少 2 分鐘"
+info "  PR → ${PROD} 每次推送（CI Gate＋Security Gate）      ：最少 2 分鐘"
 if [ "$FLOW" = develop ]; then
-  info "  功能分支 → develop，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
+  info "  功能分支 → develop：PR 不跑檢查，合併後 Branch Guard  ：最少 1 分鐘"
   info "  develop → ${PROD} 發版，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
 else
   info "  PR → ${PROD}，推送 1 次後合併（＋Branch Guard）        ：最少 3 分鐘"
@@ -797,6 +869,11 @@ if [ "$HAS_DOTNET" = true ]; then
   info "  ⓘ .NET 若改用 dotnet-runner: windows-latest，每次 CI 多 1 個 Windows job（單價約 Linux 的 1.7 倍）。"
 fi
 info "  詳細規則：https://github.com/singi0771/ci-standards/blob/main/docs/ACTIONS-MINUTES.md"
+if [ "$FLOW" = develop ]; then
+  info ""
+  warn "develop 流程：發到 develop 的 PR 不跑 CI／Security（2.6.0 起）。develop 的分支保護不能要求 Gate，"
+  info "    否則 PR 永遠 pending。設定方式見公版 README「develop 流程設定」（REQUIRED_CHECKS=none）。"
+fi
 info "───────────────────────────────────────────────────────────"
 
 if [ "$FLOW" = develop ]; then BASE_BRANCH="develop"; else BASE_BRANCH="$PROD"; fi
@@ -823,6 +900,8 @@ cat <<'NEXT'
       git push -u origin chore/adopt-ci-standards
 
  4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+    develop 流程：發往 develop 的 PR 不跑 CI／Security，第一次會在 develop → 正式分支的 PR 執行；
+    develop 的 ruleset 不要求 Gate（setup-branch-protection.sh 加 REQUIRED_CHECKS=none）。
     不是每個 repo 都設得了（例如 Free 方案的 private repo）—— 設不了時 Gate 照跑、
     紅燈只能提醒、擋不住 merge，補位做法見 README「無法設定分支保護時」。
 

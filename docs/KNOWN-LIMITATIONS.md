@@ -10,6 +10,7 @@
 |---|---|---|
 | [只內建 Python 與 .NET 的 lint/test](#ci-reusable-只內建-python-與-net-的-linttest) | 其他語言、前端（React / Vue / Node） | 安全掃描照用；CI 的 lint/test 在呼叫端自己補一個 job |
 | [沒有分支保護時紅燈擋不住 merge](#沒有分支保護時紅燈擋不住-merge) | Free 方案的 private repo、公司統一管制的 repo | 照 README「無法設定分支保護時」補位 |
+| [發往 develop 的 PR 不檢查](#發往-develop-的-pr-不檢查) | develop 流程的專案（2.6.0 起的範本） | 推送前本機跑 lint／測試；要每個 PR 都檢查就把 `branches` 改成 `['**']` |
 
 ---
 
@@ -82,3 +83,23 @@ GitHub Free 方案的 **private** repo 不能用 ruleset（API 回 `403 Upgrade 
 - 每解決一條，把它**從這裡刪掉**，並在 [CHANGELOG](../CHANGELOG.md) 記一筆
 - 新發現的限制，一律附上「怎麼測的 + 結果 + 查問題的步驟」，不要只寫「XX 好像不能用」
 - 查問題的步驟要能讓沒有前後文的人照著跑
+
+---
+
+## 發往 develop 的 PR 不檢查
+
+**現況**：2.6.0 起範本的 `ci.yml`、`security.yml` 有 `pull_request.branches: [<正式分支>]`，
+功能分支 → develop、Dependabot 版本更新（`target-branch: develop`）的 PR 都不跑 CI／Security。
+
+**原因**：私有 repo 的 Actions 每個 job 不滿一分鐘以一分鐘計，同一帳號的私有 repo 共用額度
+（[ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。每個功能 PR 都跑兩個 Gate，額度消耗得很快。
+
+**影響**：
+
+- develop 上的問題（lint、測試、弱點、外洩的密鑰）要到 develop → 正式分支的發版 PR 才會出現；
+  一次發版帶了好幾個功能時，要自己找出是哪一個造成的。
+- 密鑰外洩：gitleaks 在發版 PR 才掃到，這時密鑰已在 develop 的 git 歷史裡，**必須撤銷並換新**，只刪檔案不夠。
+- develop 的分支保護不能要求 Gate（`REQUIRED_CHECKS=none`），develop 可能一段時間處於紅燈狀態。
+
+**現在的做法**：推送前在本機跑 lint 與測試；發版 PR 紅燈時，修正發到 develop，發版 PR 會因來源分支更新而重跑。
+需要每個 PR 都檢查的專案，把兩支呼叫端的 `branches` 改成 `['**']`，並讓 develop 的分支保護要求兩個 Gate。

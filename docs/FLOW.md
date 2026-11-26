@@ -28,7 +28,9 @@
 
 ```mermaid
 flowchart TD
-    PR[PR opened / synchronize / reopened / ready_for_review<br/>或 edited 且改了 base 分支] --> DRAFT{草稿 PR?}
+    PR[PR opened / synchronize / reopened / ready_for_review<br/>或 edited 且改了 base 分支] --> BASE{發到正式分支?<br/>pull_request.branches}
+    BASE -->|否，例如發到 develop| STOP0[不跑，於發版 PR 一併檢查]
+    BASE -->|是| DRAFT{草稿 PR?}
     DRAFT -->|是| STOP1[不跑，省 Actions 分鐘]
     DRAFT -->|否| PAR
 
@@ -60,6 +62,9 @@ flowchart TD
 3. **圖裡沒有出現任何分支名稱**，這是刻意的 —— 要用什麼分支模型由各專案決定，
    見 [README 的分支模型](../README.md#分支模型)。本 repo 自己走的是
    「功能分支 → PR → `develop` → PR → `main`」，靠 `restricted-base-branches` 擋住發錯地方的 PR。
+4. **範本只在 PR 發到正式分支時跑**（2.6.0 起，呼叫端的 `pull_request.branches`）。功能分支 → develop 的 PR
+   不跑 CI／Security，develop 累積的變更在發版 PR 一次驗過，省 Actions 分鐘（見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。
+   本 repo 是公開 repo、不計費，自己的呼叫端仍是每個 PR 都跑。
 
 > ℹ️ 2.0.0 之前還有第三條線：Copilot 自動修 / 自動審（`copilot-autofix-*`、`copilot-autoreview-*`）。
 > 那套已整組移除 —— 它需要 Copilot Business 授權與真人 PAT，而且 Copilot 每推一次 commit，
