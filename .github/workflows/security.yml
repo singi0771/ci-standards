@@ -3,6 +3,7 @@ name: Security Scan
 
 on:
   # 只在 PR 上掃描，合併後不再重跑；新公布的 CVE 由 schedule 每週重掃抓。
+  # 與範本不同：不加 pull_request.branches，發往 develop 的 PR 也掃（公開 repo 不計費，理由見 ci.yml）。
   # pull_request 不加 paths-ignore —— Security Gate 是 required check，
   # 被 path filter 擋掉就永遠不回報，純文件 PR 會卡死。
   # 多列 ready_for_review：草稿 PR 不跑（見下面 job 的 if），改成正式 PR 那一刻才跑。

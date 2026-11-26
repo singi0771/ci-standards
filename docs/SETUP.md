@@ -126,7 +126,7 @@ Settings → Billing → **Spending limit** → Actions 設為 **$0**。
 
 - `scan-docker-image: false` —— image 掃描每次多吃 2–3 分鐘；沒 Dockerfile 一定關
 - schedule 從每週改每月（改呼叫端 `security.yml` 的 cron，例如 `"0 3 1 * *"`）
-- 呼叫端只在 PR 上跑 CI / Security，合併進 main / develop 後不再重跑一輪
+- 呼叫端只在 PR 上跑 CI / Security，合併後不再重跑一輪；2.6.0 起只在 PR 發往正式分支時跑，功能分支 → develop 的 PR 不跑
   （`pull_request` 刻意不加 `paths-ignore` —— 加了會讓純文件 PR 的 required check 永遠 pending、PR 卡死）
 - 呼叫端已設 `concurrency` + `cancel-in-progress`，連續 push 會自動取消舊 run
 - 還在寫的 PR 開成**草稿**：1.3.0 的範本呼叫端遇到草稿整個跳過，按 Ready for review 才跑
