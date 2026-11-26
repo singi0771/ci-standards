@@ -65,7 +65,8 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 |---|---|
 | `*.new` 檔案 | 與既有檔案比對，採用需要的段落後刪除 `.new`，不得提交 |
 | 「在 vX 不存在」的 input | workflow 會 `startup_failure`，Gate 永遠不回報。移除該 input |
-| 「觸發條件不是範本原樣」 | 對照 `templates/consumer-repo/.github/workflows/ci.yml` 手動修改。設有來源分支政策時必須處理 |
+| 「觸發條件不是範本原樣」 | 對照 `templates/consumer-repo/.github/workflows/ci.yml`、`security.yml` 手動修改。設有來源分支政策時必須處理；`security.yml` 沒有 `edited` 時，PR 先發往 develop 再改 base 會使 Security Gate 不回報 |
+| 「develop 的分支保護不能要求 Gate」 | 告知使用者 develop 的 ruleset 改以 `REQUIRED_CHECKS=none` 設定（README「develop 流程設定」）；舊的 develop＋main 共用 ruleset 須拆開 |
 | Copilot 呼叫端殘留 | 依輸出的 `git rm` 指令刪除 |
 | 多個 .NET 方案／專案檔 | 於 `ci.yml` 的 `with:` 加 `dotnet-project`。只有一個方案檔時（含 `docker-compose.dcproj` 的方案亦同）維持空白，勿改指單一專案檔 |
 | `.editorconfig` 與 `.gitattributes` 換行不一致 | 依提示於 `.gitattributes` 加 `*.cs text eol=<值>`，執行 `git add --renormalize .` 後一併提交（見 README「dotnet format 回報 ENDOFLINE」） |
@@ -74,6 +75,8 @@ bash /tmp/adopt.sh --notify "@帳號" --flow develop
 
 1. 提交 `.github/` 變更，PR 發往 develop（`trunk` 流程發往正式分支）。
 2. 等待 `ci / CI Gate`、`security / Security Gate`。
+   develop 流程（2.6.0 起）發往 develop 的 PR 不跑 CI／Security，只會看到 Branch Guard：
+   合併導入 PR 後開 develop → 正式分支的 PR，第一次掃描在那裡執行。修正一樣發到 develop，發版 PR 會自動重跑。
 3. 失敗時依 [README — 疑難排解](../README.md#疑難排解)、[誤判抑制](../README.md#誤判抑制) 處理，將原因與修法告知使用者後修在同一個 PR。
    **不得**關閉或刪除掃描 job、以 `.semgrepignore` 排除主要程式檔等方式讓 Gate 轉綠。
 

@@ -18,6 +18,7 @@
 #   ./scripts/setup-branch-protection.sh acme/app main develop    # 兩條長壽分支一起保護
 #   ./scripts/setup-branch-protection.sh acme/app 'release/*'     # 支援 fnmatch 樣式
 #   ./scripts/setup-branch-protection.sh acme/app main --dry-run  # 只印 payload，不打 API
+#   REQUIRED_CHECKS=none ./scripts/setup-branch-protection.sh acme/app develop   # 只要求開 PR，不要求 check
 #
 # 分支名稱刻意不寫死：用什麼分支模型（只有 main、main+develop、GitFlow…）
 # 是各專案自己的決定，公版只提供「怎麼保護」。
@@ -80,6 +81,12 @@ RULESET_NAME="${RULESET_NAME:-$DEFAULT_RULESET_NAME}"
 # check 名稱的格式是「<呼叫端 job id> / <公版 job 名>」：
 #   security.yml 的 job id 是 security；公版彙總 job 名是 Security Gate
 #   ci.yml       的 job id 是 ci      ；公版彙總 job 名是 CI Gate
+#
+# none＝不要求任何 check，只保留「必須開 PR、禁止 force push / 刪除」（2.6.0 起）。
+# 給 develop 用：範本只在 PR 發到正式分支時跑 CI／Security，發到 develop 的 PR 不會有 Gate，
+# 要求 Gate 的話 PR 永遠 pending。develop 與正式分支要分兩次執行（各一份 ruleset）：
+#   ./scripts/setup-branch-protection.sh acme/app main
+#   REQUIRED_CHECKS=none ./scripts/setup-branch-protection.sh acme/app develop
 REQUIRED_CHECKS="${REQUIRED_CHECKS:-security / Security Gate,ci / CI Gate}"
 
 # required check 要由哪個 GitHub App 回報才算數。預設 15368 = GitHub Actions。
@@ -151,7 +158,7 @@ done
 # （Semgrep 的 bash.lang.security.ifs-tampering 就是在抓這個）。
 # check 名稱本身含空白（"ci / CI Gate"），所以用 IFS= read -r 整行讀。
 CHECKS=""
-while IFS= read -r c; do
+[ "$REQUIRED_CHECKS" = "none" ] || while IFS= read -r c; do
   # 去掉逗號後可能殘留的前後空白（"a, b" 這種寫法）
   c="${c#"${c%%[![:space:]]*}"}"
   c="${c%"${c##*[![:space:]]}"}"
@@ -166,9 +173,23 @@ done <<EOF
 $(printf '%s' "$REQUIRED_CHECKS" | tr ',' '
 ')
 EOF
-if [ -z "$CHECKS" ]; then
-  echo "❌ REQUIRED_CHECKS 是空的 —— 沒有任何 check 要求等於沒有守門" >&2
+CHECKS_RULE=""
+if [ "$REQUIRED_CHECKS" = "none" ]; then
+  # 整條規則拿掉，不要送空陣列（空陣列的 required_status_checks 會被 API 拒絕）
+  :
+elif [ -z "$CHECKS" ]; then
+  echo "❌ REQUIRED_CHECKS 是空的 —— 沒有任何 check 要求等於沒有守門。" >&2
+  echo "   develop 這類不跑 CI 的分支，明確寫 REQUIRED_CHECKS=none。" >&2
   exit 1
+else
+  CHECKS_RULE="
+    {
+      \"type\": \"required_status_checks\",
+      \"parameters\": {
+        \"strict_required_status_checks_policy\": $STRICT_CHECKS,
+        \"required_status_checks\": [$CHECKS]
+      }
+    },"
 fi
 
 PAYLOAD=$(cat <<JSON
@@ -189,14 +210,7 @@ PAYLOAD=$(cat <<JSON
         "require_last_push_approval": false,
         "required_review_thread_resolution": true
       }
-    },
-    {
-      "type": "required_status_checks",
-      "parameters": {
-        "strict_required_status_checks_policy": $STRICT_CHECKS,
-        "required_status_checks": [$CHECKS]
-      }
-    },
+    },$CHECKS_RULE
     { "type": "non_fast_forward" },
     { "type": "deletion" }
   ]

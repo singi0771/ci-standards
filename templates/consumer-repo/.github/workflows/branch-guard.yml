@@ -25,5 +25,10 @@ jobs:
       pull-requests: read
       checks: read
       issues: write
+    # develop 流程由導入腳本加上 required-checks（2.6.0 起）：
+    #   required-checks: ${{ github.ref_name != 'develop' && 'ci / CI Gate,security / Security Gate' || '' }}
+    # 發到 develop 的 PR 不跑 CI／Security，合併進 develop 時只檢查「是否經 PR」，不檢查 Gate。
+    # ⚠️ 要寫成 != 'develop' && '<check>' || ''。反過來寫 == 'develop' && '' || '<check>' 永遠拿到後者：
+    #    '' 在運算式裡是 false，&& 會跳到 || 後面。
     with:
       notify: ""

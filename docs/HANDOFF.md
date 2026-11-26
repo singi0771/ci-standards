@@ -110,12 +110,12 @@
 > **⑫ 省 Actions 分鐘（2026-11-26 起）**：私有 repo 計費以「每個 job 進位到整分鐘」計，
 > 2.4.x 以前每次 PR 推送 6～10 個 job，實際跑 1 分鐘卻計 10 分鐘（規則見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。分兩階段：
 > - **第一階段 2.5.0**（2026-11-26 發佈）：CI、Security 各合併為一個 job，Gate 名稱不變，各專案不用動作。
-> - **第二階段 3.0.0**（未做）：feature → develop 的 PR 不跑 CI／Security，只在 PR 到正式分支時跑。
->   已知要一起處理的配套：範本 `security.yml` 補 `edited`；`pull_request.branches` 依 `--prod` 代換、不寫死 main；
->   develop 的 ruleset 不要求 check（`setup-branch-protection.sh` 須允許，且舊的 develop+main 共用 ruleset 要拆）；
->   Branch Guard 範本的 `required-checks` 改為 `${{ github.ref_name != 'develop' && '...' || '' }}`（不能反過來寫，`''` 是 falsy）；
->   Dependabot 版本更新 PR（`target-branch: develop`）不再被掃；`docs/AI-ADOPT.md` 與 ci-standards-onboard skill
->   的「等 Gate」流程要改；adopt 升級補丁兩支腳本要 byte-identical。
+> - **第二階段 2.6.0**（已實作，待發佈）：範本只在 PR 發往正式分支時跑 CI／Security。公版 reusable 沒動，所以不是 3.0.0：
+>   不重跑導入腳本的專案完全不受影響。配套：範本 `security.yml` 補 `edited`；`pull_request.branches` 依 `--prod` 代換；
+>   `setup-branch-protection.sh` 支援 `REQUIRED_CHECKS=none`；Branch Guard 範本 develop 流程加 `required-checks` 運算式
+>   （必須 `!= 'develop' && '...' || ''`，`''` 是 falsy）；AI-ADOPT 第 6 步改為「第一次掃描在發版 PR」。
+>   本 repo 自己的呼叫端不加 branches（公開 repo 不計費）。
+>   **待辦**：ci-standards-onboard skill（`~/.claude/skills/`，同步到 claude-config repo）的「PR 發往 develop 後等 Gate」流程要跟著改。
 >
 
 > **1.3.1 已發佈完成**（2026-09-15；`v1` 與 `v1.3.1^{}` 都在 `386c990`，已用 `git ls-remote` 驗過；

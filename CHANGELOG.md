@@ -12,6 +12,42 @@
 
 ---
 
+## [2.6.0] — 未發佈
+
+範本的 CI／Security 只在 PR 發往正式分支時執行，功能分支 → develop 的 PR 不再執行，降低私有 repo 的 Actions 分鐘數。
+公版 reusable 沒有變更，不重跑導入腳本的專案不受影響。
+
+### 需要專案動作
+- 要採用的專案重跑導入腳本（`adopt.sh` / `adopt.ps1`）。升級模式會自動：
+  - `ci.yml`、`security.yml` 的 `pull_request` 加上 `branches: [<正式分支>]`（已有 `branches` 的不動）
+  - `security.yml` 加上 `edited`，job `if` 與 `concurrency` 一併更新（範本原樣才自動改，否則提示手動修改）
+  - develop 流程的 `branch-guard.yml` 加上 `required-checks`，合併進 develop 時不檢查 Gate
+- **develop 有分支保護且要求 Gate 的專案（必做，否則發往 develop 的 PR 永遠 pending）**：
+  正式分支與 develop 分開設定，再刪除舊的共用 ruleset：
+  ```bash
+  ./scripts/setup-branch-protection.sh <owner>/<repo> main
+  REQUIRED_CHECKS=none ./scripts/setup-branch-protection.sh <owner>/<repo> develop
+  gh api -X DELETE repos/<owner>/<repo>/rulesets/<舊的 CI Standard (branches: develop main) 的 id>
+  ```
+  Free 方案的私有 repo 沒有 ruleset，不需處理。
+- 要維持每個 PR 都檢查的專案：重跑導入腳本前，先把兩支呼叫端的 `pull_request` 加上 `branches: ['**']`。
+
+### 變更
+- 範本 `ci.yml`、`security.yml`：`pull_request.branches: [main]`，導入腳本依 `--prod` 代換。
+  發往 develop 的功能 PR 與 Dependabot 版本更新不執行，於 develop → 正式分支的發版 PR 一併檢查；
+  hotfix/*、Dependabot 資安更新（發往預設分支）照常檢查。
+- 範本 `security.yml`：`pull_request` 加 `edited`。PR 先發往 develop 再把 base 改成正式分支時，Security Gate 才會回報。
+- 範本 `branch-guard.yml`（develop 流程）：
+  `required-checks: ${{ github.ref_name != 'develop' && 'ci / CI Gate,security / Security Gate' || '' }}`。
+- `setup-branch-protection.sh`：`REQUIRED_CHECKS=none` 建立只要求 PR、禁止 force push 與刪除的 ruleset（不含 check 規則）。
+- 導入腳本：分鐘數預估改為新的觸發方式；develop 流程提醒 develop 的分支保護不可要求 Gate；
+  產生的 `dependabot.yml` 註解改為說明發往 develop 的 PR 不執行檢查。
+- 本 repo 自己的呼叫端維持每個 PR 都執行（公開 repo 不計費，公版改壞要在功能 PR 上就發現）。
+
+### 文件
+- README「觸發條件」「develop 流程設定」「以腳本設定」、ACTIONS-MINUTES、FLOW、AI-ADOPT、SETUP 依新觸發方式更新。
+- KNOWN-LIMITATIONS 新增「發往 develop 的 PR 不檢查」：問題延到發版 PR 才出現；密鑰外洩在 develop 歷史中須撤銷換新。
+
 ## [2.5.0] — 2026-11-26
 
 CI 與 Security 各合併為一個 job，降低私有 repo 的 Actions 分鐘數；新增分鐘數計費說明，導入腳本印出預估。

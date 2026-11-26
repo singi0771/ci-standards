@@ -81,6 +81,11 @@ has "$CI"  'ready_for_review, edited]' "範本的 pull_request 有 edited（改 
 has "$SEC" 'scan-docker-image: true'   "scan-docker-image 依 Dockerfile 設為 true"
 has "$SEC" 'run-zizmor: true'          "run-zizmor 預設打開"
 hasnt "$SEC" 'python-version'          "security.yml 不再傳沒有任何步驟用到的 python-version"
+PRODA="$(git symbolic-ref --short HEAD)"
+has "$CI"  "    branches: [$PRODA]"    "ci.yml 只在發到正式分支的 PR 執行（2.6.0）"
+has "$SEC" "    branches: [$PRODA]"    "security.yml 只在發到正式分支的 PR 執行（2.6.0）"
+has "$SEC" 'ready_for_review, edited]' "security.yml 也聽 edited（PR 改 base 到正式分支時掃描）"
+hasnt ".github/workflows/branch-guard.yml" '      required-checks:' "trunk 流程：branch-guard 不加 required-checks"
 has ".github/zizmor.yml" 'singi0771/ci-standards/*' "zizmor.yml 有建立，且放行規則指向公版"
 if [ -f ".github/pull_request_template.md" ]; then ok "pull_request_template.md 有建立"; else bad "應建立 pull_request_template.md"; fi
 if [ ! -e ".github/zizmor.yml.new" ]; then ok "全新導入不會產生多餘的 .new"; else bad "不該產生 .new"; fi
@@ -307,6 +312,8 @@ has "$CI"  'ready_for_review, edited]'                                     "v1 �
 has "$CI"  "github.event.action != 'edited' || github.event.changes.base"  "job if 一起改成「只有改 base 的 edited 才跑」"
 has "$CI"  "format('ci-edit-{0}', github.run_id)"                                         "concurrency 一起改（改標題不會取消正在跑的 CI）"
 has "$CI"  'ci-reusable.yml@v2'                                            "uses: 改指向 @v2"
+has "$CI"  '    branches: ['                                               "v1 範本的 ci.yml 補上 pull_request.branches"
+has "$SEC" '    branches: ['                                               "沒有 types 的 security.yml 也補上 pull_request.branches"
 # shellcheck disable=SC2016  # 故意不展開：比對的是檔案裡的 ${{ }} 原文
 has "$SEC" 'group: security-${{ github.event_name }}-${{ github.ref }}'    "security.yml 的 concurrency 依事件分組"
 if grep -q "$(printf '\r')" "$CI"; then bad "CRLF 呼叫端合併後應統一成 LF"; else ok "CRLF 呼叫端合併後統一成 LF（與 adopt.ps1 一致）"; fi
@@ -472,6 +479,11 @@ case "$OUT" in *"分支流程     : develop"*) ok "有 develop 分支時自動�
 has "$CI"    "restricted-base-branches: \"$PRODB\""      "develop 流程：ci.yml 加上 restricted-base-branches（正式分支）"
 has "$CI"    'allowed-head-branches: "develop hotfix/* dependabot/*"' "develop 流程：ci.yml 加上 allowed-head-branches"
 has "$GUARD" "branches: [$PRODB, develop]"               "develop 流程：branch-guard 守正式分支與 develop"
+# shellcheck disable=SC2016  # 故意不展開：比對的是檔案裡的 ${{ }} 原文
+has "$GUARD" '      required-checks: ${{ github.ref_name != '"'develop'"' && '"'ci / CI Gate,security / Security Gate'"' || '"''"' }}' \
+                                                         "develop 流程：合併進 develop 時 Branch Guard 不檢查 Gate"
+has "$CI"    "    branches: [$PRODB]"                    "develop 流程：ci.yml 只在發到正式分支的 PR 執行"
+case "$OUT" in *"develop 的分支保護不能要求 Gate"*) ok "develop 流程：提醒 develop 的分支保護不要求 Gate" ;; *) bad "沒有提醒 develop 的分支保護" ;; esac
 check "develop 流程：dependabot 每一項都發到 develop" "$(grep -c 'target-branch: "develop"' "$DEP")" "3"
 has "$DEP"   'package-ecosystem: "pip"'                  "有 requirements.txt → dependabot 有 pip"
 has "$DEP"   '      - "/svc/a"'                                "多個 Dockerfile 目錄 → docker 用 directories 列出"
@@ -482,6 +494,8 @@ new_repo flow-trunk
 "$ADOPT" --std "$STD" --prod release >/dev/null
 hasnt "$CI"  '      restricted-base-branches:'   "trunk 流程：不加來源分支政策"
 has "$GUARD" 'branches: [release]'           "--prod 指定的正式分支寫進 branch-guard"
+has "$CI"    '    branches: [release]'       "--prod 指定的正式分支寫進 ci.yml 的 pull_request.branches"
+has "$SEC"   '    branches: [release]'       "--prod 指定的正式分支寫進 security.yml 的 pull_request.branches"
 hasnt "$DEP" 'target-branch'                 "trunk 流程：dependabot 不加 target-branch"
 has "$DEP"   'package-ecosystem: "github-actions"' "dependabot 一定有 github-actions"
 hasnt "$DEP" 'package-ecosystem: "pip"'      "沒有 Python 相依清單 → 不列 pip"
@@ -508,6 +522,8 @@ printf 'jobs:\n  ci:\n    uses: singi0771/ci-standards/.github/workflows/ci-reus
 OUT="$("$ADOPT_RAW" --std "$STD" --prod main 2>&1)"
 has "$GUARD" 'branches: [main, develop]'      "升級：只守正式分支的 branch-guard 補上 develop"
 has "$GUARD" 'notify: "@owner"'               "升級：既有 notify 保留"
+has "$GUARD" '      required-checks: ${{ github.ref_name != '"'develop'" "升級：develop 流程的 branch-guard 補上 required-checks"
+check "升級：notify 仍只有一行" "$(grep -c 'notify:' "$GUARD")" "1"
 has "$CI"    'restricted-base-branches: "main"' "升級：ci.yml 補上來源分支政策"
 case "$OUT" in *"加上來源分支政策"*"on.push.branches 加上 develop"*) ok "升級時報告列出分支流程的變更" ;; *) bad "升級報告沒有列出分支流程變更（實際輸出：${OUT}）" ;; esac
 new_repo flow-custom
@@ -516,6 +532,58 @@ mkdir -p .github/workflows
 printf 'on:\n  push:\n    branches: [main, "release/*"]\njobs:\n  guard:\n    uses: singi0771/ci-standards/.github/workflows/branch-guard-reusable.yml@v2\n    with:\n      notify: "@owner"\n' > "$GUARD"
 "$ADOPT_RAW" --std "$STD" --prod main >/dev/null
 has "$GUARD" 'branches: [main, "release/*"]'  "使用者自訂的 branches 寫法不動"
+
+# ═════════════════════════════════════════════════════════════
+printf '\n▸ 情境 O：2.5.x 範本原樣的呼叫端升級到 2.6.0（只在 PR 到正式分支時檢查）\n'
+# ═════════════════════════════════════════════════════════════
+new_repo v25-template
+mkdir -p .github/workflows
+cat > "$SEC" <<'OLD'
+name: Security Scan
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "0 3 * * 1"
+concurrency:
+  group: security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  security:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    uses: singi0771/ci-standards/.github/workflows/security-reusable.yml@v2
+    with:
+      run-zizmor: true
+OLD
+"$ADOPT" --std "$STD" --prod main >/dev/null
+has "$SEC" 'ready_for_review, edited]'                                    "security.yml 補上 edited"
+has "$SEC" "github.event.action != 'edited' || github.event.changes.base" "security.yml 的 job if 一起改"
+has "$SEC" "format('security-edit-{0}', github.run_id)"                   "security.yml 的 concurrency 一起改（改標題不取消正在跑的掃描）"
+check "branches 插在 pull_request: 的下一行" "$(grep -A1 '^  pull_request:$' "$SEC" | tail -1)" "    branches: [main]"
+has "$SEC" '    - cron: "0 3 * * 1"'                                      "schedule 原樣保留"
+cp "$SEC" "$WORK/v25-sec-after"
+"$ADOPT" --std "$STD" --prod main >/dev/null
+if cmp -s "$SEC" "$WORK/v25-sec-after"; then ok "2.6.0 修補可重複執行（第二次不再變動）"; else bad "第二次執行又改了 security.yml"; fi
+check "branches 只有一行" "$(grep -c '^    branches:' "$SEC")" "1"
+
+# 使用者自訂了 branches（例如要每個 PR 都跑）→ 不動
+new_repo v25-custom
+mkdir -p .github/workflows
+cat > "$CI" <<'OLD'
+on:
+  pull_request:
+    # 每個 PR 都跑
+    branches: ['**']
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+jobs:
+  ci:
+    uses: singi0771/ci-standards/.github/workflows/ci-reusable.yml@v2
+    with:
+      run-python: false
+OLD
+"$ADOPT" --std "$STD" --prod main >/dev/null
+check "既有的 branches 寫法不動" "$(grep -c '^    branches:' "$CI")" "1"
+has "$CI" "    branches: ['**']" "使用者的 ['**'] 原樣保留"
 
 # ═════════════════════════════════════════════════════════════
 printf '\n▸ 情境 N：with: 的 input 要存在於 --ref 指定的版本\n'

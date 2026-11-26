@@ -316,8 +316,9 @@ Semgrep 結果一律存為 artifact `semgrep-sarif`，不上傳 Security 分頁�
 ```bash
 curl -fsSL https://raw.githubusercontent.com/singi0771/ci-standards/v2/scripts/setup-branch-protection.sh -o /tmp/setup-branch-protection.sh
 bash /tmp/setup-branch-protection.sh <owner>/<repo>                         # 保護 default branch
-bash /tmp/setup-branch-protection.sh <owner>/<repo> main develop            # 指定多個分支
-bash /tmp/setup-branch-protection.sh <owner>/<repo> main develop --dry-run  # 僅輸出 payload
+bash /tmp/setup-branch-protection.sh <owner>/<repo> main                    # 指定分支
+REQUIRED_CHECKS=none bash /tmp/setup-branch-protection.sh <owner>/<repo> develop   # 不要求 Gate（develop 流程）
+bash /tmp/setup-branch-protection.sh <owner>/<repo> main --dry-run          # 僅輸出 payload
 ```
 
 建立的 ruleset 內容：必須經由 PR、對話須解決、`security / Security Gate` 與 `ci / CI Gate` 須通過、禁止 force push 與刪除分支。
@@ -326,6 +327,7 @@ bash /tmp/setup-branch-protection.sh <owner>/<repo> main develop --dry-run  # �
 |---|---|---|
 | `REQUIRED_APPROVALS` | `0` | 必要核准數。單人團隊設為 1 會導致 PR 無法 merge（作者無法核准自己的 PR，ruleset 預設無 bypass） |
 | `STRICT_CHECKS` | `false` | `true` 時要求 PR 分支與目標分支同步後才可 merge |
+| `REQUIRED_CHECKS` | `security / Security Gate,ci / CI Gate` | 要求的 check，逗號分隔。`none` 為不要求 check（develop 流程的 develop 用） |
 | `CHECKS_INTEGRATION_ID` | `15368` | required check 限定由 GitHub Actions 回報，防止以 commit status API 偽造。空字串為不限定 |
 
 腳本可重複執行，同名 ruleset 會更新而非新增。
@@ -421,30 +423,40 @@ jobs:
 
 ### 觸發條件
 
-範本的 `ci.yml` 只對 PR 執行（所有 base 分支）；`security.yml` 另有每週排程重掃：
+2.6.0 起範本的 `ci.yml`、`security.yml` 只在 **PR 發到正式分支**時執行；`security.yml` 另有每週排程重掃。
+`branches` 由導入腳本填成正式分支（`--prod`，預設依 `origin/HEAD` 判斷）：
 
 ```yaml
 on:
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
 ```
 
-合併進 main / develop 後不再重跑：
+| PR | 是否執行 CI／Security |
+|---|---|
+| develop → 正式分支（發版） | ✅ |
+| hotfix/* → 正式分支 | ✅ |
+| Dependabot 資安更新（固定發往預設分支） | ✅ |
+| 功能分支 → develop | ❌ 不執行 |
+| Dependabot 版本更新（develop 流程發往 develop） | ❌ 不執行，於發版 PR 一併檢查 |
 
-- PR 檢查的是合併後的結果（`refs/pull/N/merge`），合併後再跑多半是同一份程式碼。
-- develop → main 的 PR 會再驗一次 develop 累積的變更。PR 開啟期間 develop（此 PR 的來源分支）有新 commit 時，PR 收到 `synchronize` 自動重跑，前一輪的結果不再算數。
-- 直接 push 與 Gate 未通過即 merge 由 [Branch Guard](#branch-guard) 偵測。
+不在每個功能 PR 檢查的原因是 Actions 分鐘數：私有 repo 每個 job 不滿一分鐘以一分鐘計，同一帳號的私有 repo 共用額度（見 [`docs/ACTIONS-MINUTES.md`](docs/ACTIONS-MINUTES.md)）。
+發版 PR 檢查的是合併後的結果（`refs/pull/N/merge`），develop 累積的所有變更在此一次驗證。
+代價是 develop 上的問題要到發版 PR 才會出現，建議推送前於本機執行 lint 與測試。
+
+要每個 PR 都檢查（包含發往 develop 的），將兩支呼叫端的 `branches` 改為 `['**']`，並讓 develop 的分支保護要求兩個 Gate。導入腳本看到已有 `branches` 就不會改回。
+
+合併後不再重跑；直接 push 與 Gate 未通過即 merge 由 [Branch Guard](#branch-guard) 偵測。
 
 例外：以 Actions 的 `GITHUB_TOKEN` merge 或 push 時，GitHub 不觸發任何 workflow，PR 不會重跑。自動化流程請使用個人或 GitHub App 的 token。
 
-`synchronize` 只在來源分支有新 commit 時觸發，目標分支有新 commit 不會重跑。feature → develop 的 PR 開啟期間 develop 合併了其他 PR，此 PR 仍顯示先前的結果，未驗證與新 develop 合併後的程式碼。處理方式：
-
-- 以 `STRICT_CHECKS=true` 執行 `setup-branch-protection.sh`（Require branches to be up to date）：目標分支前進後須先更新 PR 分支才可 merge，更新即觸發重跑。代價是每次目標分支前進，所有開啟中的 PR 都要更新並重跑。
-- 不開 strict：develop → main 的發版 PR 仍會驗證合併後的結果，正式分支不受影響；develop 可能短暫處於未驗證的組合。
+`synchronize` 只在來源分支有新 commit 時觸發，目標分支有新 commit 不會重跑。發版 PR 開啟期間 main 被 hotfix 合併時，此 PR 仍顯示先前的結果。
+需要時以 `STRICT_CHECKS=true` 執行 `setup-branch-protection.sh`（Require branches to be up to date），目標分支前進後須先更新 PR 分支才可 merge。
 
 - `on:` 不支援 `${{ }}` 運算式，分支名稱須直接寫入。
-- 加上 `pull_request.branches` 篩選後，未列入分支的 PR 不會產生 `ci / CI Gate`，這些分支不可設為 required check。
-- `edited` 用於 PR 變更 base 分支時重新判定來源分支政策。僅修改標題或內文的 `edited` 不執行，由 job 的 `if` 與 `concurrency` 控制：
+- 未列入 `branches` 的分支，其 PR 不會產生 `ci / CI Gate`、`security / Security Gate`，這些分支的分支保護不可要求 Gate（develop 以 `REQUIRED_CHECKS=none` 設定，見下方）。
+- `edited` 用於 PR 變更 base 分支時重新執行：PR 先發往 develop（不執行）再改為正式分支時於此時檢查，也避免先取得綠燈再改 base 繞過來源分支政策。僅修改標題或內文的 `edited` 不執行，由 job 的 `if` 與 `concurrency` 控制：
 
 ```yaml
 concurrency:
@@ -486,15 +498,20 @@ with:
 
 | 目標 | 設定 | 由誰設定 |
 |---|---|---|
-| develop、main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main develop` | 手動（需 admin） |
+| main 禁止直接 push、須通過 Gate、禁止 force push 與刪除 | `setup-branch-protection.sh <owner>/<repo> main` | 手動（需 admin） |
+| develop 禁止直接 push、禁止 force push 與刪除，**不要求 Gate**（發往 develop 的 PR 不執行 CI／Security） | `REQUIRED_CHECKS=none setup-branch-protection.sh <owner>/<repo> develop` | 手動（需 admin） |
+| CI／Security 只在 PR 發往 main 時執行 | `ci.yml`、`security.yml` 的 `pull_request.branches: [main]` | 導入腳本 |
 | main 只接受 develop、hotfix、Dependabot 資安更新的 PR | `restricted-base-branches: "main"`、`allowed-head-branches: "develop hotfix/* dependabot/*"` | 導入腳本 |
-| develop 也偵測直接 push | `branch-guard.yml` 的 `on.push.branches: [main, develop]` | 導入腳本 |
-| Dependabot 版本更新 PR 發往 develop | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
+| develop 也偵測直接 push；合併進 develop 時不檢查 Gate | `branch-guard.yml` 的 `on.push.branches: [main, develop]`、`required-checks: ${{ github.ref_name != 'develop' && '...' \|\| '' }}` | 導入腳本 |
+| Dependabot 版本更新 PR 發往 develop（不執行檢查，於發版 PR 一併檢查） | `dependabot.yml` 每一項 `target-branch: "develop"` | 導入腳本 |
 | 發版 PR 不破壞歷史 | develop → main 以 merge commit 合併，不使用 squash；不開「Automatically delete head branches」 | 團隊規則 |
 
 Dependabot 資安更新（security updates）不套用 `target-branch`，固定發往 repo 的預設分支（通常為 main），來源分支為 `dependabot/...`。導入腳本因此將 `dependabot/*` 列入 `allowed-head-branches`，資安更新比照 hotfix 直接合併進 main，合併後將 main 合回 develop。不希望資安更新直接進 main 時，自 `allowed-head-branches` 移除 `dependabot/*`，改以 cherry-pick 將修正帶到 develop 並關閉原 PR。
 
 分支名稱可自訂，腳本與 input 皆依實際填寫的名稱運作。
+
+**2.5.x 以前導入、以單一 ruleset 同時保護 main 與 develop 的專案**：該 ruleset 要求 Gate，升級到 2.6.0 的範本後發往 develop 的 PR 會永遠 pending。
+依上表分別建立 main 與 develop 的 ruleset，再刪除舊的 `CI Standard (branches: develop main)`（腳本完成時會列出同系列的其他 ruleset 與刪除指令）。
 
 ---
 

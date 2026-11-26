@@ -16,30 +16,29 @@
 name: CI
 
 on:
-  # 只在 PR 上檢查，合併進 main / develop 後不再重跑一輪：
-  #   - PR 檢查的就是「合併後的結果」（refs/pull/N/merge），合併後再跑多半是同一份程式碼
-  #   - develop → main 的 PR 會把 develop 累積的變更一起再驗一次；
-  #     PR 開著時 develop 又有新 commit，因為 develop 是這個 PR 的來源分支，PR 會收到 synchronize 而重跑
+  # 只在「PR 發到正式分支」時檢查（2.6.0 起）。合併後不再重跑，功能分支發到 develop 的 PR 也不跑：
+  #   - 私有 repo 的 Actions 每個 job 不滿一分鐘也算一分鐘，同一帳號的私有 repo 共用額度
+  #     （公版 docs/ACTIONS-MINUTES.md）。每個功能 PR 都檢查，額度消耗得很快。
+  #   - develop → 正式分支的發版 PR 檢查的是「合併後的結果」（refs/pull/N/merge），
+  #     develop 累積的所有變更在這裡一次驗過；hotfix/* → 正式分支、Dependabot 資安更新也在這裡驗。
+  #   - 代價：develop 上的問題要到發版 PR 才會出現，發版前最好先在本機跑過 lint 與測試。
+  #   - 直接 push、Gate 沒綠就 merge 正式分支，由 branch-guard.yml 偵測並開 Issue 通知
+  # branches 由導入腳本填成正式分支。想讓每個 PR 都檢查（包含發到 develop 的），改成 branches: ['**']
+  # （導入腳本看到已有 branches 就不會改回來）。
+  # ⚠️ 沒列在 branches 的分支，其 PR 不會有 `ci / CI Gate` —— 那些分支的分支保護不能要求這個 check，
+  #   develop 的 ruleset 用 REQUIRED_CHECKS=none 設定（見公版 README「develop 流程設定」）。
   # ⚠️ synchronize 只在「來源分支」有新 commit 時觸發；「目標分支」有新 commit 不會重跑。
-  #   例如 feature → develop 的 PR 開著時 develop 被合併了別的 PR，這個 PR 仍掛著舊的綠燈。
-  #   要擋就用分支保護的「Require branches to be up to date」（setup-branch-protection.sh 的 STRICT_CHECKS=true）；
-  #   不開的話，develop → main 的發版 PR 仍會驗一次合併後的結果，正式分支不受影響。
-  #   - 直接 push、Gate 沒綠就 merge，由 branch-guard.yml 偵測並開 Issue 通知
+  #   要擋就用分支保護的「Require branches to be up to date」（setup-branch-protection.sh 的 STRICT_CHECKS=true）。
   # ⚠️ pull_request 這裡「不要」加 paths-ignore。
   # 分支保護把 `ci / CI Gate` 設成 required check 後，被 path filter 擋掉的 PR
   # 根本不會啟動 workflow → required check 永遠 pending → 純文件 PR 永遠 merge 不了
   # （連 admin 都不行，ruleset 沒有例外名單）。省那幾分鐘不值得換一個卡死。
   # 多列 ready_for_review 是為了讓「草稿 PR 不跑、改成正式 PR 那一刻才跑」能運作（見 jobs 的 if）。
-  # 多列 edited 是為了「PR 改了 base 分支」時重跑：不然先發到 develop 拿綠燈、再把 base 改成 main，
-  # 綠燈會原封不動沿用，來源分支政策就被繞過了。改標題、改內文也是 edited，
+  # 多列 edited 是為了「PR 改了 base 分支」時重跑：先發到 develop（不跑）再把 base 改成正式分支時，
+  # 要在這時候檢查；也避免先拿到綠燈再改 base 繞過來源分支政策。改標題、改內文也是 edited，
   # 那種不重跑（見 jobs 的 if 與 concurrency）。
-  # 沒有 branches: 篩選＝「發到任何分支的 PR 都跑」。
-  # 只想對特定分支的 PR 跑，就自己加，例如：
-  #   pull_request:
-  #     branches: [main, develop]
-  #     types: [...]
-  # ⚠️ 加了之後，沒被列到的分支其 PR 不會有 `ci / CI Gate` —— 那些分支就不能設成 required check。
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
 # 呼叫端也要宣告最小權限，不然 reusable 拿到的是 repo 預設 token 權限

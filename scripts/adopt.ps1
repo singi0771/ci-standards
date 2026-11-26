@@ -400,6 +400,26 @@ $V1If      = '    if: ${{ github.event_name != ''pull_request'' || !github.event
 $V2If      = '    if: ${{ github.event_name != ''pull_request'' || (!github.event.pull_request.draft && (github.event.action != ''edited'' || github.event.changes.base != null)) }}'
 $V1SecConc = '  group: security-${{ github.ref }}'
 $V2SecConc = '  group: security-${{ github.event_name }}-${{ github.ref }}'
+# 2.6.0：security.yml 也聽 edited（PR 先發到 develop、再把 base 改成正式分支時要掃描），改標題的 edited 另開一組
+$V3SecConc = '  group: ${{ github.event.action == ''edited'' && github.event.changes.base == null && format(''security-edit-{0}'', github.run_id) || format(''security-{0}-{1}'', github.event_name, github.ref) }}'
+$PrBranchesLine = "    branches: [$Prod]"
+
+# 2.6.0：pull_request 只在發到正式分支時觸發（與 adopt.sh 的 add_pr_branches 一致）。
+# 只認兩格縮排的「  pull_request:」，區塊內已有 branches / branches-ignore 就不動。沒插入回傳 $null。
+function Add-PrBranches([string[]]$Lines) {
+  $p = -1
+  for ($i = 0; $i -lt $Lines.Count; $i++) { if ($Lines[$i] -ceq '  pull_request:') { $p = $i; break } }
+  if ($p -lt 0) { return $null }
+  for ($i = $p + 1; $i -lt $Lines.Count; $i++) {
+    $s = $Lines[$i]
+    if ($s -match '^[ 	]*$' -or $s -match '^[ 	]*#') { continue }
+    if ($s -cnotmatch '^    ') { break }
+    if ($s -cmatch '^    branches(-ignore)?:') { return $null }
+  }
+  $out = @()
+  for ($i = 0; $i -lt $Lines.Count; $i++) { $out += $Lines[$i]; if ($i -eq $p) { $out += $PrBranchesLine } }
+  return $out
+}
 
 function Update-V2Triggers([string[]]$Lines, [string]$Name, [ref]$Report) {
   $has = { param($l) $Lines -ccontains $l }
@@ -408,23 +428,39 @@ function Update-V2Triggers([string[]]$Lines, [string]$Name, [ref]$Report) {
   if ($Name -eq 'ci.yml') {
     # 三行各自要是「v1 原樣」或「已經是 v2」其中之一（與 adopt.sh 一致）：
     # 使用者只手動加了 edited、沒改 if 與 concurrency 的半套狀態也要補齊
-    if ((& $has $V2Types) -and (& $has $V2CiConc) -and (& $has $V2If)) { return $Lines }
-    if (((& $has $V1Types) -or (& $has $V2Types)) -and ((& $has $V1CiConc) -or (& $has $V2CiConc)) -and ((& $has $V1If) -or (& $has $V2If))) {
+    if ((& $has $V2Types) -and (& $has $V2CiConc) -and (& $has $V2If)) {
+    } elseif (((& $has $V1Types) -or (& $has $V2Types)) -and ((& $has $V1CiConc) -or (& $has $V2CiConc)) -and ((& $has $V1If) -or (& $has $V2If))) {
       $map[$V1Types] = $V2Types; $map[$V1CiConc] = $V2CiConc; $map[$V1If] = $V2If
       $Report.Value += '    ci.yml -> pull_request 加上 edited（改 base 時重跑來源分支政策），job if 與 concurrency 一併更新'
     } else {
       $Report.Value += '    ci.yml -> [!] 觸發條件不是範本原樣，沒有自動改。請照公版範本手動加上 edited 與對應的 if / concurrency'
       $Report.Value += '             （有設 restricted-base-branches 時一定要做，否則 PR 改 base 就能繞過來源分支政策）'
-      return $Lines
     }
   } elseif ($Name -eq 'security.yml') {
-    if (-not (& $has $V1SecConc)) { return $Lines }
-    $map[$V1SecConc] = $V2SecConc
-    $Report.Value += '    security.yml -> concurrency 依事件分組（排程重掃不再跟 push 互相取消）'
+    # 跟 ci.yml 同一套：三行各自是舊範本原樣或已是新版，才一起換（與 adopt.sh 一致）
+    if ((& $has $V2Types) -and (& $has $V3SecConc) -and (& $has $V2If)) {
+    } elseif (((& $has $V1Types) -or (& $has $V2Types)) -and ((& $has $V1SecConc) -or (& $has $V2SecConc) -or (& $has $V3SecConc)) -and ((& $has $V1If) -or (& $has $V2If))) {
+      $map[$V1Types] = $V2Types; $map[$V1SecConc] = $V3SecConc; $map[$V2SecConc] = $V3SecConc; $map[$V1If] = $V2If
+      $Report.Value += '    security.yml -> pull_request 加上 edited（PR 改 base 到正式分支時掃描），job if 與 concurrency 一併更新'
+    } else {
+      if (& $has $V1SecConc) {
+        $map[$V1SecConc] = $V2SecConc
+        $Report.Value += '    security.yml -> concurrency 依事件分組（排程重掃不再跟 push 互相取消）'
+      }
+      $Report.Value += '    security.yml -> [!] 觸發條件不是範本原樣，沒有自動加上 edited。PR 先發到 develop 再把 base 改成正式分支時'
+      $Report.Value += '                   Security Gate 不會回報，請照公版範本手動加上 edited 與對應的 if / concurrency'
+    }
   }
   $out = @()
   foreach ($line in $Lines) {
     if ($map.ContainsKey($line)) { $out += $map[$line] } else { $out += $line }
+  }
+  if ($Name -eq 'ci.yml' -or $Name -eq 'security.yml') {
+    $added = Add-PrBranches $out
+    if ($null -ne $added) {
+      $out = $added
+      $Report.Value += ("    {0} -> pull_request 只在發到 {1} 的 PR 執行（branches: [{1}]；要每個 PR 都跑改成 ['**']）" -f $Name, $Prod)
+    }
   }
   return $out
 }
@@ -468,6 +504,11 @@ $SecAdditions = @(
 )
 $GuardAdditions = @()
 if ($Notify) { $GuardAdditions = @(('notify: "{0}"' -f $Notify)) }
+# develop 流程（2.6.0 起，與 adopt.sh 一致）：發到 develop 的 PR 不跑 CI／Security，合併進 develop 時只檢查是否經 PR。
+# 必須寫成 != 'develop' && '<check>' || ''：反過來寫的話 '' 是 false，永遠拿到 || 後面那串。
+if ($Flow -eq 'develop') {
+  $GuardAdditions += 'required-checks: ${{ github.ref_name != ''develop'' && ''ci / CI Gate,security / Security Gate'' || '''' }}'
+}
 # Branch Guard 一定要有通知對象：沒有分支保護時，直接 push、強制 merge 只能靠它發現。
 # 既有 branch-guard.yml 的 notify 已有值才可以不給 -Notify（與 adopt.sh 一致）。
 $GuardFile = '.github\workflows\branch-guard.yml'
@@ -554,6 +595,7 @@ foreach ($n in $Configured) {
     $lines = Read-Lines $dst
     if ($n -eq 'ci.yml')       { $lines = Set-WithBlock $lines $CiAdditions }
     if ($n -eq 'security.yml') { $lines = Set-WithBlock $lines $SecAdditions }
+    if ($n -eq 'ci.yml' -or $n -eq 'security.yml') { $lines = Set-Line $lines '    branches: [main]' "    branches: [$Prod]" }
     if ($n -eq 'branch-guard.yml') {
       $lines = Set-WithBlock $lines $GuardAdditions
       $lines = Set-Line $lines '    branches: [main]' "    branches: $GuardBranches"
@@ -570,7 +612,11 @@ foreach ($n in $Configured) {
     $found = $false
     $before = Read-Lines $dst
     $hadPolicy = [bool]($before | Where-Object { $_ -cmatch '^      restricted-base-branches:' })
+    $hadReq = [bool]($before | Where-Object { $_ -cmatch '^      required-checks:' })
     $lines = Merge-WithBlock $before $known $adds ([ref]$dropped) ([ref]$found)
+    if ($n -eq 'branch-guard.yml' -and -not $hadReq -and ($lines | Where-Object { $_ -cmatch '^      required-checks:' })) {
+      $BranchReport += '    branch-guard.yml -> 合併進 develop 時不檢查 Gate（發到 develop 的 PR 不跑 CI／Security）'
+    }
     if ($n -eq 'ci.yml' -and $Flow -eq 'develop' -and -not $hadPolicy -and ($lines | Where-Object { $_ -cmatch '^      restricted-base-branches:' })) {
       $BranchReport += ("    ci.yml -> 加上來源分支政策：{0} 只收 develop、hotfix/*、dependabot/* 的 PR" -f $Prod)
     }
@@ -620,15 +666,15 @@ function New-DependabotText {
   $o = @(
     '# Dependabot（GitHub 內建、免費）—— 由 ci-standards 導入腳本依偵測到的技術產生',
     '#',
-    '# 每個 Dependabot PR 都會跑一整套 CI + Security，頻率要看著用：',
+    '# 發到正式分支的 Dependabot PR 會跑 CI + Security，頻率要看著用：',
     '#   - 套件（pip / npm / nuget）：每週，小版本併成一個 PR，major 單獨開',
     '#   - docker / github-actions：每月一次',
     '# cooldown：剛發布的版本先觀察 7 天再更新，避免搶到被動過手腳的新版。',
     '# 緊急的安全更新走 Dependabot security updates（Settings → Code security 打開），不受排程限制。'
   )
   if ($Flow -eq 'develop') {
-    $o += '# develop 流程：版本更新 PR 一律發到 develop。資安更新不看 target-branch，固定發到預設分支（正式分支），'
-    $o += '# 合併後比照 hotfix 把正式分支合回 develop。'
+    $o += '# develop 流程：版本更新 PR 一律發到 develop，不跑 CI／Security，於 develop → 正式分支的發版 PR 一併檢查。'
+    $o += '# 資安更新不看 target-branch，固定發到預設分支（正式分支）並照常檢查，合併後比照 hotfix 把正式分支合回 develop。'
   }
   $o += @('version: 2', '', 'updates:')
   if ($HasPyManifest) { $o += New-DepEntry 'pip' 'weekly' 'pip-minor-patch' 'minor' @('/') }
@@ -759,9 +805,9 @@ Write-Host ""
 Write-Host "Actions 分鐘數預估（私有 repo 才計費；公開 repo 使用 GitHub 代管 runner 免費）:"
 Write-Host "  計費：每個 job 不滿 1 分鐘以 1 分鐘計；同一帳號（或組織）的所有私有 repo 共用每月額度"
 Write-Host "        （Free 方案約 2,000 分鐘 Linux）。"
-Write-Host "  每次 PR 推送（CI Gate＋Security Gate）              ：最少 2 分鐘"
+Write-Host "  PR -> $Prod 每次推送（CI Gate＋Security Gate）      ：最少 2 分鐘"
 if ($Flow -eq 'develop') {
-  Write-Host "  功能分支 -> develop，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
+  Write-Host "  功能分支 -> develop：PR 不跑檢查，合併後 Branch Guard  ：最少 1 分鐘"
   Write-Host "  develop -> $Prod 發版，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
 } else {
   Write-Host "  PR -> $Prod，推送 1 次後合併（＋Branch Guard）        ：最少 3 分鐘"
@@ -774,6 +820,11 @@ if ($HasDotnet) {
   Write-Host "  [i] .NET 若改用 dotnet-runner: windows-latest，每次 CI 多 1 個 Windows job（單價約 Linux 的 1.7 倍）。"
 }
 Write-Host "  詳細規則：https://github.com/singi0771/ci-standards/blob/main/docs/ACTIONS-MINUTES.md"
+if ($Flow -eq 'develop') {
+  Write-Host ""
+  Warn "develop 流程：發到 develop 的 PR 不跑 CI／Security（2.6.0 起）。develop 的分支保護不能要求 Gate，"
+  Write-Host "    否則 PR 永遠 pending。設定方式見公版 README「develop 流程設定」（REQUIRED_CHECKS=none）。"
+}
 Write-Host "-----------------------------------------------------------"
 
 $BaseBranch = $Prod
@@ -801,6 +852,8 @@ Write-Host " 3. 送出（不需要 gh，PR 可以用瀏覽器開；PR 發到 $Ba
       git push -u origin chore/adopt-ci-standards
 
  4. 等第一次 CI 跑完，再開分支保護（見公版 README）。
+    develop 流程：發往 develop 的 PR 不跑 CI／Security，第一次會在 develop -> 正式分支的 PR 執行；
+    develop 的 ruleset 不要求 Gate（setup-branch-protection.sh 加 REQUIRED_CHECKS=none）。
     不是每個 repo 都設得了（例如 Free 方案的 private repo）—— 設不了時 Gate 照跑、
     紅燈只能提醒、擋不住 merge，補位做法見 README「無法設定分支保護時」。
 
