@@ -80,46 +80,113 @@ permissions:
 env:
   TOOL_OSV_VERSION: "2.3.8"            # https://github.com/google/osv-scanner/releases（osv-scanner_SHA256SUMS）
   TOOL_OSV_SHA256: "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc"
-  # trivy 與 trivy-image 兩個 job 共用，兩邊結果才會一致；快取也共用同一份
+  # 檔案系統掃描、SBOM、image 掃描共用同一個 trivy 執行檔，結果才會一致
   TOOL_TRIVY_VERSION: "0.70.0"         # https://github.com/aquasecurity/trivy/releases（trivy_<版本>_checksums.txt）
   TOOL_TRIVY_SHA256: "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
   TOOL_ZIZMOR_VERSION: "1.30.1"        # https://github.com/zizmorcore/zizmor/releases（對 .tar.gz 重算）
   TOOL_ZIZMOR_SHA256: "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a"
 
 jobs:
-  # 1) SAST：靜態掃程式碼裡的弱點（私有 repo 用不了 CodeQL 時的免費替代）
-  semgrep:
-    name: SAST (Semgrep)
+  # ── 為什麼所有掃描都在同一個 job（2.5.0）──────────────────────────────
+  # GitHub 每個 job「不滿一分鐘也算一分鐘」（docs/ACTIONS-MINUTES.md）。2.4.x 以前每項掃描一個 job、
+  # 再加一個 Gate job，共 5～7 個 job，多數只跑 10～30 秒，計費卻是每個 1 分鐘。
+  # 2.5.0 起改成同一個 job 裡的步驟，job 名稱維持 Security Gate —— 分支保護要求的
+  # `security / Security Gate` 名稱不變，各專案的 ruleset 不必改。
+  #
+  # 寫法與 ci-reusable 相同：
+  #   - 每項掃描的步驟都設 continue-on-error：一項失敗不會讓後面的掃描被跳過，結果一次看完。
+  #   - 同一項掃描裡，後續步驟用 if 指定「前一步 outcome == success」才跑（例如安裝失敗就不掃）。
+  #   - 最後的 Evaluate 步驟依各步的 outcome 判定：**開了就必須 success**，skipped / failure / cancelled 一律擋。
+  #
+  # 任何一項掃描失敗，這個 gate 就失敗 → 有設分支保護的 repo，PR 無法 merge；
+  # 沒有分支保護的 repo，它只是一個看得到的紅燈（見 README「沒辦法設分支保護時」）。
+  security-gate:
+    name: Security Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    container:
-      # 版本 + digest 都釘死。不釘（= latest）等於每次跑都可能吃到新規則，
-      # 讓沒改程式的 repo 突然變紅，也是供應鏈風險。要升級就在這裡改一版、所有專案一起生效。
-      # digest 查法：docker buildx imagetools inspect semgrep/semgrep:<版本> | head -3
-      image: semgrep/semgrep:1.171.0@sha256:bdf7013b2c3634a487671158da77c554f531742326b543a9464d2adf6c433ac8
+    # 各步驟另有自己的 timeout-minutes；這裡是全部加總的上限，計費依實際執行時間
+    timeout-minutes: 75
+    env:
+      RUN_ZIZMOR: ${{ inputs.run-zizmor }}
+      SCAN_IMAGE: ${{ inputs.scan-docker-image }}
+      GENERATE_SBOM: ${{ inputs.generate-sbom }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # gitleaks 需要：PR 模式要 base 與 head 兩個 commit 都在本機，range 才算得出來；其他事件掃完整歷史
+          fetch-depth: 0
           # 這個 job 不需要推東西回 repo，不要把 token 留在磁碟上（zizmor: artipacked）
           persist-credentials: false
-      - name: Semgrep scan
+
+      # ── 1) 密鑰外洩：gitleaks ────────────────────────────────────────────
+      # 逐一檢查 commit 新增的程式碼行（git log -p），已刪除但仍留在歷史裡的也抓得到。
+      # 用 docker 直接跑執行檔，避開 gitleaks-action 對組織帳號的授權要求。
+      # 掃描範圍：
+      #   - pull_request：只掃 PR 新增的 commit（base..head）。舊 commit 已在先前的 PR 掃過，
+      #     每次重掃全部歷史會讓歷史大的 repo 每個 PR 多花約 5 分鐘 Actions 分鐘數。
+      #   - 其他事件（schedule、push、workflow_dispatch）：掃完整歷史，補足 PR 以外進入的 commit。
+      # 放第一個：其他步驟會在工作目錄產生檔案（semgrep.sarif、trivy 快取），gitleaks 只看 git 歷史不受影響，
+      # 但排前面讓它在最乾淨的狀態跑。
+      - name: Secret scan (gitleaks)
+        id: gitleaks
+        continue-on-error: true
+        # 完整歷史掃描的時間隨 git 歷史大小成長：約 190 MB 的 repo 需 4～5 分鐘
+        timeout-minutes: 15
         env:
-          SEMGREP_RULES: ${{ inputs.semgrep-rules }}
+          # 只控制「找到 leak」時的退出碼；gitleaks 本身出錯一律非零，照樣紅
+          LEAK_EXIT_CODE: ${{ inputs.fail-on-findings && '1' || '0' }}
+          # reusable workflow 的 github context 是呼叫端的事件
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set --
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # SHA 會原樣交給 git log，先確認是 40 碼 hex，避免夾帶其他 git 參數
+            for s in "$BASE_SHA" "$HEAD_SHA"; do
+              if ! printf '%s' "$s" | grep -Eq '^[0-9a-f]{40}$'; then
+                echo "::error::pull_request 事件取不到有效的 base/head SHA（'$s'），無法決定掃描範圍。"
+                exit 1
+              fi
+            done
+            echo "掃描範圍：PR 新增的 commit（$BASE_SHA..$HEAD_SHA）"
+            set -- --log-opts="$BASE_SHA..$HEAD_SHA"
+          else
+            echo "掃描範圍：完整 git 歷史（事件：$EVENT_NAME）"
+          fi
+          # 版本 + digest 都釘死，理由同 semgrep：latest 升版會新增規則，沒改程式也可能突然變紅。
+          # digest 查法：docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本> | head -3
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            detect --source=. --redact --no-banner --exit-code="$LEAK_EXIT_CODE" "$@"
+
+      # ── 2) SAST：Semgrep（私有 repo 用不了 CodeQL 時的免費替代）──────────────
+      # 2.4.x 以前是 container job；合併成一個 job 後改用 docker run 跑同一個釘死的 image。
+      # 版本 + digest 都釘死。不釘（= latest）等於每次跑都可能吃到新規則，
+      # 讓沒改程式的 repo 突然變紅，也是供應鏈風險。要升級就在這裡改一版、所有專案一起生效。
+      # digest 查法：docker buildx imagetools inspect semgrep/semgrep:<版本> | head -3
+      - name: SAST (Semgrep)
+        id: semgrep
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          # 不叫 SEMGREP_RULES：那是 semgrep 自己讀的環境變數（等同 --config），避免日後傳進容器時重複載入
+          RULES: ${{ inputs.semgrep-rules }}
           FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         run: |
           # 把「空白隔開的規則包」組成多個 --config 參數；input 先過 env 再進 shell
           set --
-          for r in $SEMGREP_RULES; do set -- "$@" --config "$r"; done
+          for r in $RULES; do set -- "$@" --config "$r"; done
           # --error：有 finding 就 exit 1。fail-on-findings=false 時不加 —— 有 finding 回 0，
           # 但規則下載失敗、parse 錯誤這類「工具本身出錯」仍是非零（exit 2+），照樣紅。
-          # 舊版用 continue-on-error，會把「沒掃成」也一起吞成綠燈。
           if [ "$FAIL_ON_FINDINGS" = "true" ]; then set -- "$@" --error; fi
-          echo "規則包：$SEMGREP_RULES"
-          semgrep scan "$@" --sarif --output=semgrep.sarif
-      - name: Upload SARIF as artifact
-        # always() 是刻意的：semgrep 用 --error，掃到問題時「這一步就是 failed」。
-        # 拿掉它的話後續步驟會被 GitHub 跳過 —— 變成「只有什麼都沒掃到才上傳報告」，
-        # 最需要報告的時候反而不傳。（2026-08-09 PR #15 一度改錯成這樣。）
+          echo "規則包：$RULES"
+          # --user 用 runner 的 uid：容器內的 git 才會認得這個工作目錄（不然 dubious ownership，
+          # semgrep 退回不看 .gitignore 的檔案列舉）；HOME 指到可寫的 /tmp 放 semgrep 的設定與快取。
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/src" -w /src \
+            semgrep/semgrep:1.171.0@sha256:bdf7013b2c3634a487671158da77c554f531742326b543a9464d2adf6c433ac8 \
+            semgrep scan "$@" --sarif --output=semgrep.sarif
+      - name: Upload Semgrep SARIF as artifact
+        # always() 是刻意的：掃到問題時正是最需要報告的時候。（2026-08-09 PR #15 一度改錯成只在通過時上傳。）
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -127,15 +194,68 @@ jobs:
           path: semgrep.sarif
           if-no-files-found: ignore
 
-  # 2) 相依套件的已知弱點（比對 OSV 弱點資料庫）
-  osv-scanner:
-    name: Dependency vuln (OSV-Scanner)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # ── 3) （可選）workflow 本身的安全檢查：zizmor ──────────────────────────
+      # actionlint 只管語法；zizmor 管的是「這支 workflow 會不會被人拿來做壞事」——
+      # 把 PR 標題直接塞進 run: 的腳本注入、pull_request_target / workflow_run 這種危險觸發器、
+      # 沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact 等。
+      # 專案要調整規則（例如放行公版刻意用的 @v2）放在自己的 .github/zizmor.yml，範本已附一份。
+      # 下載與快取的寫法見檔頭 env 說明
+      - name: Restore zizmor from cache
+        id: zizmor-cache
+        if: ${{ env.RUN_ZIZMOR == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          persist-credentials: false
+          path: ~/.cache/ci-tools/zizmor
+          key: ci-tools-zizmor-${{ env.TOOL_ZIZMOR_VERSION }}-${{ env.TOOL_ZIZMOR_SHA256 }}
+      - name: Install zizmor
+        id: zizmor-install
+        if: ${{ env.RUN_ZIZMOR == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          F="$HOME/.cache/ci-tools/zizmor/zizmor.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 zizmor.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/zizmorcore/zizmor/releases/download/v${TOOL_ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" zizmor
+          sudo mv "$RUNNER_TEMP/zizmor" /usr/local/bin/zizmor
+          zizmor --version
+      - name: Save zizmor to cache
+        if: ${{ steps.zizmor-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/zizmor
+          key: ${{ steps.zizmor-cache.outputs.cache-primary-key }}
+      - name: Workflow security (zizmor)
+        id: zizmor
+        if: ${{ env.RUN_ZIZMOR == 'true' && steps.zizmor-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          # 有 token 才能做線上檢查（例如「這個釘死的 SHA 是不是已知有漏洞的版本」）
+          GH_TOKEN: ${{ github.token }}
+          MIN_SEVERITY: ${{ inputs.zizmor-min-severity }}
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        run: |
+          # 會自動找 repo 底下所有 .github/workflows/*.yml，設定檔讀 .github/zizmor.yml
+          #
+          # fail-on-findings=false 時不用 continue-on-error（那會把「zizmor 自己當掉、
+          # 參數錯、找不到任何 workflow」也一起吞成綠燈）。改用 --no-exit-codes：
+          # 只把「有找到問題」的 exit code 壓成 0，工具本身出錯照樣紅。
+          if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+            zizmor --no-progress --min-severity "$MIN_SEVERITY" .
+          else
+            zizmor --no-progress --no-exit-codes --min-severity "$MIN_SEVERITY" .
+          fi
+
+      # ── 4) 相依套件的已知弱點：OSV-Scanner（比對 OSV 弱點資料庫）───────────
       # 下載與快取的寫法見檔頭 env 說明
       - name: Restore OSV-Scanner from cache
         id: osv-scanner-cache
@@ -145,6 +265,8 @@ jobs:
           key: ci-tools-osv-scanner-${{ env.TOOL_OSV_VERSION }}-${{ env.TOOL_OSV_SHA256 }}
       - name: Install OSV-Scanner
         id: osv-scanner-install
+        continue-on-error: true
+        timeout-minutes: 3
         run: |
           F="$HOME/.cache/ci-tools/osv-scanner/osv-scanner_linux_amd64"
           if [ -f "$F" ] && ! echo "${TOOL_OSV_SHA256}  $F" | sha256sum -c --status -; then
@@ -165,7 +287,11 @@ jobs:
         with:
           path: ~/.cache/ci-tools/osv-scanner
           key: ${{ steps.osv-scanner-cache.outputs.cache-primary-key }}
-      - name: Run OSV-Scanner
+      - name: Dependency vuln (OSV-Scanner)
+        id: osv
+        if: ${{ steps.osv-scanner-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
         env:
           FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         run: |
@@ -210,16 +336,8 @@ jobs:
             exit 1
           fi
 
-  # 3) 檔案系統：相依弱點 + Dockerfile / Kubernetes / Terraform 等設定檔的錯誤設定
-  #    （可選再加 secret / license，見 trivy-scanners）
-  trivy:
-    name: FS / IaC / Docker (Trivy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # ── 5) 檔案系統：Trivy（相依弱點 + Dockerfile / K8s / Terraform 等設定檔的錯誤設定）──
+      #    可選再加 secret / license，見 trivy-scanners。trivy 執行檔與 6)、7) 共用
       # 下載與快取的寫法見檔頭 env 說明
       - name: Restore Trivy from cache
         id: trivy-cache
@@ -229,6 +347,8 @@ jobs:
           key: ci-tools-trivy-${{ env.TOOL_TRIVY_VERSION }}-${{ env.TOOL_TRIVY_SHA256 }}
       - name: Install Trivy
         id: trivy-install
+        continue-on-error: true
+        timeout-minutes: 3
         run: |
           F="$HOME/.cache/ci-tools/trivy/trivy.tar.gz"
           if [ -f "$F" ] && ! echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c --status -; then
@@ -250,7 +370,11 @@ jobs:
         with:
           path: ~/.cache/ci-tools/trivy
           key: ${{ steps.trivy-cache.outputs.cache-primary-key }}
-      - name: Trivy scan
+      - name: FS / IaC / Docker (Trivy)
+        id: trivy-fs
+        if: ${{ steps.trivy-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           skip-setup-trivy: true   # 用上面 Install Trivy 裝好的 trivy
@@ -258,14 +382,16 @@ jobs:
           scanners: ${{ inputs.trivy-scanners }}
           format: table
           severity: ${{ inputs.severity }}
-          # fail-on-findings=false 時用 exit-code 0，而不是 continue-on-error：
-          # 只放行「有找到弱點」，trivy 本身出錯（DB 下載失敗、參數錯）照樣紅。
+          # fail-on-findings=false 時用 exit-code 0：只放行「有找到弱點」，trivy 本身出錯（DB 下載失敗、參數錯）照樣紅。
           exit-code: ${{ inputs.fail-on-findings && '1' || '0' }}
-      # SBOM：把「這個 commit 到底用了哪些套件、什麼版本」寫成標準格式（CycloneDX）。
-      # 不是檢查、不會讓 job 失敗；出事時（例如又一個 log4j）拿它秒查有沒有中。
-      # 用 !cancelled() 而不是預設：上面掃到弱點時這一步也要跑，那正是最需要 SBOM 的時候。
+
+      # ── 6) （可選）SBOM：把「這個 commit 到底用了哪些套件、什麼版本」寫成標準格式（CycloneDX）──
+      # 不是檢查；出事時（例如又一個 log4j）拿它秒查有沒有中。上面掃到弱點時也照樣產出。
       - name: Generate SBOM (CycloneDX)
-        if: ${{ !cancelled() && inputs.generate-sbom }}
+        id: sbom
+        if: ${{ env.GENERATE_SBOM == 'true' && steps.trivy-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           skip-setup-trivy: true   # 用上面 Install Trivy 裝好的 trivy
@@ -274,165 +400,23 @@ jobs:
           output: sbom.cdx.json
           exit-code: "0"
       - name: Upload SBOM as artifact
-        if: ${{ !cancelled() && inputs.generate-sbom }}
+        id: sbom-upload
+        if: ${{ env.GENERATE_SBOM == 'true' && steps.sbom.outcome == 'success' }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
           if-no-files-found: error
 
-  # 4) 密鑰外洩：逐一檢查 commit 新增的程式碼行（git log -p），已刪除但仍留在歷史裡的也抓得到
-  #    用 docker 直接跑執行檔，避開 gitleaks-action 對組織帳號的授權要求
-  #    掃描範圍：
-  #    - pull_request：只掃 PR 新增的 commit（base..head）。舊 commit 已在先前的 PR 掃過，
-  #      每次重掃全部歷史會讓歷史大的 repo 每個 PR 多花約 5 分鐘 Actions 分鐘數。
-  #    - 其他事件（schedule、push、workflow_dispatch）：掃完整歷史，補足 PR 以外進入的 commit。
-  gitleaks:
-    name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
-    # 完整歷史掃描的時間隨 git 歷史大小成長：約 190 MB 的 repo 需 4～5 分鐘。
-    # 只是上限，計費依實際執行時間
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # PR 模式也需要：base 與 head 兩個 commit 都要在本機，range 才算得出來
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Run gitleaks (free, no license)
-        env:
-          # 只控制「找到 leak」時的退出碼；gitleaks 本身出錯一律非零，照樣紅
-          LEAK_EXIT_CODE: ${{ inputs.fail-on-findings && '1' || '0' }}
-          # reusable workflow 的 github context 是呼叫端的事件
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set --
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            # SHA 會原樣交給 git log，先確認是 40 碼 hex，避免夾帶其他 git 參數
-            for s in "$BASE_SHA" "$HEAD_SHA"; do
-              if ! printf '%s' "$s" | grep -Eq '^[0-9a-f]{40}$'; then
-                echo "::error::pull_request 事件取不到有效的 base/head SHA（'$s'），無法決定掃描範圍。"
-                exit 1
-              fi
-            done
-            echo "掃描範圍：PR 新增的 commit（$BASE_SHA..$HEAD_SHA）"
-            set -- --log-opts="$BASE_SHA..$HEAD_SHA"
-          else
-            echo "掃描範圍：完整 git 歷史（事件：$EVENT_NAME）"
-          fi
-          # 版本 + digest 都釘死，理由同 semgrep：latest 升版會新增規則，沒改程式也可能突然變紅。
-          # digest 查法：docker buildx imagetools inspect ghcr.io/gitleaks/gitleaks:<版本> | head -3
-          docker run --rm -v "$PWD:/repo" -w /repo \
-            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
-            detect --source=. --redact --no-banner --exit-code="$LEAK_EXIT_CODE" "$@"
-
-  # 5) （可選）workflow 本身的安全檢查：zizmor
-  #    actionlint 只管語法；zizmor 管的是「這支 workflow 會不會被人拿來做壞事」——
-  #    把 PR 標題直接塞進 run: 的腳本注入、pull_request_target / workflow_run 這種危險觸發器、
-  #    沒釘 SHA 的第三方 action、權限給太大、checkout 留下 token 又上傳 artifact 等。
-  #    專案要調整規則（例如放行公版刻意用的 @v2）放在自己的 .github/zizmor.yml，範本已附一份。
-  zizmor:
-    name: Workflow security (zizmor)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: ${{ inputs.run-zizmor }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # 下載與快取的寫法見檔頭 env 說明
-      - name: Restore zizmor from cache
-        id: zizmor-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/zizmor
-          key: ci-tools-zizmor-${{ env.TOOL_ZIZMOR_VERSION }}-${{ env.TOOL_ZIZMOR_SHA256 }}
-      - name: Install zizmor
-        id: zizmor-install
-        run: |
-          F="$HOME/.cache/ci-tools/zizmor/zizmor.tar.gz"
-          if [ -f "$F" ] && ! echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c --status -; then
-            echo "::warning::快取的 zizmor.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
-          fi
-          if [ ! -f "$F" ]; then
-            mkdir -p "$(dirname "$F")"
-            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
-              "https://github.com/zizmorcore/zizmor/releases/download/v${TOOL_ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
-            echo "downloaded=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "${TOOL_ZIZMOR_SHA256}  $F" | sha256sum -c -
-          tar -xzf "$F" -C "$RUNNER_TEMP" zizmor
-          sudo mv "$RUNNER_TEMP/zizmor" /usr/local/bin/zizmor
-          zizmor --version
-      - name: Save zizmor to cache
-        if: ${{ steps.zizmor-install.outputs.downloaded == 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/zizmor
-          key: ${{ steps.zizmor-cache.outputs.cache-primary-key }}
-      - name: Run zizmor
-        env:
-          # 有 token 才能做線上檢查（例如「這個釘死的 SHA 是不是已知有漏洞的版本」）
-          GH_TOKEN: ${{ github.token }}
-          MIN_SEVERITY: ${{ inputs.zizmor-min-severity }}
-          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
-        run: |
-          # 會自動找 repo 底下所有 .github/workflows/*.yml，設定檔讀 .github/zizmor.yml
-          #
-          # fail-on-findings=false 時不用 continue-on-error（那會把「zizmor 自己當掉、
-          # 參數錯、找不到任何 workflow」也一起吞成綠燈）。改用 --no-exit-codes：
-          # 只把「有找到問題」的 exit code 壓成 0，工具本身出錯照樣紅。
-          if [ "$FAIL_ON_FINDINGS" = "true" ]; then
-            zizmor --no-progress --min-severity "$MIN_SEVERITY" .
-          else
-            zizmor --no-progress --no-exit-codes --min-severity "$MIN_SEVERITY" .
-          fi
-
-  # 6) （可選）Docker image 弱點掃描：scan-docker-image=true 才跑；
-  #    舊版只 build 根目錄的 Dockerfile，2.0.0 起跟 ci-reusable 一樣找全 repo（或照 dockerfile 指定）。
-  #    trivy-action 一次只能掃一個 image，所以這裡直接裝 trivy 執行檔、用迴圈掃。
-  trivy-image:
-    name: Docker image (Trivy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: ${{ inputs.scan-docker-image }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # 下載與快取的寫法見檔頭 env 說明
-      - name: Restore Trivy from cache
-        id: trivy-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/trivy
-          key: ci-tools-trivy-${{ env.TOOL_TRIVY_VERSION }}-${{ env.TOOL_TRIVY_SHA256 }}
-      - name: Install Trivy
-        id: trivy-install
-        run: |
-          F="$HOME/.cache/ci-tools/trivy/trivy.tar.gz"
-          if [ -f "$F" ] && ! echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c --status -; then
-            echo "::warning::快取的 trivy.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
-          fi
-          if [ ! -f "$F" ]; then
-            mkdir -p "$(dirname "$F")"
-            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
-              "https://github.com/aquasecurity/trivy/releases/download/v${TOOL_TRIVY_VERSION}/trivy_${TOOL_TRIVY_VERSION}_Linux-64bit.tar.gz"
-            echo "downloaded=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "${TOOL_TRIVY_SHA256}  $F" | sha256sum -c -
-          tar -xzf "$F" -C "$RUNNER_TEMP" trivy
-          sudo mv "$RUNNER_TEMP/trivy" /usr/local/bin/trivy
-          trivy --version
-      - name: Save Trivy to cache
-        if: ${{ steps.trivy-install.outputs.downloaded == 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/trivy
-          key: ${{ steps.trivy-cache.outputs.cache-primary-key }}
-      - name: Build + scan images
+      # ── 7) （可選）Docker image 弱點掃描：scan-docker-image=true 才跑 ─────────
+      #    跟 ci-reusable 一樣找全 repo 的 Dockerfile（或照 dockerfile 指定）。
+      #    trivy-action 一次只能掃一個 image，所以直接用 trivy 執行檔、用迴圈掃。最花時間，放最後。
+      - name: Docker image (Trivy)
+        id: trivy-image
+        if: ${{ env.SCAN_IMAGE == 'true' && steps.trivy-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 30
         env:
           SHA: ${{ github.sha }}
           DOCKERFILES: ${{ inputs.dockerfile }}
@@ -481,78 +465,64 @@ jobs:
           done < "$LIST"
           exit "$FAIL"
 
-  # 7) 總結：needs 所有掃描，讓分支保護「只需要要求這一個」status check。
-  #    任何一項掃描失敗，這個 gate 就失敗 → 有設分支保護的 repo，PR 無法 merge；
-  #    沒有分支保護的 repo，它只是一個看得到的紅燈（見 README「沒辦法設分支保護時」）。
-  security-gate:
-    name: Security Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    needs: [semgrep, osv-scanner, trivy, gitleaks, zizmor, trivy-image]
-    if: ${{ always() }}
-    steps:
+      # ── 判定：分支保護「只需要要求這一個」status check ─────────────────────
       - name: Evaluate all scan results
+        if: ${{ always() }}
         env:
-          SEMGREP: ${{ needs.semgrep.result }}
-          OSV: ${{ needs.osv-scanner.result }}
-          TRIVY: ${{ needs.trivy.result }}
-          GITLEAKS: ${{ needs.gitleaks.result }}
-          ZIZMOR: ${{ needs.zizmor.result }}
-          IMAGE: ${{ needs.trivy-image.result }}
-          RUN_ZIZMOR: ${{ inputs.run-zizmor }}
-          SCAN_IMAGE: ${{ inputs.scan-docker-image }}
+          GITLEAKS: ${{ steps.gitleaks.outcome }}
+          SEMGREP: ${{ steps.semgrep.outcome }}
+          ZIZMOR: ${{ steps.zizmor.outcome }}
+          OSV: ${{ steps.osv.outcome }}
+          TRIVY: ${{ steps.trivy-fs.outcome }}
+          SBOM: ${{ steps.sbom.outcome }}
+          SBOM_UPLOAD: ${{ steps.sbom-upload.outcome }}
+          IMAGE: ${{ steps.trivy-image.outcome }}
         run: |
+          FAIL=0
+          ROWS=""
+
+          # 判定原則與 CI Gate 一致：**開了就必須 success**；沒開的項目不看結果。
+          # 白名單寫法是刻意的：不只擋 failure，連 cancelled、skipped（安裝失敗而沒掃）、
+          # 以及拿不到結果的情況，全部都擋 ——「沒跑到」不能被當成「通過」。
+          check() {
+            local name="$1" enabled="$2" r ok=1 shown=""
+            shift 2
+            if [ "$enabled" != "true" ]; then
+              ROWS="$ROWS| $name | 未啟用 | — |"$'\n'
+              return
+            fi
+            for r in "$@"; do
+              shown="$shown${shown:+ / }${r:-<空值>}"
+              [ "$r" = "success" ] || ok=0
+            done
+            if [ "$ok" = "1" ]; then
+              ROWS="$ROWS| $name | ✅ | $shown |"$'\n'
+            else
+              ROWS="$ROWS| $name | ❌ | $shown |"$'\n'
+              FAIL=1
+            fi
+          }
+
+          check "Secret (gitleaks)"          "true"          "$GITLEAKS"
+          check "SAST (Semgrep)"             "true"          "$SEMGREP"
+          check "Workflow security (zizmor)" "$RUN_ZIZMOR"   "$ZIZMOR"
+          check "Dependency (OSV)"           "true"          "$OSV"
+          check "FS/IaC (Trivy)"             "true"          "$TRIVY"
+          check "SBOM (CycloneDX)"           "$GENERATE_SBOM" "$SBOM" "$SBOM_UPLOAD"
+          check "Docker image (Trivy)"       "$SCAN_IMAGE"   "$IMAGE"
+
           {
             echo "## 🛡️ Security Gate 結果"
             echo ""
-            echo "| 掃描 | 啟用 | 結果 |"
+            echo "| 掃描 | 判定 | 各步驟結果 |"
             echo "| --- | --- | --- |"
-            echo "| SAST (Semgrep) | 一定跑 | $SEMGREP |"
-            echo "| Dependency (OSV) | 一定跑 | $OSV |"
-            echo "| FS/IaC (Trivy) | 一定跑 | $TRIVY |"
-            echo "| Secret (gitleaks) | 一定跑 | $GITLEAKS |"
-            echo "| Workflow security (zizmor) | $RUN_ZIZMOR | $ZIZMOR |"
-            echo "| Docker image (Trivy) | $SCAN_IMAGE | $IMAGE |"
+            printf '%s' "$ROWS"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-          FAIL=0
-
-          # 這四項沒有 if 條件，一定會跑 —— 所以「不是 success 就擋」。
-          # 白名單寫法是刻意的：不只擋 failure，連 cancelled、skipped、
-          # 以及 runner 沒排到而拿不到結果的情況，全部都擋。
-          for r in "$SEMGREP" "$OSV" "$TRIVY" "$GITLEAKS"; do
-            if [ "$r" != "success" ]; then
-              echo "❌ 有掃描的結果是 \`${r:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
-              FAIL=1
-            fi
-          done
-
-          # 可選的項目判定原則跟 CI Gate 一致：**開了就必須 success**，沒開才允許 skipped。
-          # 舊寫法只擋 failure —— 那樣的話開了但 job 被取消時，掃描沒跑成 Gate 卻放行，
-          # 等於「沒跑到」被當成「通過」。
-          assert_optional() {
-            local name="$1" enabled="$2" result="$3"
-            if [ "$enabled" = "true" ]; then
-              if [ "$result" != "success" ]; then
-                echo "❌ **$name** 已啟用，但結果是 \`${result:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
-                FAIL=1
-              fi
-            else
-              case "$result" in
-                failure|cancelled)
-                  echo "❌ **$name** 未啟用，結果卻是 \`$result\`" >> "$GITHUB_STEP_SUMMARY"
-                  FAIL=1
-                  ;;
-              esac
-            fi
-          }
-          assert_optional "Workflow security (zizmor)" "$RUN_ZIZMOR" "$ZIZMOR"
-          assert_optional "Docker image (Trivy)"        "$SCAN_IMAGE" "$IMAGE"
-
           if [ "$FAIL" = "1" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "❌ Security Gate 未通過（有掃描失敗、沒跑成，或發現高風險問題）" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ Security Gate 未通過（有掃描失敗、沒跑成，或發現高風險問題）—— 展開上方標紅叉的步驟看原因" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Security Gate 未通過，各項結果見 job summary"
             exit 1
           fi
           echo "✅ Security Gate 通過" >> "$GITHUB_STEP_SUMMARY"

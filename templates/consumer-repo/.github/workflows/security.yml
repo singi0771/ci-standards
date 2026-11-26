@@ -34,7 +34,7 @@ jobs:
       severity: "CRITICAL,HIGH"
       fail-on-findings: true
       # 範本預設 false（與公版預設一致）。有 Dockerfile 才改成 true ——
-      # 沒有 Dockerfile 時公版雖然會快速略過，但仍會起一個 job 白吃 Actions 分鐘。
+      # 沒有 Dockerfile 時公版會快速略過；關掉可省去安裝 trivy 與找 Dockerfile 的幾秒。
       scan-docker-image: false
       # workflow 本身的安全檢查（腳本注入、權限過大、沒釘 SHA 的 action…），規則在 .github/zizmor.yml
       run-zizmor: true

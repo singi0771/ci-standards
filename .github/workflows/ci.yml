@@ -31,7 +31,7 @@ jobs:
     uses: ./.github/workflows/ci-reusable.yml
     with:
       # 本 repo 的產品是 workflow 與 shell script；Python / .NET / Docker 三條路徑
-      # 用 tests/ 底下的最小範例跑，公版每個 job 都要實際執行，不能是 skipped。
+      # 用 tests/ 底下的最小範例跑，公版每項檢查都要實際執行，不能是 skipped。
       # Python：ruff 與 pytest 在 repo 根目錄執行，會找到 tests/python
       run-python: true
       # .NET：dotnet-version 留空，依 csproj 的 TargetFramework 安裝 SDK
@@ -50,3 +50,15 @@ jobs:
       # 這兩個 input 是選配的，不填就不檢查 —— 公版不預設任何分支模型。
       restricted-base-branches: "main"
       allowed-head-branches: "develop"
+
+  # dotnet-runner 不是 ubuntu-latest 時，.NET 走獨立 job（其餘檢查仍在 CI Gate）。
+  # 上面的 ci 只測到「.NET 在 CI Gate 裡」那條路徑，這裡補測另一條。
+  # 本 repo 是公開 repo，多一個 Windows job 不計費；check 名稱是 ci-dotnet-windows / CI Gate，不設成 required。
+  ci-dotnet-windows:
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'edited' || github.event.changes.base != null)) }}
+    uses: ./.github/workflows/ci-reusable.yml
+    with:
+      run-dotnet: true
+      dotnet-project: "tests/dotnet/CiSelfTest.csproj"
+      dotnet-runner: "windows-latest"
+      run-docker-build: false

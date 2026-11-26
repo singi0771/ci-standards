@@ -1,13 +1,13 @@
 # 中央公版：CI Reusable Workflow（Python / .NET + Docker + workflow / shell lint）
 # 各專案用一行 uses: 呼叫；統一 lint + test + Docker build 檢查。
 #
-# 語言相關的 job（Python、.NET）一律預設「關」，由呼叫端（或 adopt.sh 的偵測結果）明確打開 ——
+# 語言相關的檢查（Python、.NET）一律預設「關」，由呼叫端（或 adopt.sh 的偵測結果）明確打開 ——
 # 公版不假設專案用什麼語言。語言無關的檢查（Docker、actionlint、shellcheck）也是各自開關。
 #
-# 省 Actions 分鐘的設計（GitHub 每個 job 都是「不滿一分鐘也算一分鐘」）：
-#   - actionlint 與 shellcheck 合成一個 job（兩個加起來不到 30 秒，拆兩個 job 多付一分鐘）
-#   - hadolint 放在 Docker build 那個 job 裡當一個步驟，不另開 job
-#   - actionlint 改抓 2 MB 的執行檔，不再拉 docker image（省 20–40 秒）
+# 省 Actions 分鐘的設計（GitHub 每個 job 都是「不滿一分鐘也算一分鐘」，見 docs/ACTIONS-MINUTES.md）：
+#   - 2.5.0 起所有檢查都是 CI Gate 這一個 job 裡的步驟（說明見 jobs: 開頭）；
+#     只有 .NET 要用非 ubuntu-latest 的 runner 時才多一個 job
+#   - actionlint 抓 2 MB 的執行檔，不拉 docker image（省 20–40 秒）
 name: Reusable CI
 
 on:
@@ -124,62 +124,28 @@ env:
   TOOL_ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 
 jobs:
-  python:
-    name: Python lint + test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: ${{ inputs.run-python }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # 這個 job 不會推東西回 repo，不要把 token 留在磁碟上（zizmor: artipacked）
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ inputs.python-version }}
-          # 只有找得到相依清單時才開 pip 快取 —— setup-python 開了快取卻找不到 requirements*.txt /
-          # pyproject.toml 會直接失敗（只有 .py 檔、還沒有相依清單的專案就是這樣）
-          cache: ${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') != '' && 'pip' || '' }}
-          cache-dependency-path: |
-            **/requirements*.txt
-            **/pyproject.toml
-      - name: Install deps
-        env:
-          RUFF_VERSION: ${{ inputs.ruff-version }}
-        run: |
-          # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改程式的 repo 突然變紅
-          # （runner 的 pip 已經夠新，不必再花 10 秒 upgrade pip）
-          pip install "ruff==$RUFF_VERSION" pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # pyproject.toml 只放 ruff / pytest 設定（沒有 [project] 或 [build-system]）時，
-          # 它不是一個可安裝的套件，pip install -e . 一定失敗 —— 那種情況就不裝。
-          # 真的是套件卻裝不起來，要讓這一步紅，不能像舊版用 `|| true` 吞掉，
-          # 否則後面 pytest 只會噴一堆看不懂的 ImportError。
-          if [ -f pyproject.toml ] && grep -qE '^\[(project|build-system)\]' pyproject.toml; then
-            pip install -e .
-          fi
-      - name: Lint (ruff)
-        run: ruff check .
-      - name: Test (pytest)
-        run: |
-          set +e
-          pytest -q
-          EXIT=$?
-          set -e
-          # pytest 的 exit 5 = 「沒收集到任何測試」。還沒開始寫測試的專案不該因此
-          # 永遠紅著（那只會逼人把 CI 關掉）。真正的測試失敗是 exit 1，照樣擋。
-          if [ "$EXIT" -eq 5 ]; then
-            echo "⚠️  沒有找到任何測試 —— 通過，但這個專案應該補上測試。"
-            echo "⚠️ 沒有任何測試" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$EXIT" -ne 0 ]; then
-            exit "$EXIT"
-          fi
-
+  # ── 為什麼幾乎所有檢查都在同一個 job（2.5.0）──────────────────────────
+  # GitHub 每個 job「不滿一分鐘也算一分鐘」（docs/ACTIONS-MINUTES.md）。2.4.x 以前每項檢查一個 job、
+  # 再加一個 Gate job：Python + lint + 來源分支 + Gate 實際跑 30 秒，計費卻是 4 分鐘。
+  # 2.5.0 起改成同一個 job 裡的步驟，job 名稱維持 CI Gate —— 分支保護要求的 `ci / CI Gate`
+  # 名稱不變，各專案的 ruleset 不必改。
+  #
+  # 寫法：
+  #   - 每項檢查的步驟都設 continue-on-error：一項失敗不會讓後面的檢查被跳過，結果一次看完。
+  #     失敗的步驟在畫面上仍是紅叉，只是 job 繼續往下跑。
+  #   - 同一項檢查裡，後續步驟用 if 指定「前一步 outcome == success」才跑。
+  #   - 最後的 Evaluate 步驟依各步的 outcome（continue-on-error 生效前的真實結果）判定：
+  #     **開了就必須 success**，skipped（前一步壞了）、failure、cancelled 一律擋。
+  #
+  # 例外：dotnet-runner 不是 ubuntu-latest（例如 WPF 要 windows-latest）時，.NET 無法跟其他檢查
+  # 擠在同一台 Linux runner，改由下面獨立的 dotnet job 跑，CI Gate 等它結束再一起判定。
+  # 兩處 .NET 步驟的 run: 內容是同一份的兩個副本，改一邊要同步改另一邊
+  # （tests/python/test_reusable_sync.py 會比對）。
   dotnet:
     name: .NET build + test
     runs-on: ${{ inputs.dotnet-runner }}
     timeout-minutes: 20
-    if: ${{ inputs.run-dotnet }}
+    if: ${{ inputs.run-dotnet && inputs.dotnet-runner != 'ubuntu-latest' }}
     # Windows runner 的預設 shell 是 pwsh；統一用 bash（Windows 上是 Git Bash），兩邊同一份腳本
     defaults:
       run:
@@ -192,8 +158,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: 決定 SDK 版本與要建置的方案
-        id: plan
+      - name: ".NET: 決定 SDK 版本與要建置的方案"
+        id: dotnet-plan
         env:
           DOTNET_VERSION: ${{ inputs.dotnet-version }}
           PROJECT: ${{ inputs.dotnet-project }}
@@ -244,239 +210,74 @@ jobs:
           echo "→ 建置目標：$PROJECT"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: ${{ steps.plan.outputs.version }}
-          global-json-file: ${{ steps.plan.outputs.global-json }}
+          dotnet-version: ${{ steps.dotnet-plan.outputs.version }}
+          global-json-file: ${{ steps.dotnet-plan.outputs.global-json }}
           # 有 packages.lock.json 才能開快取（setup-dotnet 找不到 lock 檔會直接失敗）
           cache: ${{ hashFiles('**/packages.lock.json') != '' }}
           cache-dependency-path: "**/packages.lock.json"
-      - name: Restore
+      - name: ".NET: Restore"
         env:
-          PROJECT: ${{ steps.plan.outputs.project }}
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
         run: dotnet restore "$PROJECT"
-      - name: Format / analyzers (dotnet format)
+      - name: ".NET: Format / analyzers (dotnet format)"
         if: ${{ inputs.run-dotnet-format }}
         env:
-          PROJECT: ${{ steps.plan.outputs.project }}
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
         run: |
           # 規則讀專案的 .editorconfig。舊專案第一次導入可能整片紅 ——
           # 先 run-dotnet-format: false 過渡，在本機跑一次 dotnet format 整理完再打開。
           dotnet format "$PROJECT" --verify-no-changes --no-restore
-      - name: Build
+      - name: ".NET: Build"
         env:
-          PROJECT: ${{ steps.plan.outputs.project }}
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
         run: dotnet build "$PROJECT" --no-restore --configuration Release
-      - name: Test
+      - name: ".NET: Test"
         env:
-          PROJECT: ${{ steps.plan.outputs.project }}
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
         # 方案裡沒有任何測試專案時，dotnet test 什麼都不做、回 0 —— 跟 Python 那邊一樣不擋
         run: dotnet test "$PROJECT" --no-build --configuration Release
 
-  docker-build:
-    name: Docker build check
+  # 分支保護「只需要要求 ci / CI Gate 這一個」status check。
+  # 新增檢查時：步驟加 id 與 continue-on-error，並在最後的 Evaluate 加上對應的判定，否則形同虛設。
+  ci-gate:
+    name: CI Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: ${{ inputs.run-docker-build }}
+    # 各步驟另有自己的 timeout-minutes；這裡是全部加總的上限，計費依實際執行時間
+    timeout-minutes: 60
+    needs: [dotnet]
+    # dotnet job 多半是 skipped（沒開 .NET，或 .NET 就在這個 job 裡跑），沒有 always() 的話這個 job 會跟著被跳過
+    if: ${{ always() }}
+    env:
+      # 各項檢查「是否在這個 job 裡跑」，步驟的 if 與最後的判定都看它
+      RUN_PYTHON: ${{ inputs.run-python }}
+      RUN_DOTNET_HERE: ${{ inputs.run-dotnet && inputs.dotnet-runner == 'ubuntu-latest' }}
+      RUN_DOTNET_JOB: ${{ inputs.run-dotnet && inputs.dotnet-runner != 'ubuntu-latest' }}
+      RUN_DOTNET_FORMAT: ${{ inputs.run-dotnet-format }}
+      RUN_DOCKER: ${{ inputs.run-docker-build }}
+      RUN_HADOLINT: ${{ inputs.run-docker-build && inputs.run-hadolint }}
+      RUN_ACTIONLINT: ${{ inputs.run-actionlint }}
+      RUN_SHELLCHECK: ${{ inputs.run-shellcheck }}
+      RUN_POLICY: ${{ github.event_name == 'pull_request' && inputs.restricted-base-branches != '' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: 找出要檢查的 Dockerfile
-        env:
-          DOCKERFILES: ${{ inputs.dockerfile }}
-        run: |
-          LIST="$RUNNER_TEMP/dockerfiles.txt"
-          if [ -n "$DOCKERFILES" ]; then
-            # 呼叫端明確列出的：一項一行，不做 glob 展開
-            set -f
-            for d in $DOCKERFILES; do printf '%s\n' "$d"; done > "$LIST"
-            set +f
-          else
-            # 舊版只看根目錄的 Dockerfile，monorepo 子目錄裡的完全沒被檢查到
-            find . \( -path ./.git -o -name node_modules \) -prune -o -type f \
-              \( -name Dockerfile -o -name '*.Dockerfile' -o -name 'Dockerfile.*' \) \
-              ! -name '*.dockerignore' -print | sed 's|^\./||' | sort > "$LIST"
-          fi
-          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
-          echo "要檢查的 Dockerfile："; sed 's/^/  /' "$LIST"
-          # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為。
-          # 清空清單（讓後面的 hadolint / build 略過）要在下面的迴圈外做 —— 邊讀邊寫同一個檔是 SC2094
-          if [ "$DOCKERFILES" = "Dockerfile" ] && [ ! -f Dockerfile ]; then
-            echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0
-          fi
-          while IFS= read -r entry; do
-            f="${entry%%:*}"
-            if [ ! -f "$f" ]; then
-              # 其他明確指定的路徑找不到＝多半打錯字，要吵（不能讓檢查被靜靜略過）
-              echo "::error::dockerfile input 指定的 $f 不存在（路徑打錯？）"; exit 1
-            fi
-          done < "$LIST"
-      # hadolint：檢查 Dockerfile 的寫法（沒釘版本的 apt 套件、用 latest tag、
-      # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
-      # hadolint 抓得更廣。放在 build 前面：Dockerfile 寫壞了不必等 build 跑完才知道。
-      # 下載與快取的寫法見檔頭 env 說明
-      - name: Restore hadolint from cache
-        id: hadolint-cache
-        if: ${{ inputs.run-hadolint }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/hadolint
-          key: ci-tools-hadolint-${{ env.TOOL_HADOLINT_VERSION }}-${{ env.TOOL_HADOLINT_SHA256 }}
-      - name: Install hadolint
-        id: hadolint-install
-        if: ${{ inputs.run-hadolint }}
-        run: |
-          if [ ! -s "$RUNNER_TEMP/dockerfiles.txt" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
-          F="$HOME/.cache/ci-tools/hadolint/hadolint-linux-x86_64"
-          if [ -f "$F" ] && ! echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c --status -; then
-            echo "::warning::快取的 hadolint-linux-x86_64 校驗不符，改為重新下載"; rm -f "$F"
-          fi
-          if [ ! -f "$F" ]; then
-            mkdir -p "$(dirname "$F")"
-            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
-              "https://github.com/hadolint/hadolint/releases/download/v${TOOL_HADOLINT_VERSION}/hadolint-linux-x86_64"
-            echo "downloaded=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c -
-          sudo install -m 755 "$F" /usr/local/bin/hadolint
-          hadolint --version
-      - name: Save hadolint to cache
-        if: ${{ steps.hadolint-install.outputs.downloaded == 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/hadolint
-          key: ${{ steps.hadolint-cache.outputs.cache-primary-key }}
-      - name: Dockerfile lint (hadolint)
-        if: ${{ inputs.run-hadolint }}
-        run: |
-          LIST="$RUNNER_TEMP/dockerfiles.txt"
-          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
-          # warning 以上才算失敗；info / style 只印出來。要忽略某條規則放 .hadolint.yaml 在專案根目錄。
-          FAIL=0
-          while IFS= read -r entry; do
-            f="${entry%%:*}"
-            echo "── hadolint $f"
-            hadolint --failure-threshold warning "$f" || FAIL=1
-          done < "$LIST"
-          exit "$FAIL"
-      - name: Build image (不推送，只驗證能 build)
-        env:
-          # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
-          SHA: ${{ github.sha }}
-          # 不可命名為 DOCKER_CONTEXT：那是 Docker CLI 自己讀的環境變數（指定 docker context），
-          # 設成 "." 時 docker build 會失敗：ERROR: no builder "." found
-          BUILD_CONTEXT: ${{ inputs.docker-context }}
-        run: |
-          LIST="$RUNNER_TEMP/dockerfiles.txt"
-          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
-          n=0
-          while IFS= read -r entry; do
-            n=$((n+1))
-            f="${entry%%:*}"
-            # context：那一項有寫 :<context> 就用它，否則用 docker-context（預設 repo 根目錄，
-            # 跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）
-            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$BUILD_CONTEXT"; fi
-            echo "── docker build -f $f $ctx"
-            docker build -f "$f" -t "ci-check-$n:$SHA" "$ctx"
-          done < "$LIST"
-
-  # workflow 語法 + shell script 檢查，合在一個 job（見檔頭「省分鐘」說明）。
-  # actionlint 會自動呼叫 PATH 上的 shellcheck 去檢查 run: 區塊，ubuntu runner 內建 shellcheck，
-  # 所以不必再拉 docker image。
-  lint:
-    name: Workflow + shell lint (actionlint, shellcheck)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: ${{ inputs.run-actionlint || inputs.run-shellcheck }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # 下載與快取的寫法見檔頭 env 說明
-      - name: Restore actionlint from cache
-        id: actionlint-cache
-        if: ${{ inputs.run-actionlint }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/actionlint
-          key: ci-tools-actionlint-${{ env.TOOL_ACTIONLINT_VERSION }}-${{ env.TOOL_ACTIONLINT_SHA256 }}
-      - name: Install actionlint
-        id: actionlint-install
-        if: ${{ inputs.run-actionlint }}
-        run: |
-          F="$HOME/.cache/ci-tools/actionlint/actionlint.tar.gz"
-          if [ -f "$F" ] && ! echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c --status -; then
-            echo "::warning::快取的 actionlint.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
-          fi
-          if [ ! -f "$F" ]; then
-            mkdir -p "$(dirname "$F")"
-            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
-              "https://github.com/rhysd/actionlint/releases/download/v${TOOL_ACTIONLINT_VERSION}/actionlint_${TOOL_ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-            echo "downloaded=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c -
-          tar -xzf "$F" -C "$RUNNER_TEMP" actionlint
-          sudo mv "$RUNNER_TEMP/actionlint" /usr/local/bin/actionlint
-          actionlint -version
-      - name: Save actionlint to cache
-        if: ${{ steps.actionlint-install.outputs.downloaded == 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ci-tools/actionlint
-          key: ${{ steps.actionlint-cache.outputs.cache-primary-key }}
-      - name: Run actionlint
-        if: ${{ inputs.run-actionlint }}
-        env:
-          EXTRA_PATHS: ${{ inputs.actionlint-paths }}
-        run: |
-          shellcheck --version | head -2
-
-          # 不帶檔案參數時 actionlint 會自動掃 .github/workflows；
-          # 一旦給了檔案參數就「只」檢查那些檔案，所以額外路徑必須分開跑一次。
-          actionlint -color
-
-          if [ -n "$EXTRA_PATHS" ]; then
-            # shellcheck disable=SC2086  # 要讓 glob / 多路徑展開成多個參數
-            actionlint -color $EXTRA_PATHS
-          fi
-      - name: Run shellcheck
-        if: ${{ inputs.run-shellcheck }}
-        env:
-          PATHS: ${{ inputs.shellcheck-paths }}
-        run: |
-          if [ -n "$PATHS" ]; then
-            # shellcheck disable=SC2086
-            shellcheck $PATHS
-          else
-            mapfile -t FILES < <(find . -path ./.git -prune -o -name '*.sh' -print)
-            if [ "${#FILES[@]}" -eq 0 ]; then
-              echo "沒有 .sh 檔，略過"; exit 0
-            fi
-            printf '檢查：%s\n' "${FILES[@]}"
-            shellcheck "${FILES[@]}"
-          fi
-
-  # PR 來源分支政策：擋下「從不該來的分支發 PR 到受管制的 base」。
-  #
-  # 典型用法是 develop 流程 —— 功能分支只能發 PR 到 develop，
-  # 而 main 只接受 develop 的 PR。但公版不寫死任何分支名稱：
-  # 要管哪些 base、允許哪些來源，全由呼叫端用兩個 input 決定，沒填就整個不啟用。
-  #
-  # 為什麼放在 CI 裡而不是另開一支 workflow：它的結果會被 ci-gate 收進去，
-  # 而 `ci / CI Gate` 本來就是 required check —— 專案端的 ruleset 一個字都不用改。
-  #
-  # ⚠️ 改 base 的漏洞（2.0.0 修）：PR 先發到 develop 拿到綠燈，再到網頁上把 base 改成 main，
-  # 預設的 pull_request 事件不會重跑，同一個 head SHA 上的綠燈就直接滿足 required check。
-  # 呼叫端的 pull_request.types 要有 edited（範本已附），這個 job 才會在改 base 時重新判定。
-  #
-  # ⚠️ 這是「擋得住誤操作」，不是「擋得住惡意」。而且只有在能設分支保護的 repo，
-  # 紅燈才真的擋得住 merge；沒有分支保護的 repo，它只是一個看得到的紅燈（見 README）。
-  branch-policy:
-    name: PR source branch policy
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    if: ${{ github.event_name == 'pull_request' && inputs.restricted-base-branches != '' }}
-    steps:
-      - name: Check PR source branch
+      # ── PR 來源分支政策：擋下「從不該來的分支發 PR 到受管制的 base」──────────
+      #
+      # 典型用法是 develop 流程 —— 功能分支只能發 PR 到 develop，
+      # 而 main 只接受 develop 的 PR。但公版不寫死任何分支名稱：
+      # 要管哪些 base、允許哪些來源，全由呼叫端用兩個 input 決定，沒填就整個不啟用。
+      #
+      # 結果收進 CI Gate，而 `ci / CI Gate` 本來就是 required check —— 專案端的 ruleset 一個字都不用改。
+      #
+      # ⚠️ 改 base 的漏洞（2.0.0 修）：PR 先發到 develop 拿到綠燈，再到網頁上把 base 改成 main，
+      # 預設的 pull_request 事件不會重跑，同一個 head SHA 上的綠燈就直接滿足 required check。
+      # 呼叫端的 pull_request.types 要有 edited（範本已附），才會在改 base 時重新判定。
+      #
+      # ⚠️ 這是「擋得住誤操作」，不是「擋得住惡意」。而且只有在能設分支保護的 repo，
+      # 紅燈才真的擋得住 merge；沒有分支保護的 repo，它只是一個看得到的紅燈（見 README）。
+      - name: PR source branch policy
+        id: policy
+        if: ${{ env.RUN_POLICY == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
         env:
           # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
           BASES: ${{ inputs.restricted-base-branches }}
@@ -552,83 +353,439 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
-  # 總結：分支保護「只需要要求 ci / CI Gate 這一個」status check。
-  # 不要把 docker-build 之類的直接設成 required —— 它們有 if 條件，關掉時會 skipped，
-  # 而 skipped 的 required check 要嘛被 GitHub 當通過（等於沒檢查）、要嘛永遠 pending，
-  # 兩種都不是你要的。
-  # 未來 ci-reusable 新增 job 時，記得加進下面的 needs（否則那個 job 形同虛設）。
-  ci-gate:
-    name: CI Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    needs: [python, dotnet, docker-build, lint, branch-policy]
-    if: ${{ always() }}
-    steps:
-      - name: Evaluate all CI results
-        env:
-          PYTHON: ${{ needs.python.result }}
-          DOTNET: ${{ needs.dotnet.result }}
-          DOCKER: ${{ needs.docker-build.result }}
-          LINT: ${{ needs.lint.result }}
-          POLICY: ${{ needs.branch-policy.result }}
-          # 每個檢查「是否應該要跑」——判斷通過與否的關鍵，見下方說明
-          RUN_PYTHON: ${{ inputs.run-python }}
-          RUN_DOTNET: ${{ inputs.run-dotnet }}
-          RUN_DOCKER: ${{ inputs.run-docker-build }}
-          RUN_LINT: ${{ inputs.run-actionlint || inputs.run-shellcheck }}
-          RUN_POLICY: ${{ github.event_name == 'pull_request' && inputs.restricted-base-branches != '' }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 這個 job 不會推東西回 repo，不要把 token 留在磁碟上（zizmor: artipacked）
+          persist-credentials: false
+
+      # ── Workflow 語法 + shell script（actionlint、shellcheck）───────────
+      # actionlint 會自動呼叫 PATH 上的 shellcheck 去檢查 run: 區塊，ubuntu runner 內建 shellcheck，
+      # 所以不必再拉 docker image。下載與快取的寫法見檔頭 env 說明
+      - name: Restore actionlint from cache
+        id: actionlint-cache
+        if: ${{ env.RUN_ACTIONLINT == 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/actionlint
+          key: ci-tools-actionlint-${{ env.TOOL_ACTIONLINT_VERSION }}-${{ env.TOOL_ACTIONLINT_SHA256 }}
+      - name: Install actionlint
+        id: actionlint-install
+        if: ${{ env.RUN_ACTIONLINT == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
         run: |
-          {
-            echo "## 🧪 CI Gate 結果"
-            echo ""
-            echo "| 檢查 | 啟用 | 結果 |"
-            echo "| --- | --- | --- |"
-            echo "| Python lint + test | $RUN_PYTHON | $PYTHON |"
-            echo "| .NET build + test | $RUN_DOTNET | $DOTNET |"
-            echo "| Docker build check（含 hadolint） | $RUN_DOCKER | $DOCKER |"
-            echo "| Workflow + shell lint (actionlint, shellcheck) | $RUN_LINT | $LINT |"
-            echo "| PR source branch policy | $RUN_POLICY | $POLICY |"
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
+          F="$HOME/.cache/ci-tools/actionlint/actionlint.tar.gz"
+          if [ -f "$F" ] && ! echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 actionlint.tar.gz 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/rhysd/actionlint/releases/download/v${TOOL_ACTIONLINT_VERSION}/actionlint_${TOOL_ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_ACTIONLINT_SHA256}  $F" | sha256sum -c -
+          tar -xzf "$F" -C "$RUNNER_TEMP" actionlint
+          sudo mv "$RUNNER_TEMP/actionlint" /usr/local/bin/actionlint
+          actionlint -version
+      - name: Save actionlint to cache
+        if: ${{ steps.actionlint-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/actionlint
+          key: ${{ steps.actionlint-cache.outputs.cache-primary-key }}
+      - name: Run actionlint
+        id: actionlint
+        if: ${{ env.RUN_ACTIONLINT == 'true' && steps.actionlint-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          EXTRA_PATHS: ${{ inputs.actionlint-paths }}
+        run: |
+          shellcheck --version | head -2
 
+          # 不帶檔案參數時 actionlint 會自動掃 .github/workflows；
+          # 一旦給了檔案參數就「只」檢查那些檔案，所以額外路徑必須分開跑一次。
+          actionlint -color
+
+          if [ -n "$EXTRA_PATHS" ]; then
+            # shellcheck disable=SC2086  # 要讓 glob / 多路徑展開成多個參數
+            actionlint -color $EXTRA_PATHS
+          fi
+      - name: Run shellcheck
+        id: shellcheck
+        if: ${{ env.RUN_SHELLCHECK == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          PATHS: ${{ inputs.shellcheck-paths }}
+        run: |
+          if [ -n "$PATHS" ]; then
+            # shellcheck disable=SC2086
+            shellcheck $PATHS
+          else
+            mapfile -t FILES < <(find . -path ./.git -prune -o -name '*.sh' -print)
+            if [ "${#FILES[@]}" -eq 0 ]; then
+              echo "沒有 .sh 檔，略過"; exit 0
+            fi
+            printf '檢查：%s\n' "${FILES[@]}"
+            shellcheck "${FILES[@]}"
+          fi
+
+      # ── Python lint + test ──────────────────────────────────────────────
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: py-setup
+        if: ${{ env.RUN_PYTHON == 'true' }}
+        continue-on-error: true
+        with:
+          python-version: ${{ inputs.python-version }}
+          # 只有找得到相依清單時才開 pip 快取 —— setup-python 開了快取卻找不到 requirements*.txt /
+          # pyproject.toml 會直接失敗（只有 .py 檔、還沒有相依清單的專案就是這樣）
+          cache: ${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') != '' && 'pip' || '' }}
+          cache-dependency-path: |
+            **/requirements*.txt
+            **/pyproject.toml
+      - name: "Python: Install deps"
+        id: py-install
+        if: ${{ env.RUN_PYTHON == 'true' && steps.py-setup.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          RUFF_VERSION: ${{ inputs.ruff-version }}
+        run: |
+          # ruff 釘版本：不釘的話新版 ruff 會憑空多出 lint 規則，讓沒改程式的 repo 突然變紅
+          # （runner 的 pip 已經夠新，不必再花 10 秒 upgrade pip）
+          pip install "ruff==$RUFF_VERSION" pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # pyproject.toml 只放 ruff / pytest 設定（沒有 [project] 或 [build-system]）時，
+          # 它不是一個可安裝的套件，pip install -e . 一定失敗 —— 那種情況就不裝。
+          # 真的是套件卻裝不起來，要讓這一步紅，不能像舊版用 `|| true` 吞掉，
+          # 否則後面 pytest 只會噴一堆看不懂的 ImportError。
+          if [ -f pyproject.toml ] && grep -qE '^\[(project|build-system)\]' pyproject.toml; then
+            pip install -e .
+          fi
+      - name: "Python: Lint (ruff)"
+        id: py-ruff
+        if: ${{ env.RUN_PYTHON == 'true' && steps.py-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: ruff check .
+      - name: "Python: Test (pytest)"
+        id: py-test
+        if: ${{ env.RUN_PYTHON == 'true' && steps.py-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          set +e
+          pytest -q
+          EXIT=$?
+          set -e
+          # pytest 的 exit 5 = 「沒收集到任何測試」。還沒開始寫測試的專案不該因此
+          # 永遠紅著（那只會逼人把 CI 關掉）。真正的測試失敗是 exit 1，照樣擋。
+          if [ "$EXIT" -eq 5 ]; then
+            echo "⚠️  沒有找到任何測試 —— 通過，但這個專案應該補上測試。"
+            echo "⚠️ 沒有任何測試" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$EXIT" -ne 0 ]; then
+            exit "$EXIT"
+          fi
+
+      # ── .NET build + test（dotnet-runner 是 ubuntu-latest 時在這裡跑）────────
+      # run: 內容與上面獨立的 dotnet job 相同，改一邊要同步改另一邊。
+      # 一律 shell: bash（含 pipefail），與獨立 job 的 defaults 一致
+      - name: ".NET: 決定 SDK 版本與要建置的方案"
+        id: dotnet-plan
+        if: ${{ env.RUN_DOTNET_HERE == 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          DOTNET_VERSION: ${{ inputs.dotnet-version }}
+          PROJECT: ${{ inputs.dotnet-project }}
+        run: |
+          # SDK 版本：呼叫端指定 > global.json > 專案檔裡的 TargetFramework(s)。
+          # 第三種要把「每個用到的版本」都裝起來：SDK 10 可以建置 net8.0，但測試要在 8.0 的 runtime 上跑，
+          # 只裝 10 的話 dotnet test 會因為找不到 Microsoft.NETCore.App 8.0 而失敗。
+          # 一律用 <<EOF 的多行寫法：dotnet-version 可以是換行隔開的好幾個版本，
+          # 用 version=... 單行寫法的話，第二行會讓 runner 判定 GITHUB_OUTPUT 格式錯誤
+          if [ -n "$DOTNET_VERSION" ]; then
+            { echo "version<<EOF"; echo "$DOTNET_VERSION"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          elif [ -f global.json ]; then
+            echo "global-json=global.json" >> "$GITHUB_OUTPUT"
+          else
+            # net8.0 / net9.0-windows / netcoreapp3.1 → 8.0.x / 9.0.x / 3.1.x；net48 這類 .NET Framework 不需要裝 SDK
+            TFMS="$(find . \( -path ./.git -o -name node_modules -o -name bin -o -name obj \) -prune -o -type f \
+                \( -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' -o -name 'Directory.Build.props' \) -print0 \
+              | xargs -0 -r grep -ohE '<TargetFrameworks?>[^<]+' \
+              | sed 's/<TargetFrameworks\{0,1\}>//' | tr ';' '\n' \
+              | sed -nE 's/^[[:space:]]*net(coreapp)?([0-9]+\.[0-9]+).*$/\2.x/p' | sort -uV || true)"
+            # ↑ || true：這個 job 用 shell: bash（含 pipefail），一個 TargetFramework 都沒找到時
+            #   grep 會讓整條管線非零 → 步驟直接死掉，下面的 10.0.x 退路就永遠走不到
+            if [ -z "$TFMS" ]; then TFMS="10.0.x"; fi
+            echo "→ 依 TargetFramework 安裝 SDK：$(echo "$TFMS" | tr '\n' ' ')"
+            { echo "version<<EOF"; echo "$TFMS"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -z "$PROJECT" ]; then
+            # 先找方案檔（.sln / .slnx），沒有才找單一專案檔。找到兩個以上就不猜 ——
+            # 猜錯的話「CI 綠」只代表其中一個方案建得起來，那是假綠燈。
+            mapfile -t CANDS < <(find . \( -path ./.git -o -name node_modules -o -name bin -o -name obj \) -prune \
+              -o -type f \( -name '*.sln' -o -name '*.slnx' \) -print | sort)
+            if [ "${#CANDS[@]}" -eq 0 ]; then
+              mapfile -t CANDS < <(find . \( -path ./.git -o -name node_modules -o -name bin -o -name obj \) -prune \
+                -o -type f \( -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' \) -print | sort)
+            fi
+            if [ "${#CANDS[@]}" -ne 1 ]; then
+              echo "::error::找到 ${#CANDS[@]} 個方案 / 專案檔，無法自動決定要建置哪一個。請在呼叫端設定 dotnet-project。"
+              printf '  %s\n' "${CANDS[@]}"
+              exit 1
+            fi
+            PROJECT="${CANDS[0]}"
+          elif [ ! -e "$PROJECT" ]; then
+            echo "::error::dotnet-project 指的 $PROJECT 不存在"
+            exit 1
+          fi
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "→ 建置目標：$PROJECT"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        id: dotnet-setup
+        if: ${{ env.RUN_DOTNET_HERE == 'true' && steps.dotnet-plan.outcome == 'success' }}
+        continue-on-error: true
+        with:
+          dotnet-version: ${{ steps.dotnet-plan.outputs.version }}
+          global-json-file: ${{ steps.dotnet-plan.outputs.global-json }}
+          # 有 packages.lock.json 才能開快取（setup-dotnet 找不到 lock 檔會直接失敗）
+          cache: ${{ hashFiles('**/packages.lock.json') != '' }}
+          cache-dependency-path: "**/packages.lock.json"
+      - name: ".NET: Restore"
+        id: dotnet-restore
+        if: ${{ env.RUN_DOTNET_HERE == 'true' && steps.dotnet-setup.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+          DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+        run: dotnet restore "$PROJECT"
+      - name: ".NET: Format / analyzers (dotnet format)"
+        id: dotnet-format
+        if: ${{ env.RUN_DOTNET_HERE == 'true' && env.RUN_DOTNET_FORMAT == 'true' && steps.dotnet-restore.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+        run: |
+          # 規則讀專案的 .editorconfig。舊專案第一次導入可能整片紅 ——
+          # 先 run-dotnet-format: false 過渡，在本機跑一次 dotnet format 整理完再打開。
+          dotnet format "$PROJECT" --verify-no-changes --no-restore
+      # format 沒過照樣 build + test：結果一次看完
+      - name: ".NET: Build"
+        id: dotnet-build
+        if: ${{ env.RUN_DOTNET_HERE == 'true' && steps.dotnet-restore.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+        run: dotnet build "$PROJECT" --no-restore --configuration Release
+      - name: ".NET: Test"
+        id: dotnet-test
+        if: ${{ env.RUN_DOTNET_HERE == 'true' && steps.dotnet-build.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PROJECT: ${{ steps.dotnet-plan.outputs.project }}
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+        # 方案裡沒有任何測試專案時，dotnet test 什麼都不做、回 0 —— 跟 Python 那邊一樣不擋
+        run: dotnet test "$PROJECT" --no-build --configuration Release
+
+      # ── Docker build check（含 hadolint）── 最花時間，放最後 ──────────────
+      - name: "Docker: 找出要檢查的 Dockerfile"
+        id: docker-list
+        if: ${{ env.RUN_DOCKER == 'true' }}
+        continue-on-error: true
+        env:
+          DOCKERFILES: ${{ inputs.dockerfile }}
+        run: |
+          LIST="$RUNNER_TEMP/dockerfiles.txt"
+          if [ -n "$DOCKERFILES" ]; then
+            # 呼叫端明確列出的：一項一行，不做 glob 展開
+            set -f
+            for d in $DOCKERFILES; do printf '%s\n' "$d"; done > "$LIST"
+            set +f
+          else
+            # 舊版只看根目錄的 Dockerfile，monorepo 子目錄裡的完全沒被檢查到
+            find . \( -path ./.git -o -name node_modules \) -prune -o -type f \
+              \( -name Dockerfile -o -name '*.Dockerfile' -o -name 'Dockerfile.*' \) \
+              ! -name '*.dockerignore' -print | sed 's|^\./||' | sort > "$LIST"
+          fi
+          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
+          echo "要檢查的 Dockerfile："; sed 's/^/  /' "$LIST"
+          # 1.4.0 的預設值是 "Dockerfile"（根目錄沒有就略過）；照抄這個值的呼叫端維持同樣行為。
+          # 清空清單（讓後面的 hadolint / build 略過）要在下面的迴圈外做 —— 邊讀邊寫同一個檔是 SC2094
+          if [ "$DOCKERFILES" = "Dockerfile" ] && [ ! -f Dockerfile ]; then
+            echo "沒有 Dockerfile，略過"; : > "$LIST"; exit 0
+          fi
+          while IFS= read -r entry; do
+            f="${entry%%:*}"
+            if [ ! -f "$f" ]; then
+              # 其他明確指定的路徑找不到＝多半打錯字，要吵（不能讓檢查被靜靜略過）
+              echo "::error::dockerfile input 指定的 $f 不存在（路徑打錯？）"; exit 1
+            fi
+          done < "$LIST"
+      # hadolint：檢查 Dockerfile 的寫法（沒釘版本的 apt 套件、用 latest tag、
+      # RUN 裡的 shell 問題…）。Trivy 的 misconfig 只抓「會出資安問題」的那幾條，
+      # hadolint 抓得更廣。下載與快取的寫法見檔頭 env 說明
+      - name: Restore hadolint from cache
+        id: hadolint-cache
+        if: ${{ env.RUN_HADOLINT == 'true' && steps.docker-list.outcome == 'success' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/hadolint
+          key: ci-tools-hadolint-${{ env.TOOL_HADOLINT_VERSION }}-${{ env.TOOL_HADOLINT_SHA256 }}
+      - name: Install hadolint
+        id: hadolint-install
+        if: ${{ env.RUN_HADOLINT == 'true' && steps.docker-list.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          if [ ! -s "$RUNNER_TEMP/dockerfiles.txt" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
+          F="$HOME/.cache/ci-tools/hadolint/hadolint-linux-x86_64"
+          if [ -f "$F" ] && ! echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c --status -; then
+            echo "::warning::快取的 hadolint-linux-x86_64 校驗不符，改為重新下載"; rm -f "$F"
+          fi
+          if [ ! -f "$F" ]; then
+            mkdir -p "$(dirname "$F")"
+            curl --fail -sSL --retry 6 --retry-delay 10 -o "$F" \
+              "https://github.com/hadolint/hadolint/releases/download/v${TOOL_HADOLINT_VERSION}/hadolint-linux-x86_64"
+            echo "downloaded=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "${TOOL_HADOLINT_SHA256}  $F" | sha256sum -c -
+          sudo install -m 755 "$F" /usr/local/bin/hadolint
+          hadolint --version
+      - name: Save hadolint to cache
+        if: ${{ steps.hadolint-install.outputs.downloaded == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/hadolint
+          key: ${{ steps.hadolint-cache.outputs.cache-primary-key }}
+      - name: Dockerfile lint (hadolint)
+        id: hadolint
+        if: ${{ env.RUN_HADOLINT == 'true' && steps.hadolint-install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          LIST="$RUNNER_TEMP/dockerfiles.txt"
+          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
+          # warning 以上才算失敗；info / style 只印出來。要忽略某條規則放 .hadolint.yaml 在專案根目錄。
           FAIL=0
+          while IFS= read -r entry; do
+            f="${entry%%:*}"
+            echo "── hadolint $f"
+            hadolint --failure-threshold warning "$f" || FAIL=1
+          done < "$LIST"
+          exit "$FAIL"
+      # hadolint 沒過照樣 build：兩項結果一次看完
+      - name: "Docker: Build image (不推送，只驗證能 build)"
+        id: docker-build
+        if: ${{ env.RUN_DOCKER == 'true' && steps.docker-list.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          # 一律先過 env 再進 shell，不要把 ${{ }} 直接塞進 run: 字串（shell injection）
+          SHA: ${{ github.sha }}
+          # 不可命名為 DOCKER_CONTEXT：那是 Docker CLI 自己讀的環境變數（指定 docker context），
+          # 設成 "." 時 docker build 會失敗：ERROR: no builder "." found
+          BUILD_CONTEXT: ${{ inputs.docker-context }}
+        run: |
+          LIST="$RUNNER_TEMP/dockerfiles.txt"
+          if [ ! -s "$LIST" ]; then echo "沒有 Dockerfile，略過"; exit 0; fi
+          n=0
+          while IFS= read -r entry; do
+            n=$((n+1))
+            f="${entry%%:*}"
+            # context：那一項有寫 :<context> 就用它，否則用 docker-context（預設 repo 根目錄，
+            # 跟 Visual Studio / docker-compose 產生的 .NET Dockerfile 慣例一致）
+            if [ "$entry" != "$f" ]; then ctx="${entry#*:}"; else ctx="$BUILD_CONTEXT"; fi
+            echo "── docker build -f $f $ctx"
+            docker build -f "$f" -t "ci-check-$n:$SHA" "$ctx"
+          done < "$LIST"
 
-          # 判定原則：**開了就必須是 success**；只有沒開時才允許非 success。
+      # ── 判定 ───────────────────────────────────────────────────────────
+      - name: Evaluate all CI results
+        if: ${{ always() }}
+        env:
+          POLICY: ${{ steps.policy.outcome }}
+          ACTIONLINT: ${{ steps.actionlint.outcome }}
+          SHELLCHECK: ${{ steps.shellcheck.outcome }}
+          PY_RUFF: ${{ steps.py-ruff.outcome }}
+          PY_TEST: ${{ steps.py-test.outcome }}
+          DOTNET_FORMAT: ${{ steps.dotnet-format.outcome }}
+          DOTNET_TEST: ${{ steps.dotnet-test.outcome }}
+          DOTNET_JOB: ${{ needs.dotnet.result }}
+          HADOLINT: ${{ steps.hadolint.outcome }}
+          DOCKER_LIST: ${{ steps.docker-list.outcome }}
+          DOCKER_BUILD: ${{ steps.docker-build.outcome }}
+        run: |
+          FAIL=0
+          ROWS=""
+
+          # 判定原則：**開了就必須是 success**；沒開的項目不看結果。
           #
-          # 為什麼不能只擋 failure / cancelled（2026-08-06 實測遇到）：
-          # runner 排隊過久被 GitHub 取消時，那些 job 的 conclusion 是 cancelled，
-          # 但傳進 needs.<job>.result 的值並不是 cancelled ——
-          # 舊寫法（只擋 failure|cancelled）因此判定通過，Gate 回報 success，
-          # 而那次 actionlint 與 shellcheck 根本一行都沒執行。
-          # 分支保護只認這個 Gate，等於「沒跑到」被當成「通過」，required check 形同虛設。
-          #
-          # 所以這裡改成白名單：該跑的就得拿到 success，其他一律擋。
-          assert_job() {
-            local name="$1" enabled="$2" result="$3"
-            if [ "$enabled" = "true" ]; then
-              if [ "$result" != "success" ]; then
-                echo "❌ **$name** 已啟用，但結果是 \`${result:-<空值>}\`（需要 success）" >> "$GITHUB_STEP_SUMMARY"
-                FAIL=1
-              fi
+          # 為什麼是白名單（2026-08-06 實測遇到）：runner 排隊過久被 GitHub 取消時，
+          # 結果不一定是 cancelled。只擋 failure / cancelled 的舊寫法因此判定通過，
+          # 而那次 actionlint 與 shellcheck 根本一行都沒執行 ——「沒跑到」被當成「通過」。
+          # 前一步壞掉而被跳過的步驟是 skipped，同樣擋。
+          check() {
+            local name="$1" enabled="$2" r ok=1 shown=""
+            shift 2
+            if [ "$enabled" != "true" ]; then
+              ROWS="$ROWS| $name | 未啟用 | — |"$'\n'
+              return
+            fi
+            for r in "$@"; do
+              shown="$shown${shown:+ / }${r:-<空值>}"
+              [ "$r" = "success" ] || ok=0
+            done
+            if [ "$ok" = "1" ]; then
+              ROWS="$ROWS| $name | ✅ | $shown |"$'\n'
             else
-              case "$result" in
-                failure|cancelled)
-                  echo "❌ **$name** 未啟用，結果卻是 \`$result\`" >> "$GITHUB_STEP_SUMMARY"
-                  FAIL=1
-                  ;;
-              esac
+              ROWS="$ROWS| $name | ❌ | $shown |"$'\n'
+              FAIL=1
             fi
           }
 
-          assert_job "Python lint + test"     "$RUN_PYTHON" "$PYTHON"
-          assert_job ".NET build + test"      "$RUN_DOTNET" "$DOTNET"
-          assert_job "Docker build check"     "$RUN_DOCKER" "$DOCKER"
-          assert_job "Workflow + shell lint"  "$RUN_LINT"   "$LINT"
-          assert_job "PR source branch policy" "$RUN_POLICY" "$POLICY"
+          # dotnet format 與 hadolint 是子項目，關掉時不列入判定
+          DN_FMT="success"; if [ "$RUN_DOTNET_FORMAT" = "true" ]; then DN_FMT="$DOTNET_FORMAT"; fi
+          DK_LINT="success"; if [ "$RUN_HADOLINT" = "true" ]; then DK_LINT="$HADOLINT"; fi
+
+          check "PR source branch policy"            "$RUN_POLICY"      "$POLICY"
+          check "actionlint"                         "$RUN_ACTIONLINT"  "$ACTIONLINT"
+          check "shellcheck"                         "$RUN_SHELLCHECK"  "$SHELLCHECK"
+          check "Python lint + test"                 "$RUN_PYTHON"      "$PY_RUFF" "$PY_TEST"
+          check ".NET build + test"                  "$RUN_DOTNET_HERE" "$DN_FMT" "$DOTNET_TEST"
+          check ".NET build + test（獨立 job）"       "$RUN_DOTNET_JOB"  "$DOTNET_JOB"
+          check "Docker build check（含 hadolint）"   "$RUN_DOCKER"      "$DOCKER_LIST" "$DK_LINT" "$DOCKER_BUILD"
+
+          {
+            echo "## 🧪 CI Gate 結果"
+            echo ""
+            echo "| 檢查 | 判定 | 各步驟結果 |"
+            echo "| --- | --- | --- |"
+            printf '%s' "$ROWS"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$FAIL" = "1" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "❌ CI Gate 未通過" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ CI Gate 未通過 —— 展開上方標紅叉的步驟看原因" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::CI Gate 未通過，各項結果見 job summary"
             exit 1
           fi
           echo "✅ CI Gate 通過" >> "$GITHUB_STEP_SUMMARY"

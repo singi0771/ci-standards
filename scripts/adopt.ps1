@@ -752,6 +752,30 @@ if ($RefUnchecked) {
 if ($CopilotLeftovers) { Write-Host ""; Show-CopilotLeftovers }
 Write-Host "-----------------------------------------------------------"
 
+# ── Actions 分鐘數預估 ─────────────────────────────────────────────
+# 只算「最低」：每個 job 不滿一分鐘以一分鐘計，CI Gate、Security Gate 各至少 1 分鐘。
+# 規則與估算方式見 docs/ACTIONS-MINUTES.md（改這段要同步改 adopt.sh 與該文件）。
+Write-Host ""
+Write-Host "Actions 分鐘數預估（私有 repo 才計費；公開 repo 使用 GitHub 代管 runner 免費）:"
+Write-Host "  計費：每個 job 不滿 1 分鐘以 1 分鐘計；同一帳號（或組織）的所有私有 repo 共用每月額度"
+Write-Host "        （Free 方案約 2,000 分鐘 Linux）。"
+Write-Host "  每次 PR 推送（CI Gate＋Security Gate）              ：最少 2 分鐘"
+if ($Flow -eq 'develop') {
+  Write-Host "  功能分支 -> develop，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
+  Write-Host "  develop -> $Prod 發版，推送 1 次後合併（＋Branch Guard）：最少 3 分鐘"
+} else {
+  Write-Host "  PR -> $Prod，推送 1 次後合併（＋Branch Guard）        ：最少 3 分鐘"
+}
+Write-Host "  每週排程重掃（Security Gate）                         ：最少 1 分鐘／次，約 5 分鐘／月"
+if ($HasDockerfile) {
+  Write-Host "  [i] 有 Dockerfile：docker build 與 image 掃描通常讓兩個 Gate 各多 1～3 分鐘。"
+}
+if ($HasDotnet) {
+  Write-Host "  [i] .NET 若改用 dotnet-runner: windows-latest，每次 CI 多 1 個 Windows job（單價約 Linux 的 1.7 倍）。"
+}
+Write-Host "  詳細規則：https://github.com/singi0771/ci-standards/blob/main/docs/ACTIONS-MINUTES.md"
+Write-Host "-----------------------------------------------------------"
+
 $BaseBranch = $Prod
 if ($Flow -eq 'develop') { $BaseBranch = 'develop' }
 Write-Host ""

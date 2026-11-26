@@ -287,7 +287,7 @@ Semgrep 結果一律存為 artifact `semgrep-sarif`，不上傳 Security 分頁�
 | `dotnet-version` | string | `""` | SDK 版本，多個以換行分隔。空白時依序採用 `global.json`、專案檔的 `TargetFramework(s)`、`10.0.x` |
 | `dotnet-project` | string | `""` | `.sln` / `.slnx` / `.csproj` 路徑。空白時自動搜尋；找到兩個以上時失敗。方案內含 `docker-compose.dcproj` 時不需處理，維持空白；勿改指單一專案檔，否則方案內其他專案不會被建置與測試 |
 | `run-dotnet-format` | boolean | `true` | 執行 `dotnet format --verify-no-changes`（依 `.editorconfig`） |
-| `dotnet-runner` | string | `ubuntu-latest` | WPF、WinForms、.NET Framework 專案設為 `windows-latest`（分鐘數 2 倍） |
+| `dotnet-runner` | string | `ubuntu-latest` | WPF、WinForms、.NET Framework 專案設為 `windows-latest`（.NET 改在另一個 Windows job 執行，單價約 Linux 的 1.7 倍） |
 | `run-docker-build` | boolean | `true` | 驗證 image 可 build（不推送） |
 | `dockerfile` | string | `""` | 空白時搜尋全 repo 的 `Dockerfile`、`*.Dockerfile`、`Dockerfile.*`（略過 `node_modules`）。可列多個，以空白分隔，格式為 `路徑` 或 `路徑:context`。明確列出的路徑不存在時失敗 |
 | `docker-context` | string | `"."` | 未指定 `:context` 時的 build context |
@@ -644,17 +644,15 @@ git commit -m "chore: 以 .gitattributes 固定 C# 檔案換行"
 
 ## Actions 用量
 
-私有 repo 依分鐘計費，每個 job 不足一分鐘以一分鐘計；Windows runner 2 倍、macOS 10 倍。
+私有 repo 才計費，公開 repo 使用 GitHub 代管 runner 免費。
 
-參考值（Python + Docker 私有專案，每次 PR 推送）：CI 4–5 分鐘、Security 5–6 分鐘。
+- **每個 job 不滿一分鐘以一分鐘計**，畫面上的 Total duration 不是計費時間。
+- **同一帳號（或組織）的所有私有 repo 共用每月額度**。Free 方案每月 $12，約 Linux 2,000 分鐘；Windows 單價約 Linux 的 1.7 倍、macOS 約 10 倍。
 
-| 公版已採用 | 可自行調整 |
-|---|---|
-| 草稿 PR 不執行 | `scan-docker-image` 無 Dockerfile 時關閉 |
-| 連續推送自動取消前一次執行 | 排程改為每月：`cron: "0 3 1 * *"` |
-| 只在 PR 上執行，合併後不重跑 | Billing 將 spending limit 設為 `$0` |
-| actionlint 與 shellcheck、hadolint 與 Docker build 合併為同一 job | `dotnet-runner` 非必要不使用 Windows |
-| Trivy 預設不掃 secret；Dependabot docker / actions 每月 | |
+2.5.0 起 CI 與 Security 各只有一個 job（`CI Gate`、`Security Gate`），每次 PR 推送最少 2 分鐘；2.4.x 以前為 6～10 分鐘。
+有 Dockerfile 時 docker build 與 image 掃描通常讓兩個 Gate 各多 1～3 分鐘。導入腳本結束時會依專案內容印出預估。
+
+計費規則、各情境的最低分鐘數、查詢實際用量的指令與減量做法見 [`docs/ACTIONS-MINUTES.md`](docs/ACTIONS-MINUTES.md)。
 
 ---
 
@@ -670,7 +668,7 @@ git tag -f v2 && git push -f origin v2
 | 變更類型 | 版本 |
 |---|---|
 | 修正錯誤、調整規則、升級 action、新增有預設值的 input | `v2.x.y`，移動 `v2` |
-| 變更或移除 input、變更預設值、變更 job 名稱、移除 workflow | `v3.0.0`，建立 `v3` |
+| 變更或移除 input、變更預設值、變更 Gate job 名稱（`CI Gate`、`Security Gate`）、移除 workflow | `v3.0.0`，建立 `v3` |
 
 | 主版本 | 狀態 |
 |---|---|
@@ -752,6 +750,7 @@ ci-standards/
 | [`docs/AI-ADOPT.md`](docs/AI-ADOPT.md) | 以 AI 代理導入的步驟 |
 | [`docs/ADOPT.md`](docs/ADOPT.md) | 導入腳本細節、內網與離線環境 |
 | [`docs/SETUP.md`](docs/SETUP.md) | 管理者：發佈、方案與額度 |
+| [`docs/ACTIONS-MINUTES.md`](docs/ACTIONS-MINUTES.md) | Actions 分鐘數計費規則與估算 |
 | [`docs/MIGRATION-TO-ORG.md`](docs/MIGRATION-TO-ORG.md) | 遷移至組織 |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | 現況、待辦與發佈程序 |
 | [`docs/DEVSECOPS-NOTES.md`](docs/DEVSECOPS-NOTES.md) | 工具選型 |
