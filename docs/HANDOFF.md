@@ -75,11 +75,11 @@
 
 | 項目 | 狀態 |
 |---|---|
-| 發佈基準 | `v2.5.0`（2026-11-26，SHA 以 `git rev-parse v2.5.0^{}` 為準；前一版 2.4.0 以 `git rev-parse v2.4.0^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
-| CHANGELOG | 已寫到 **2.5.0（2026-11-26）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
+| 發佈基準 | `v2.6.0`（2026-11-26，SHA 以 `git rev-parse v2.6.0^{}` 為準；前一版 2.5.0 以 `git rev-parse v2.5.0^{}` 為準）。確認有無未發佈的實質變更：`git log --oneline v2..main -- .github/workflows templates scripts`，有輸出才需要發版 |
+| CHANGELOG | 已寫到 **2.6.0（2026-11-26）**；自 2.1.0 起每版建 GitHub Release，2.1.1 起由 `release.yml` 自動建立 |
 | `v1` tag | ✅ 在 `ff5a781`（1.4.0，v1 最後一個功能版）。之後只有修 bug 才移 —— 還沒升級到 v2 的專案靠它 |
-| `v2` tag | ✅ 指向 2.5.0。新導入一律 `@v2` |
-| 最新版本 tag | ✅ `v2.5.0`（驗收：`v2` 與 `v2.5.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
+| `v2` tag | ✅ 指向 2.6.0。新導入一律 `@v2` |
+| 最新版本 tag | ✅ `v2.6.0`（驗收：`v2` 與 `v2.6.0^{}` 同一 SHA，`v1` 仍在 `ff5a781`；Release 已建立） |
 | 公版自己的 CI | ✅ 全綠（公版拿自己當第一個使用者，用 `uses: ./` 跑自己的 reusable；1.3.0 起 Security Scan 含 zizmor） |
 | Copilot 自動修 / 自動審 | 🗑️ **2.0.0 整組移除**（六支公版 + 範本四支）。公版只剩 CI 與 Security 兩條線。repo secret `COPILOT_TRIGGER_PAT` 已無人使用，可刪 |
 | 開發機 | **兩台並存**（2026-08-13 起）：Windows 為主（`D:\3_CodingProject`，1.2.3 在此發佈）；macOS 仍在服役且已搬出 OneDrive。詳見 §4 |
@@ -110,7 +110,7 @@
 > **⑫ 省 Actions 分鐘（2026-11-26 起）**：私有 repo 計費以「每個 job 進位到整分鐘」計，
 > 2.4.x 以前每次 PR 推送 6～10 個 job，實際跑 1 分鐘卻計 10 分鐘（規則見 [ACTIONS-MINUTES.md](ACTIONS-MINUTES.md)）。分兩階段：
 > - **第一階段 2.5.0**（2026-11-26 發佈）：CI、Security 各合併為一個 job，Gate 名稱不變，各專案不用動作。
-> - **第二階段 2.6.0**（已實作，待發佈）：範本只在 PR 發往正式分支時跑 CI／Security。公版 reusable 沒動，所以不是 3.0.0：
+> - **第二階段 2.6.0**（2026-11-26 發佈）：範本只在 PR 發往正式分支時跑 CI／Security。公版 reusable 沒動，所以不是 3.0.0：
 >   不重跑導入腳本的專案完全不受影響。配套：範本 `security.yml` 補 `edited`；`pull_request.branches` 依 `--prod` 代換；
 >   `setup-branch-protection.sh` 支援 `REQUIRED_CHECKS=none`；Branch Guard 範本 develop 流程加 `required-checks` 運算式
 >   （必須 `!= 'develop' && '...' || ''`，`''` 是 falsy）；AI-ADOPT 第 6 步改為「第一次掃描在發版 PR」。
